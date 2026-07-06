@@ -1,0 +1,2 @@
+- [Email wallet auth](email-wallet-auth.md) — replaced Telegram OTP with email OTP + PIN for customer wallet; key decisions and env vars documented
+- [Nail Salon Booking System](nail-salon-system.md) — booking system built on existing stack; slot locking (SELECT FOR UPDATE), deposit random cents, rental expiry, admin auth guard

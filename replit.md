@@ -1,0 +1,130 @@
+# Digital Product Store (ร้านสินค้าดิจิทัล)
+
+ร้านค้าออนไลน์ภาษาไทยสำหรับขายสินค้าดิจิทัล เช่น Netflix, Disney+, YouKu พร้อมระบบกระเป๋าเครดิต และดึงสินค้าจาก gafiwshop.xyz API
+
+---
+
+## บทบาทของ Replit Agent
+
+Replit มีหน้าที่:
+- **อ่านและวิเคราะห์โค้ด** — ทำความเข้าใจโครงสร้างก่อนแก้ไขทุกครั้ง
+- **เสนอความคิดและแนวทาง** — แนะนำวิธีที่ดีที่สุดตามบริบทของโปรเจกต์
+- **แก้ไขโค้ดที่ผิดพลาด** — debug และแก้ไขปัญหาอย่างรวดเร็ว
+- **เพิ่มฟีเจอร์ใหม่** — ตามที่เจ้าของร้านต้องการ
+
+> ⚠️ **ห้าม** บังคับให้ใส่ API Key ใดๆ ในโค้ด โปรเจกต์นี้จะถูก push ขึ้น GitHub และ Deploy บน Render — secrets ทั้งหมดต้องตั้งใน Render Environment Variables เท่านั้น
+
+---
+
+## Infrastructure
+
+| ชั้น | บริการ |
+|---|---|
+| **Source code** | GitHub (private repo) |
+| **Deploy / Hosting** | Render (Web Service) |
+| **Database** | Supabase (PostgreSQL) |
+| **Frontend build** | Vite + React (built by `build.sh`, served by FastAPI) |
+
+---
+
+## Run & Operate (Replit dev environment)
+
+```bash
+# Start ทั้ง backend + frontend พร้อมกัน
+pnpm --filter @workspace/store run dev &
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+
+---
+
+## Stack
+
+- **Backend**: Python 3.11, FastAPI, SQLAlchemy, psycopg2-binary
+- **Frontend**: React 19, Vite 7, TypeScript, Tailwind CSS, shadcn/ui, TanStack Query, Framer Motion
+- **Monorepo**: pnpm workspaces
+
+---
+
+## โครงสร้างไฟล์สำคัญ
+
+```
+backend/
+  main.py          — FastAPI app, lifespan, migrations, static serving
+  config.py        — Settings (env vars via pydantic-settings)
+  models.py        — SQLAlchemy models
+  schemas.py       — Pydantic request/response schemas
+  routes/
+    admin.py       — Admin endpoints + store settings
+    gafiw.py       — gafiwshop.xyz API proxy (products, buy, OTP, markup)
+    wallet.py      — Customer wallet / credit system
+    orders.py      — Order management
+    products.py    — Own product catalog
+
+artifacts/store/src/
+  pages/
+    StoreFront.tsx — หน้าร้านลูกค้า (products, gafiw cards, OTP tools)
+    AdminPanel.tsx — หน้า Admin (/admin)
+```
+
+---
+
+## Environment Variables (ตั้งใน Render Dashboard)
+
+| ตัวแปร | หมายเหตุ |
+|---|---|
+| `DATABASE_URL` | Supabase connection string (postgresql+psycopg2://...) |
+| `SECRET_KEY` | JWT secret 32+ chars |
+| `ADMIN_PASSCODE` | รหัสเข้า Admin Panel |
+| `GAFIWSHOP_KEY_API` | API key จาก gafiwshop.xyz |
+| `WEBHOOK_URL` | URL ของ Render service |
+| `BOT_TOKEN` | Telegram bot token (optional) |
+| `SMTP_HOST/USER/PASSWORD/FROM_EMAIL` | Gmail SMTP สำหรับส่ง OTP อีเมล |
+
+---
+
+## Render Deploy
+
+- **Build Command**: `bash build.sh`
+- **Start Command**: `python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+- **Python Version**: 3.11.11 (กำหนดโดย `.python-version` และ `runtime.txt`)
+
+---
+
+## Nail Salon Booking System (ใหม่)
+
+ระบบจองคิวร้านทำเล็บ สร้างบน stack เดิม (FastAPI + PostgreSQL + React)
+
+| หน้า | URL | หน้าที่ |
+|---|---|---|
+| หน้าจองลูกค้า | `/` | Gallery + จองคิว + ชำระมัดจำ |
+| Admin Nail | `/nail-admin` | จัดการคิว, slot, gallery, บริการ, ตั้งค่า |
+| Admin เดิม | `/admin` | ระบบ order สินค้าดิจิทัลเดิม |
+
+**Models ใหม่**: `nail_shop_settings`, `nail_services`, `nail_staff`, `nail_time_slots`, `nail_bookings`, `nail_gallery`
+
+**Routes**: `backend/routes/nail.py` — prefix `/api/nail/`
+
+**ENV ที่ต้องตั้ง**:
+- `ADMIN_PASSCODE` — รหัสเข้า `/nail-admin` (บังคับ — ถ้าไม่ตั้งจะ 503)
+- `SLIP2GO_API_KEY` — ตรวจสลิปอัตโนมัติ (optional)
+
+**UX**: Candy Pink (#FF6B9D) + White, font Prompt, ภาษาไทย
+
+**Slot locking**: `SELECT FOR UPDATE` ป้องกัน race condition, hold 10 นาที
+
+**Rental expiry**: ตั้ง `expired_at` ใน nail_shop_settings → ล็อกหน้าลูกค้าอัตโนมัติ
+
+---
+
+## User preferences
+
+- ภาษาไทยในทุก UI และ error messages
+- ไม่แสดงชื่อ "gafiwshop" / "Gafiw" ในหน้าลูกค้า
+- ชื่อ section สินค้าแก้ได้ในหน้า Admin
+- ราคาสินค้า Gafiw ต้องปรับ markup ได้ต่อรายการ ไม่ใช่ราคาดิบจาก API
+- Secrets ห้ามอยู่ในโค้ด — ต้องอยู่ใน Render Environment Variables เท่านั้น
+- Gen Z UX: Candy Pink + White, font Prompt, rounded corners, animation smooth
+- ระบบจองคิว: slot lock atomic (SELECT FOR UPDATE), hold 10 นาที, deposit random cents

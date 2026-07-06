@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: digital-product-store
+    runtime: python
+    pythonVersion: "3.11.11"
+    buildCommand: bash build.sh
+    startCommand: python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_GROUP_ID
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ADMIN_PASSCODE
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: GAFIWSHOP_KEY_API
+        sync: false
+      - key: SLIP2GO_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
