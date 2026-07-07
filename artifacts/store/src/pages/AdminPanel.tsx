@@ -2082,6 +2082,20 @@ function SettingsTab({ token }: { token: string }) {
   );
 }
 
+const LP = {
+  pink:      "#FF6B9D",
+  pinkDeep:  "#E0457B",
+  pinkLight: "#FF85B3",
+  pinkPale:  "#FFF0F7",
+  pinkBorder:"#FFD6EC",
+  white:     "#FFFFFF",
+  offwhite:  "#FFF8FC",
+  text:      "#1A1A2E",
+  sub:       "#6B6B8A",
+  muted:     "#A0A0B8",
+  error:     "#EF4444",
+} as const;
+
 function LoginView({ onLogin }: { onLogin: (token: string) => void }) {
   const [step, setStep] = useState<"passcode" | "otp">("passcode");
   const [passcode, setPasscode] = useState("");
@@ -2122,22 +2136,83 @@ function LoginView({ onLogin }: { onLogin: (token: string) => void }) {
     onLogin(data.access_token);
   };
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    border: `1.5px solid ${LP.pinkBorder}`,
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontSize: 15,
+    outline: "none",
+    boxSizing: "border-box",
+    fontFamily: "'Prompt', sans-serif",
+    background: LP.white,
+    color: LP.text,
+  };
+
+  const btnStyle: React.CSSProperties = {
+    width: "100%",
+    background: `linear-gradient(135deg, ${LP.pink}, ${LP.pinkDeep})`,
+    color: "#fff",
+    border: "none",
+    borderRadius: 12,
+    padding: "13px",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: loading ? "not-allowed" : "pointer",
+    opacity: loading ? 0.7 : 1,
+    fontFamily: "'Prompt', sans-serif",
+    transition: "opacity 0.2s",
+  };
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+    <div style={{
+      minHeight: "100vh",
+      background: `linear-gradient(160deg, ${LP.pinkPale} 0%, #fff 60%, ${LP.pinkPale} 100%)`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      fontFamily: "'Prompt', sans-serif",
+    }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');`}</style>
+
+      {/* decorative blobs */}
+      <div style={{ position: "fixed", top: -80, right: -80, width: 260, height: 260, borderRadius: "50%", background: LP.pink, opacity: 0.08, pointerEvents: "none" }} />
+      <div style={{ position: "fixed", bottom: -60, left: -60, width: 200, height: 200, borderRadius: "50%", background: LP.pinkLight, opacity: 0.1, pointerEvents: "none" }} />
+
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-sm bg-card border border-border rounded-2xl p-8"
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        style={{
+          width: "100%",
+          maxWidth: 380,
+          background: LP.white,
+          borderRadius: 24,
+          padding: 36,
+          boxShadow: "0 12px 48px rgba(255,107,157,0.18)",
+          border: `1px solid ${LP.pinkBorder}`,
+        }}
       >
-        <div className="flex items-center gap-2 mb-8">
-          <Shield size={20} className="text-primary" />
-          <span className="font-bold text-foreground">เข้าสู่ระบบแอดมิน</span>
+        {/* header */}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: 20,
+            background: `linear-gradient(135deg, ${LP.pink}, ${LP.pinkDeep})`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 14px",
+            boxShadow: `0 6px 20px rgba(255,107,157,0.35)`,
+          }}>
+            <Shield size={28} color="#fff" />
+          </div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: LP.text, margin: 0 }}>เข้าสู่ระบบแอดมิน</h1>
+          <p style={{ color: LP.sub, fontSize: 13, marginTop: 4 }}>ระบบจัดการร้านค้าดิจิทัล</p>
         </div>
 
         {step === "passcode" ? (
-          <div className="flex flex-col gap-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">
+              <label style={{ fontSize: 12, fontWeight: 600, color: LP.sub, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 รหัสผ่านแอดมิน
               </label>
               <input
@@ -2146,23 +2221,29 @@ function LoginView({ onLogin }: { onLogin: (token: string) => void }) {
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && requestOtp()}
-                className="w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                style={inputStyle}
               />
-              <p className="text-xs text-muted-foreground mt-1.5">ระบบจะส่ง OTP ไปที่กลุ่ม Telegram แอดมิน</p>
+              <p style={{ fontSize: 12, color: LP.muted, marginTop: 6 }}>
+                ระบบจะส่ง OTP ไปที่กลุ่ม Telegram แอดมิน
+              </p>
             </div>
-            {error && <p className="text-red-400 text-sm">{error}</p>}
-            <Button
-              onClick={requestOtp}
-              disabled={loading}
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold gap-1"
-            >
-              {loading ? "กำลังส่ง OTP..." : <>ส่ง OTP <ChevronRight size={14} /></>}
-            </Button>
+            {error && (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 14px" }}>
+                <p style={{ color: LP.error, fontSize: 13, margin: 0 }}>⚠️ {error}</p>
+              </div>
+            )}
+            <button onClick={requestOtp} disabled={loading} style={btnStyle}>
+              {loading ? "กำลังส่ง OTP..." : "ส่ง OTP →"}
+            </button>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+              <div style={{ fontSize: 36, marginBottom: 4 }}>📱</div>
+              <p style={{ color: LP.sub, fontSize: 13 }}>ตรวจสอบ OTP ในกลุ่มแอดมิน Telegram</p>
+            </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide block mb-1.5">
+              <label style={{ fontSize: 12, fontWeight: 600, color: LP.sub, display: "block", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 รหัส OTP
               </label>
               <input
@@ -2172,23 +2253,23 @@ function LoginView({ onLogin }: { onLogin: (token: string) => void }) {
                 onChange={(e) => setOtp(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && verifyOtp()}
                 maxLength={8}
-                className="w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-lg text-center font-mono tracking-widest text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                style={{ ...inputStyle, textAlign: "center", fontSize: 24, fontWeight: 700, letterSpacing: "0.3em" }}
               />
-              <p className="text-xs text-muted-foreground mt-1.5 text-center">
-                ตรวจสอบ OTP ในกลุ่มแอดมิน
-              </p>
             </div>
-            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-            <Button
-              onClick={verifyOtp}
-              disabled={loading}
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90 font-bold"
+            {error && (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 14px" }}>
+                <p style={{ color: LP.error, fontSize: 13, margin: 0, textAlign: "center" }}>⚠️ {error}</p>
+              </div>
+            )}
+            <button onClick={verifyOtp} disabled={loading} style={btnStyle}>
+              {loading ? "กำลังตรวจสอบ..." : "✓ ยืนยัน & เข้าสู่ระบบ"}
+            </button>
+            <button
+              onClick={() => { setStep("passcode"); setError(""); }}
+              style={{ background: "none", border: "none", color: LP.muted, fontSize: 13, cursor: "pointer", padding: "4px 0", fontFamily: "inherit" }}
             >
-              {loading ? "กำลังตรวจสอบ..." : "ยืนยัน & เข้าสู่ระบบ"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => { setStep("passcode"); setError(""); }} className="text-muted-foreground">
-              ย้อนกลับ
-            </Button>
+              ← ย้อนกลับ
+            </button>
           </div>
         )}
       </motion.div>
