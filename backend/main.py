@@ -306,9 +306,14 @@ app.include_router(upload_router, prefix="/api")
 app.include_router(nail_router)
 app.include_router(webhook_router)
 
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
-os.makedirs(UPLOADS_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+# On Vercel the filesystem is read-only except /tmp; use /tmp/uploads there.
+_IS_VERCEL = bool(os.environ.get("VERCEL"))
+UPLOADS_DIR = "/tmp/uploads" if _IS_VERCEL else os.path.join(os.path.dirname(__file__), "..", "uploads")
+try:
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+except Exception as _e:
+    logger.warning(f"Could not mount /uploads directory: {_e}")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "artifacts", "store", "dist", "public")
 

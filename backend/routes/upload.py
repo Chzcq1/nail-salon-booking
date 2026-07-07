@@ -8,8 +8,14 @@ from fastapi import APIRouter, HTTPException
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-SLIPS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "slips")
-os.makedirs(SLIPS_DIR, exist_ok=True)
+# On Vercel the filesystem is read-only except /tmp; use /tmp/uploads/slips there.
+_IS_VERCEL = bool(os.environ.get("VERCEL"))
+_UPLOADS_BASE = "/tmp/uploads" if _IS_VERCEL else os.path.join(os.path.dirname(__file__), "..", "..", "uploads")
+SLIPS_DIR = os.path.join(_UPLOADS_BASE, "slips")
+try:
+    os.makedirs(SLIPS_DIR, exist_ok=True)
+except Exception:
+    pass  # directory creation may fail silently on read-only filesystems
 
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 

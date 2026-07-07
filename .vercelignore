@@ -1,0 +1,26 @@
+# Version control
+.git
+
+# Replit-specific
+.replit
+.replitignore
+.cache
+.agents
+attached_assets
+
+# Dev sandboxes (not needed in production)
+artifacts/mockup-sandbox
+artifacts/api-server
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+
+# Node
+node_modules
+
+# Misc
+scripts
+*.log
