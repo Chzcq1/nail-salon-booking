@@ -479,6 +479,106 @@ async def send_wallet_otp(chat_id: int, otp_code: str, username: str) -> bool:
         return False
 
 
+async def send_nail_slip_notify(
+    booking_ref: str,
+    customer_name: str,
+    customer_phone: str,
+    customer_line: Optional[str],
+    slot_date: str,
+    start_time: str,
+    end_time: str,
+    service_name: Optional[str],
+    deposit_total: float,
+    payment_proof: str,
+    slip_verify_status: Optional[str] = None,
+) -> None:
+    """
+    แจ้งแอดมินกลุ่มทันทีเมื่อลูกค้าส่งสลิปนัดทำเล็บ
+    ส่งรูปสลิปพร้อมข้อมูลการจอง
+    """
+    import html as _html
+
+    if not settings.bot_token or not settings.admin_group_id:
+        logger.warning("Bot not configured — skipping nail slip notification")
+        return
+
+    from telegram.error import TelegramError
+    bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
+
+    # Escape all user-supplied fields to prevent HTML injection in Telegram HTML mode
+    esc = _html.escape
+    safe_ref = esc(booking_ref)
+    safe_name = esc(customer_name)
+    safe_phone = esc(customer_phone)
+    safe_line = esc(customer_line) if customer_line else "ไม่มี"
+    safe_date = esc(slot_date)
+    safe_start = esc(start_time)
+    safe_end = esc(end_time)
+    safe_service = esc(service_name) if service_name else "ไม่ระบุ"
+
+    # Map actual slip_verify.py status values → emoji + Thai label
+    _STATUS_MAP = {
+        "verified":         ("✅", "ผ่านอัตโนมัติ"),
+        "failed":           ("❌", "ไม่ผ่านการตรวจ"),
+        "wrong_receiver":   ("❌", "บัญชีผู้รับไม่ถูกต้อง"),
+        "amount_mismatch":  ("⚠️", "ยอดโอนไม่ตรง"),
+        "duplicate":        ("⚠️", "สลิปซ้ำ"),
+        "expired":          ("⚠️", "สลิปหมดอายุ"),
+        "no_config":        ("⚙️", "ไม่ได้ตั้งค่า Slip2Go"),
+        "error":            ("⚠️", "เกิดข้อผิดพลาด"),
+    }
+    if slip_verify_status:
+        emoji, label = _STATUS_MAP.get(slip_verify_status, ("🔍", esc(slip_verify_status)))
+        verify_str = f"\n{emoji} ตรวจสลิป: {label}"
+    else:
+        verify_str = ""
+
+    caption = (
+        f"📸 <b>สลิปใหม่ — {safe_ref}</b>\n\n"
+        f"👤 ชื่อ: {safe_name}\n"
+        f"📞 เบอร์: {safe_phone}\n"
+        f"💬 LINE: {safe_line}\n\n"
+        f"📅 วันที่: {safe_date}\n"
+        f"🕐 เวลา: {safe_start} – {safe_end}\n"
+        f"💅 บริการ: {safe_service}\n"
+        f"💵 มัดจำ: ฿{deposit_total:,.2f}"
+        f"{verify_str}"
+    )
+
+    try:
+        if payment_proof and payment_proof.startswith("data:image"):
+            try:
+                _header, b64data = payment_proof.split(",", 1)
+                image_bytes = base64.b64decode(b64data)
+                photo_file = io.BytesIO(image_bytes)
+                photo_file.name = f"slip_{booking_ref}.jpg"
+                await bot.send_photo(
+                    chat_id=_chat_id,
+                    photo=photo_file,
+                    caption=caption,
+                    parse_mode="HTML",
+                    **extra_kwargs,
+                )
+                return
+            except (ValueError, base64.binascii.Error) as decode_err:
+                logger.warning(f"Slip image decode failed, falling back to text: {decode_err}")
+
+        # ไม่มีรูป หรือ decode ล้มเหลว → ส่งแค่ข้อความ
+        text = caption
+        if payment_proof and not payment_proof.startswith("data:"):
+            text += f"\n\n🔗 สลิป: {esc(payment_proof)}"
+        await bot.send_message(
+            chat_id=_chat_id,
+            text=text,
+            parse_mode="HTML",
+            **extra_kwargs,
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send nail slip notification: {e}")
+
+
 async def setup_webhook(webhook_url: str) -> bool:
     if not settings.bot_token:
         logger.warning("BOT_TOKEN not set — skipping webhook setup")

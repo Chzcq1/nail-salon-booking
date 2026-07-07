@@ -326,6 +326,25 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(booking)
 
+    # แจ้ง Telegram แอดมินทันทีเมื่อลูกค้าส่งสลิป
+    try:
+        from backend.bot import send_nail_slip_notify
+        await send_nail_slip_notify(
+            booking_ref=booking.booking_ref,
+            customer_name=booking.customer_name or "ไม่ระบุ",
+            customer_phone=booking.customer_phone or "ไม่ระบุ",
+            customer_line=booking.customer_line,
+            slot_date=booking.slot_date or "",
+            start_time=booking.start_time or "",
+            end_time=booking.end_time or "",
+            service_name=booking.service_name,
+            deposit_total=float(booking.deposit_total or 0),
+            payment_proof=req.payment_proof,
+            slip_verify_status=booking.slip_verify_status,
+        )
+    except Exception as e:
+        logger.warning(f"Telegram slip notify failed (non-critical): {e}")
+
     return {
         "booking_ref": booking.booking_ref,
         "status": booking.status,
