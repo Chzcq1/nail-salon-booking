@@ -7,7 +7,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     bot_token: Optional[str] = Field(default=None)
     database_url: Optional[str] = Field(default=None)
-    admin_group_id: Optional[int] = Field(default=None)
+    admin_group_id: Optional[str] = Field(default=None)
     bot_username: Optional[str] = Field(default=None)
     webhook_url: Optional[str] = Field(default=None)
     secret_key: str = Field(default="changeme-please-set-a-real-secret-key-32chars")

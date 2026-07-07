@@ -32,6 +32,35 @@ def get_otp_bot():
     return get_bot()
 
 
+def _parse_admin_group() -> tuple[int, Optional[int]]:
+    """
+    Parse ADMIN_GROUP_ID into (chat_id, thread_id).
+
+    Supports two formats:
+      • "-1001234567"        → plain group  → (−1001234567, None)
+      • "-1001234567_3"      → topic/thread → (−1001234567, 3)
+
+    The underscore separates the group chat_id from the message_thread_id
+    (Telegram Topics / Forum threads).
+    """
+    raw = settings.admin_group_id
+    if not raw:
+        return 0, None
+    raw = raw.strip()
+    if "_" in raw:
+        # handle negative group IDs: "-1001234567_3"
+        # find the LAST underscore to split thread id
+        last = raw.rfind("_")
+        chat_part = raw[:last]
+        thread_part = raw[last + 1:]
+        try:
+            return int(chat_part), int(thread_part)
+        except ValueError:
+            logger.warning(f"Could not parse ADMIN_GROUP_ID '{raw}' — using as plain chat_id")
+            return int(raw.replace("_", "")), None
+    return int(raw), None
+
+
 async def send_approval_request(
     order_id: int,
     product_name: str,
@@ -49,6 +78,7 @@ async def send_approval_request(
     from telegram.error import TelegramError
 
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
     display_name = customer_first_name or customer_username or (f"ID:{customer_id}" if customer_id else "ไม่ระบุ")
     username_str = f"@{customer_username}" if customer_username else "ไม่มี username"
     proof_label = "สลีปโอนเงิน" if payment_type == "slip" else "ลิงก์ TrueMoney"
@@ -70,6 +100,8 @@ async def send_approval_request(
         ]
     ])
 
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
+
     try:
         if payment_type == "slip" and payment_proof.startswith("data:image"):
             header, b64data = payment_proof.split(",", 1)
@@ -77,23 +109,26 @@ async def send_approval_request(
             photo_file = io.BytesIO(image_bytes)
             photo_file.name = f"slip_order_{order_id}.jpg"
             msg = await bot.send_photo(
-                chat_id=settings.admin_group_id,
+                chat_id=_chat_id,
                 photo=photo_file,
                 caption=caption,
                 reply_markup=keyboard,
+                **extra_kwargs,
             )
         elif payment_type == "truemoney":
             text = caption + f"\n\n🔗 ลิงก์: {payment_proof}"
             msg = await bot.send_message(
-                chat_id=settings.admin_group_id,
+                chat_id=_chat_id,
                 text=text,
                 reply_markup=keyboard,
+                **extra_kwargs,
             )
         else:
             msg = await bot.send_message(
-                chat_id=settings.admin_group_id,
+                chat_id=_chat_id,
                 text=caption + f"\n\n{proof_label}: {payment_proof}",
                 reply_markup=keyboard,
+                **extra_kwargs,
             )
         return msg.message_id
     except TelegramError as e:
@@ -195,16 +230,19 @@ async def send_otp(telegram_id: int, otp_code: str) -> tuple[bool, str]:
 
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
 
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"🔐 คำขอเข้าสู่ระบบแอดมิน\n\n"
                 f"รหัส OTP: <b>{otp_code}</b>\n\n"
                 f"⏰ หมดอายุใน 5 นาที"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
         return True, ""
     except TelegramError as e:
@@ -217,11 +255,13 @@ async def send_finance_notification(action: str, description: str, amount: float
         return False
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     sign = "+" if amount >= 0 else ""
     emoji = "💰" if amount >= 0 else "💸"
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"{emoji} <b>{action}</b>\n\n"
                 f"📝 {description}\n"
@@ -229,6 +269,7 @@ async def send_finance_notification(action: str, description: str, amount: float
                 f"💵 จำนวน: {sign}฿{abs(amount):,.2f}"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
         return True
     except TelegramError as e:
@@ -252,12 +293,14 @@ async def send_topup_failed(
         return
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     type_label = "📸 สลีปโอนเงิน" if topup_type == "slip" else "🧧 ซองอั่งเปา TrueMoney"
     amount_str = f"฿{amount_hint:,.0f}" if amount_hint else "ไม่ทราบยอด"
     voucher_str = f"\n🔑 Voucher: <code>{voucher_code}</code>" if voucher_code else ""
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"⚠️ <b>เติมเงินไม่สำเร็จ #{topup_id}</b>\n\n"
                 f"👤 ลูกค้า: <code>{customer_email}</code>\n"
@@ -268,6 +311,7 @@ async def send_topup_failed(
                 f"📋 ตรวจสอบเพิ่มเติมได้ในแผงแอดมิน (Topup #{topup_id})"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
     except TelegramError as e:
         logger.error(f"Failed to send topup failed notification: {e}")
@@ -285,12 +329,14 @@ async def send_topup_request(
         return
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     type_label = "สลีปโอนเงิน" if topup_type == "slip" else "🧧 ซองอั่งเปา TrueMoney"
     amount_str = f"฿{amount_hint:,.0f}" if amount_hint else "ไม่ระบุ"
     extra = f"\n🔑 Voucher: <code>{voucher_code}</code>" if voucher_code else ""
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"💳 <b>คำขอเติมเครดิตใหม่ #{topup_id}</b>\n\n"
                 f"👤 @{customer_username}\n"
@@ -300,6 +346,7 @@ async def send_topup_request(
                 f"กรุณาตรวจสอบและอนุมัติในแผงแอดมิน"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
     except TelegramError as e:
         logger.error(f"Failed to send topup notification: {e}")
@@ -316,11 +363,13 @@ async def send_topup_success(
         return
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     type_label = "สลีปโอนเงิน" if topup_type == "slip" else "🧧 ซองอั่งเปา TrueMoney"
     extra = f"\n🔑 Voucher: <code>{voucher_code}</code>" if voucher_code else ""
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"✅ <b>เติมเครดิตอัตโนมัติสำเร็จ #{topup_id}</b>\n\n"
                 f"👤 @{customer_username}\n"
@@ -329,6 +378,7 @@ async def send_topup_success(
                 f"{extra}"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
     except TelegramError as e:
         logger.error(f"Failed to send topup success notification: {e}")
@@ -347,11 +397,13 @@ async def send_gafiw_purchase(
         return False
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     cost_line = f"\n💸 ต้นทุน Gafiw: ฿{actual_cost:,.2f}" if actual_cost is not None else "\n💸 ต้นทุน Gafiw: ไม่ทราบ"
     balance_line = f"\n🏦 คงเหลือ Gafiw: ฿{gafiw_balance_after:,.2f}" if gafiw_balance_after is not None else ""
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"🛒 <b>ซื้อสินค้า Gafiw</b>\n\n"
                 f"👤 ลูกค้า: <code>{customer_email}</code>\n"
@@ -362,6 +414,7 @@ async def send_gafiw_purchase(
                 f"{balance_line}"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
         return True
     except TelegramError as e:
@@ -380,10 +433,12 @@ async def send_topup_admin_notify(
         return
     from telegram.error import TelegramError
     bot = get_bot()
+    _chat_id, _thread_id = _parse_admin_group()
+    extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
     type_label = "📸 สลีปโอนเงิน" if topup_type == "slip" else "🧧 ซองอั่งเปา TrueMoney"
     try:
         await bot.send_message(
-            chat_id=settings.admin_group_id,
+            chat_id=_chat_id,
             text=(
                 f"💳 <b>คำขอเติมเครดิต #{topup_id}</b>\n\n"
                 f"👤 ลูกค้า: <code>{customer_identifier}</code>\n"
@@ -392,6 +447,7 @@ async def send_topup_admin_notify(
                 f"กรุณาตรวจสอบและอนุมัติในแผงแอดมิน"
             ),
             parse_mode="HTML",
+            **extra_kwargs,
         )
     except TelegramError as e:
         logger.error(f"Failed to send topup admin notify: {e}")
