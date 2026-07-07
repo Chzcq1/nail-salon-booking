@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional, Dict
@@ -203,8 +203,17 @@ def move_product(product_id: int, direction: str, db: Session = Depends(get_db),
 
 
 @router.get("/admin/orders", response_model=List[OrderResponse])
-def list_orders(db: Session = Depends(get_db), admin: dict = Depends(get_admin)):
-    return db.query(Order).order_by(Order.id.desc()).all()
+def list_orders(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    status: Optional[str] = Query(default=None, description="กรอง status: pending, approved, rejected"),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(get_admin),
+):
+    q = db.query(Order).order_by(Order.id.desc())
+    if status:
+        q = q.filter(Order.status == status)
+    return q.offset(offset).limit(limit).all()
 
 
 @router.delete("/admin/orders/{order_id}")

@@ -287,6 +287,7 @@ function ProductCard({ product, onBuy }: { product: Product; onBuy: (p: Product)
 
   return (
     <div
+      className="product-card-hover"
       style={{
         background: C.card,
         border: product.is_featured ? `2px solid ${badgeColor}` : `1px solid ${C.border}`,
@@ -1428,29 +1429,32 @@ export default function StoreFront() {
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["products"],
     queryFn: () => fetch("/api/products").then((r) => r.json()),
+    staleTime: 300_000, // 5 นาที — ไม่ refetch ทุกครั้งที่ focus
   });
 
   const { data: gafiwData } = useQuery<{ ok: boolean; data: GafiwProduct[] }>({
     queryKey: ["gafiw-products"],
     queryFn: () => fetch("/api/gafiw/products").then((r) => r.json()),
-    staleTime: 60_000,
+    staleTime: 120_000,
   });
   const gafiwProducts = (gafiwData?.data ?? []).filter(p => p.is_enabled);
 
   const { data: settings } = useQuery<StoreSettings>({
     queryKey: ["store-settings"],
     queryFn: () => fetch("/api/store-settings").then((r) => r.json()),
+    staleTime: 300_000,
   });
 
   const { data: storeStats } = useQuery<{ total_orders: number; fake_base: number; member_count: number }>({
     queryKey: ["store-stats"],
     queryFn: () => fetch("/api/store-stats").then((r) => r.json()),
-    staleTime: 60_000,
+    staleTime: 120_000,
   });
 
   const { data: announcements = [] } = useQuery<{ id: number }[]>({
     queryKey: ["announcements"],
     queryFn: () => fetch("/api/announcements").then((r) => r.json()),
+    staleTime: 120_000,
   });
 
   const [seenIds, setSeenIds] = useState<number[]>(() => {
@@ -1609,9 +1613,27 @@ export default function StoreFront() {
 
           {/* Local products */}
           {isLoading ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 16, marginBottom: 32 }}>
-              {[...Array(3)].map((_, i) => <div key={i} style={{ height: 240, borderRadius: 14, background: C.bgWarm, border: `1px solid ${C.border}` }} />)}
-            </div>
+            <section style={{ marginBottom: 32 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <div style={{ height: 12, width: 80, borderRadius: 6, background: C.bgWarm }} />
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 16 }}>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} style={{ borderRadius: 14, background: C.card, border: `1px solid ${C.border}`, overflow: "hidden" }}>
+                    <div className="skeleton-shimmer" style={{ aspectRatio: "16/9" }} />
+                    <div style={{ padding: "12px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div className="skeleton-shimmer" style={{ height: 14, width: "70%" }} />
+                      <div className="skeleton-shimmer" style={{ height: 10, width: "90%" }} />
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                        <div className="skeleton-shimmer" style={{ height: 22, width: 60, borderRadius: 6 }} />
+                        <div className="skeleton-shimmer" style={{ height: 32, width: 80, borderRadius: 9 }} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           ) : products.length > 0 ? (
             <section style={{ marginBottom: 32 }}>
               <RuleLabel>สินค้าแนะนำ</RuleLabel>
@@ -1632,10 +1654,18 @@ export default function StoreFront() {
           )}
 
           {products.length === 0 && gafiwProducts.length === 0 && !isLoading && (
-            <div style={{ textAlign: "center" as const, padding: "80px 0", color: C.muted }}>
-              <ShoppingBag size={36} color={C.muted} style={{ margin: "0 auto 12px", display: "block", opacity: 0.4 }} />
-              <p>ยังไม่มีสินค้าในขณะนี้</p>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              style={{ textAlign: "center" as const, padding: "80px 24px" }}
+            >
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <ShoppingBag size={28} color={C.muted} strokeWidth={1.2} />
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.ink, marginBottom: 6 }}>ยังไม่มีสินค้าในขณะนี้</div>
+              <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>ร้านกำลังเตรียมสินค้าสำหรับคุณ<br />กลับมาใหม่เร็วๆ นี้นะครับ 🙏</div>
+            </motion.div>
           )}
 
           {/* OTP Tools */}

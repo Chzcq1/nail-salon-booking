@@ -25,19 +25,42 @@ def _run_cleanup(engine):
        ไปแล้วเกิน 30 วัน — Admin ตรวจสอบเสร็จแล้วไม่จำเป็นต้องเก็บรูปอีก
     """
     cleanup_sqls = [
+        # ── OTP Sessions ─────────────────────────────────────────────────────
         "DELETE FROM email_otp_sessions WHERE expires_at < NOW()",
         "DELETE FROM wallet_otp_sessions WHERE expires_at < NOW()",
-        "DELETE FROM otp_sessions WHERE expires_at < NOW() - INTERVAL '1 day'",
+        # ลบ legacy OTP ที่ใช้แล้ว หรือหมดอายุนานเกิน 1 วัน
+        "DELETE FROM otp_sessions WHERE is_used = TRUE AND expires_at < NOW() - INTERVAL '1 day'",
+        "DELETE FROM otp_sessions WHERE expires_at < NOW() - INTERVAL '7 days'",
+
+        # ── Admin Logs ────────────────────────────────────────────────────────
         "DELETE FROM admin_logs WHERE created_at < NOW() - INTERVAL '90 days'",
-        # ลบ base64 รูปสลิปของออเดอร์เก่าที่ตัดสินใจแล้ว — ประหยัด DB มาก
+
+        # ── Orders ────────────────────────────────────────────────────────────
+        # ลบ base64 รูปสลิปออเดอร์ที่ตัดสินใจแล้วเกิน 30 วัน — ประหยัด DB มาก
         "UPDATE orders SET payment_proof = NULL WHERE payment_proof IS NOT NULL AND length(payment_proof) > 200 AND status IN ('approved', 'rejected') AND created_at < NOW() - INTERVAL '30 days'",
-        "UPDATE topup_requests SET payment_proof = NULL WHERE payment_proof IS NOT NULL AND length(payment_proof) > 200 AND status IN ('approved', 'rejected') AND created_at < NOW() - INTERVAL '30 days'",
-        # ออเดอร์ค้าง pending เกิน 7 วัน → ถือว่าลูกค้าไม่ชำระ เปลี่ยนเป็น rejected อัตโนมัติ
+        # ล้าง slip_verify_result (JSON ยาว) ออเดอร์เก่าเกิน 60 วัน — เหลือแค่ status ก็พอ
+        "UPDATE orders SET slip_verify_result = NULL WHERE slip_verify_result IS NOT NULL AND created_at < NOW() - INTERVAL '60 days'",
+        # ออเดอร์ค้าง pending เกิน 7 วัน → ถือว่าลูกค้าไม่ชำระ
         "UPDATE orders SET status = 'rejected' WHERE status = 'pending' AND created_at < NOW() - INTERVAL '7 days'",
-        # topup_requests ค้าง pending เกิน 7 วัน → เปลี่ยนเป็น rejected อัตโนมัติ
-        "UPDATE topup_requests SET status = 'rejected' WHERE status = 'pending' AND created_at < NOW() - INTERVAL '7 days'",
-        # ล้าง invite_links ออเดอร์เก่าเกิน 90 วัน — ลิงก์ Telegram หมดอายุอยู่แล้ว ไม่มีประโยชน์เก็บ
+        # ล้าง invite_links เก่าเกิน 90 วัน — ลิงก์ Telegram หมดอายุอยู่แล้ว
         "UPDATE orders SET invite_links = NULL WHERE invite_links IS NOT NULL AND status = 'approved' AND created_at < NOW() - INTERVAL '90 days'",
+
+        # ── TopupRequests ─────────────────────────────────────────────────────
+        "UPDATE topup_requests SET payment_proof = NULL WHERE payment_proof IS NOT NULL AND length(payment_proof) > 200 AND status IN ('approved', 'rejected') AND created_at < NOW() - INTERVAL '30 days'",
+        "UPDATE topup_requests SET slip_verify_result = NULL WHERE slip_verify_result IS NOT NULL AND created_at < NOW() - INTERVAL '60 days'",
+        "UPDATE topup_requests SET status = 'rejected' WHERE status = 'pending' AND created_at < NOW() - INTERVAL '7 days'",
+
+        # ── Nail Bookings ─────────────────────────────────────────────────────
+        # ลบ base64 สลิปการจองที่ยืนยัน/เสร็จแล้วเกิน 30 วัน (รูปใหญ่มาก)
+        "UPDATE nail_bookings SET payment_proof = NULL WHERE payment_proof IS NOT NULL AND length(payment_proof) > 200 AND status IN ('confirmed', 'completed', 'walkin') AND created_at < NOW() - INTERVAL '30 days'",
+        # ลบการจองที่ยกเลิกแล้วเกิน 14 วัน — ไม่มีประโยชน์เก็บ
+        "DELETE FROM nail_bookings WHERE status = 'cancelled' AND created_at < NOW() - INTERVAL '14 days'",
+        # ลบ held ที่หมดเวลานานเกิน 1 วันโดยไม่ได้จ่ายเงิน
+        "DELETE FROM nail_bookings WHERE status = 'held' AND held_until < NOW() - INTERVAL '1 day'",
+
+        # ── Nail Time Slots ───────────────────────────────────────────────────
+        # ลบ slot วันที่ผ่านมาเกิน 60 วัน — ไม่มีประโยชน์เก็บอีกต่อไป
+        "DELETE FROM nail_time_slots WHERE slot_date < (CURRENT_DATE - INTERVAL '60 days')::text",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
@@ -48,6 +71,7 @@ def _run_cleanup(engine):
                 if hasattr(result, "rowcount") and result.rowcount > 0:
                     logger.info(f"Cleanup affected {result.rowcount} rows: {sql[:60]}…")
             except Exception as e:
+                conn.rollback()  # ล้าง aborted transaction ก่อน statement ถัดไป
                 logger.warning(f"Cleanup step skipped: {e}")
 
 
@@ -135,6 +159,20 @@ def _run_migrations(engine):
         # gafiw_orders: local purchase history (keeps textdb/รหัสสินค้า permanently)
         "CREATE TABLE IF NOT EXISTS gafiw_orders (id SERIAL PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), type_id VARCHAR(100), product_name VARCHAR(255) NOT NULL, textdb TEXT, image_api VARCHAR(1000), price NUMERIC(10,2), created_at TIMESTAMPTZ DEFAULT NOW())",
         "CREATE INDEX IF NOT EXISTS ix_gafiw_orders_customer_id ON gafiw_orders (customer_id)",
+
+        # ── Performance indexes ────────────────────────────────────────────────
+        # orders: admin กรอง status บ่อย + เรียงตาม created_at
+        "CREATE INDEX IF NOT EXISTS ix_orders_status ON orders (status)",
+        "CREATE INDEX IF NOT EXISTS ix_orders_created_at ON orders (created_at DESC)",
+        # topup_requests: admin กรอง status
+        "CREATE INDEX IF NOT EXISTS ix_topup_requests_status ON topup_requests (status)",
+        # nail_bookings: admin ดึงตามวันที่ + เรียงล่าสุดก่อน
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_slot_date_status ON nail_bookings (slot_date, status)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_created_at ON nail_bookings (created_at DESC)",
+        # credit_transactions: customer history เรียงล่าสุดก่อน
+        "CREATE INDEX IF NOT EXISTS ix_credit_transactions_created_at ON credit_transactions (created_at DESC)",
+        # otp_sessions: ล้างตาม expires_at
+        "CREATE INDEX IF NOT EXISTS ix_otp_sessions_expires_at ON otp_sessions (expires_at)",
 
         # ── Nail Salon Booking System ──────────────────────────────────────────
         """CREATE TABLE IF NOT EXISTS nail_shop_settings (
