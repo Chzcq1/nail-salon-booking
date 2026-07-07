@@ -1,13 +1,8 @@
 {
-  "version": 2,
-  "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter @workspace/store run build",
   "outputDirectory": "artifacts/store/dist/public",
+  "installCommand": "pnpm install",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index.py" },
-    { "source": "/webhook", "destination": "/api/index.py" },
-    { "source": "/webhook/:path*", "destination": "/api/index.py" },
-    { "source": "/uploads/:path*", "destination": "/api/index.py" },
-    { "source": "/:path*", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
