@@ -56,8 +56,9 @@ def _check_admin(authorization: str = Header(None)):
             detail="Admin auth not configured — set ADMIN_PASSCODE environment variable",
         )
     # ป้องกัน timing attack ด้วย secrets.compare_digest
+    # .strip() ป้องกัน trailing newline/space ใน env var ที่ทำให้ fail เสมอ
     import hmac
-    if not hmac.compare_digest(token, passcode):
+    if not hmac.compare_digest(token.strip(), passcode.strip()):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

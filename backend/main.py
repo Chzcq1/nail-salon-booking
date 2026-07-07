@@ -248,11 +248,16 @@ def _run_migrations(engine):
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )""",
-        # Seed default services
-        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('เพนท์เจล', 'ทำเล็บเจลสีพื้น', 90, 350, '#FF6B9D', TRUE, 1) ON CONFLICT DO NOTHING",
-        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('อะคริลิค', 'ต่อเล็บอะคริลิค', 120, 550, '#C084FC', TRUE, 2) ON CONFLICT DO NOTHING",
-        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('เพนท์ธรรมดา', 'เพนท์สีทาเล็บทั่วไป', 45, 150, '#FB7185', TRUE, 3) ON CONFLICT DO NOTHING",
-        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('ออกแบบลาย', 'ออกแบบลายเล็บพิเศษ', 60, 200, '#F472B6', TRUE, 4) ON CONFLICT DO NOTHING",
+        # ลบ duplicate services ที่เกิดจากไม่มี unique constraint (ก่อนสร้าง index)
+        # เก็บ row ที่ id น้อยสุดของแต่ละชื่อไว้
+        "DELETE FROM nail_services a USING nail_services b WHERE a.id > b.id AND a.name = b.name",
+        # สร้าง unique constraint บน name — ป้องกัน duplicate จากนี้ไป
+        "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_services_name ON nail_services (name)",
+        # Seed default services (ใช้ ON CONFLICT (name) ได้แล้วเพราะมี unique index)
+        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('เพนท์เจล', 'ทำเล็บเจลสีพื้น', 90, 350, '#FF6B9D', TRUE, 1) ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('อะคริลิค', 'ต่อเล็บอะคริลิค', 120, 550, '#C084FC', TRUE, 2) ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('เพนท์ธรรมดา', 'เพนท์สีทาเล็บทั่วไป', 45, 150, '#FB7185', TRUE, 3) ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('ออกแบบลาย', 'ออกแบบลายเล็บพิเศษ', 60, 200, '#F472B6', TRUE, 4) ON CONFLICT (name) DO NOTHING",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

@@ -123,7 +123,7 @@ export default function NailAdminPage() {
             onChange={e => setTokenInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleLogin()}
             placeholder="รหัสผ่าน Admin"
-            style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, outline: "none", marginBottom: 12, boxSizing: "border-box", fontFamily: "inherit", background: A.bg }}
+            style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, outline: "none", marginBottom: 12, boxSizing: "border-box", fontFamily: "inherit", background: A.bg, color: A.text }}
           />
           {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
           <button onClick={handleLogin}
