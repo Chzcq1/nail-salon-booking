@@ -21,9 +21,11 @@ from backend.config import get_settings
 from backend.database import get_db
 from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot,
-    NailBooking, NailGallery,
+    NailBooking, NailGallery, OTPSession,
 )
 from backend.slip_verify import verify_slip
+from backend.auth import generate_otp, create_admin_token, verify_admin_token
+import backend.bot as bot_module
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/nail", tags=["nail"])
@@ -44,22 +46,18 @@ def _get_shop(db: Session) -> NailShopSettings:
     return shop
 
 
+# Telegram session ID สำหรับ nail admin OTP (ต่างจาก store admin ที่ใช้ 0)
+NAIL_ADMIN_SESSION_ID = -1
+
+
 def _check_admin(authorization: str = Header(None)):
+    """ตรวจสอบ JWT token ที่ได้จาก /api/nail/admin/verify-otp"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization[7:]
-    settings = get_settings()
-    passcode = settings.admin_passcode
-    if not passcode:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin auth not configured — set ADMIN_PASSCODE environment variable",
-        )
-    # ป้องกัน timing attack ด้วย secrets.compare_digest
-    # .strip() ป้องกัน trailing newline/space ใน env var ที่ทำให้ fail เสมอ
-    import hmac
-    if not hmac.compare_digest(token.strip(), passcode.strip()):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    payload = verify_admin_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token หมดอายุหรือไม่ถูกต้อง กรุณาล็อกอินใหม่")
 
 
 def _gen_ref(db: Session) -> str:
@@ -88,6 +86,68 @@ def _count_confirmed_bookings(db: Session, slot_id: int) -> int:
         NailBooking.slot_id == slot_id,
         NailBooking.status.in_(["held", "pending_payment", "confirmed"]),
     ).count()
+
+# ─── Admin Auth (2-step: passcode → OTP → JWT) ──────────────────────────────
+
+class NailAdminOTPRequest(BaseModel):
+    passcode: str
+
+class NailAdminOTPVerify(BaseModel):
+    otp_code: str
+
+@router.post("/admin/request-otp")
+async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_db)):
+    """ขั้นที่ 1 — ตรวจรหัสผ่าน แล้วส่ง OTP ไปยัง Telegram group admin"""
+    cfg = get_settings()
+    passcode = cfg.admin_passcode
+    if not passcode:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
+
+    import hmac as _hmac
+    if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
+        raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+
+    otp = generate_otp()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+    session = OTPSession(
+        telegram_id=NAIL_ADMIN_SESSION_ID,
+        otp_code=otp,
+        expires_at=expires,
+    )
+    db.add(session)
+    db.commit()
+
+    sent, err_msg = await bot_module.send_otp(NAIL_ADMIN_SESSION_ID, otp)
+    if not sent:
+        raise HTTPException(status_code=500, detail=f"ส่ง OTP ไม่สำเร็จ: {err_msg}")
+
+    return {"message": "ส่ง OTP ไปยัง Telegram แล้ว"}
+
+
+@router.post("/admin/verify-otp")
+def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
+    """ขั้นที่ 2 — ยืนยัน OTP แล้วรับ JWT token"""
+    otp_input = (body.otp_code or "").strip()
+    session = (
+        db.query(OTPSession)
+        .filter(
+            OTPSession.telegram_id == NAIL_ADMIN_SESSION_ID,
+            OTPSession.otp_code == otp_input,
+            OTPSession.is_used == False,
+            OTPSession.expires_at > datetime.now(timezone.utc),
+        )
+        .order_by(OTPSession.created_at.desc())
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=401, detail="OTP ไม่ถูกต้องหรือหมดอายุแล้ว")
+
+    session.is_used = True
+    db.commit()
+
+    token = create_admin_token(NAIL_ADMIN_SESSION_ID)
+    return {"access_token": token}
+
 
 # ─── Public endpoints ────────────────────────────────────────────────────────
 

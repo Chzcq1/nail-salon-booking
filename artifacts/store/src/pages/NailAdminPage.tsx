@@ -93,20 +93,68 @@ async function aFetch(url: string, token: string, opts?: RequestInit) {
 export default function NailAdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState(() => localStorage.getItem("nail_admin_token") || "");
-  const [tokenInput, setTokenInput] = useState("");
-  const [authError, setAuthError] = useState("");
 
-  const handleLogin = async () => {
-    const res = await fetch("/api/nail/admin/settings", {
-      headers: { Authorization: `Bearer ${tokenInput}` },
-    });
-    if (res.ok) {
-      localStorage.setItem("nail_admin_token", tokenInput);
-      setToken(tokenInput);
-      setAuthError("");
-    } else {
-      setAuthError("รหัสผ่านไม่ถูกต้อง");
+  // login steps: "passcode" → "otp"
+  const [loginStep, setLoginStep] = useState<"passcode" | "otp">("passcode");
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [otpInput, setOtpInput] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Step 1 — ตรวจรหัสผ่าน ขอ OTP
+  const handlePasscode = async () => {
+    if (!passcodeInput.trim()) return;
+    setLoading(true);
+    setAuthError("");
+    try {
+      const res = await fetch("/api/nail/admin/request-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: passcodeInput }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLoginStep("otp");
+      } else {
+        setAuthError(data?.detail || "รหัสผ่านไม่ถูกต้อง");
+      }
+    } catch {
+      setAuthError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // Step 2 — ยืนยัน OTP รับ JWT
+  const handleOTP = async () => {
+    if (!otpInput.trim()) return;
+    setLoading(true);
+    setAuthError("");
+    try {
+      const res = await fetch("/api/nail/admin/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp_code: otpInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.access_token) {
+        localStorage.setItem("nail_admin_token", data.access_token);
+        setToken(data.access_token);
+        setAuthError("");
+      } else {
+        setAuthError(data?.detail || "OTP ไม่ถูกต้อง");
+      }
+    } catch {
+      setAuthError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 12,
+    padding: "12px 14px", fontSize: 15, outline: "none", marginBottom: 12,
+    boxSizing: "border-box", fontFamily: "inherit", background: A.bg, color: A.text,
   };
 
   if (!token) {
@@ -116,20 +164,53 @@ export default function NailAdminPage() {
         <div style={{ background: A.card, borderRadius: 24, padding: "40px 32px", maxWidth: 360, width: "100%", boxShadow: "0 8px 40px rgba(176,23,75,0.12)", textAlign: "center" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 28 }}>💅</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: A.text, marginBottom: 4 }}>หลังร้านทำเล็บ</h1>
-          <p style={{ color: A.sub, fontSize: 14, marginBottom: 28 }}>กรุณาเข้าสู่ระบบ</p>
-          <input
-            type="password"
-            value={tokenInput}
-            onChange={e => setTokenInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleLogin()}
-            placeholder="รหัสผ่าน Admin"
-            style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, outline: "none", marginBottom: 12, boxSizing: "border-box", fontFamily: "inherit", background: A.bg, color: A.text }}
-          />
-          {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
-          <button onClick={handleLogin}
-            style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-            เข้าสู่ระบบ
-          </button>
+
+          {loginStep === "passcode" ? (
+            <>
+              <p style={{ color: A.sub, fontSize: 14, marginBottom: 28 }}>กรุณาใส่รหัสผ่าน Admin</p>
+              <input
+                type="password"
+                value={passcodeInput}
+                onChange={e => setPasscodeInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handlePasscode()}
+                placeholder="รหัสผ่าน Admin"
+                style={inputStyle}
+                autoFocus
+              />
+              {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
+              <button onClick={handlePasscode} disabled={loading}
+                style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                {loading ? <Loader2 size={18} className="animate-spin" /> : null}
+                {loading ? "กำลังตรวจสอบ…" : "ต่อไป →"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={{ color: A.sub, fontSize: 14, marginBottom: 8 }}>ส่ง OTP ไปยัง Telegram แล้ว</p>
+              <p style={{ color: A.muted, fontSize: 12, marginBottom: 24 }}>กรุณาเปิด Telegram group admin และกรอกรหัส 6 หลักที่ได้รับ</p>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={otpInput}
+                onChange={e => setOtpInput(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => e.key === "Enter" && handleOTP()}
+                placeholder="รหัส OTP 6 หลัก"
+                style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: 700 }}
+                autoFocus
+              />
+              {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
+              <button onClick={handleOTP} disabled={loading || otpInput.length < 6}
+                style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: (loading || otpInput.length < 6) ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: (loading || otpInput.length < 6) ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                {loading ? <Loader2 size={18} className="animate-spin" /> : null}
+                {loading ? "กำลังยืนยัน…" : "เข้าสู่ระบบ"}
+              </button>
+              <button onClick={() => { setLoginStep("passcode"); setOtpInput(""); setAuthError(""); }}
+                style={{ marginTop: 10, background: "none", border: "none", color: A.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                ← กลับใส่รหัสผ่านใหม่
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
