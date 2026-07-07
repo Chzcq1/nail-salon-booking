@@ -150,6 +150,15 @@ def get_services(db: Session = Depends(get_db)):
 def get_slots(date: str, db: Session = Depends(get_db)):
     """ดึงช่วงเวลาที่เปิดให้จองของวันนั้น พร้อมสถานะ available/held/full"""
     _release_expired_holds(db)
+    # ตรวจวันปิดร้าน
+    shop = _get_shop(db)
+    if shop.closed_dates:
+        try:
+            closed = json.loads(shop.closed_dates)
+            if date in closed:
+                return []
+        except Exception:
+            pass
     slots = (
         db.query(NailTimeSlot)
         .filter_by(slot_date=date, is_available=True)
@@ -177,6 +186,7 @@ class HoldRequest(BaseModel):
     service_id: Optional[int] = None
     customer_name: str
     customer_phone: str
+    customer_line: Optional[str] = None
     customer_note: Optional[str] = None
 
 
@@ -224,6 +234,7 @@ def hold_slot(req: HoldRequest, db: Session = Depends(get_db)):
         staff_id=slot.staff_id,
         customer_name=req.customer_name,
         customer_phone=req.customer_phone,
+        customer_line=req.customer_line,
         customer_note=req.customer_note,
         slot_date=slot.slot_date,
         start_time=slot.start_time,
@@ -377,6 +388,7 @@ def admin_list_bookings(
             "service_name": b.service_name,
             "customer_name": b.customer_name,
             "customer_phone": b.customer_phone,
+            "customer_line": b.customer_line,
             "customer_note": b.customer_note,
             "deposit_total": float(b.deposit_total or 0),
             "slip_verify_status": b.slip_verify_status,
@@ -386,6 +398,83 @@ def admin_list_bookings(
             "held_until": b.held_until.isoformat() if b.held_until else None,
         })
     return result
+
+
+@router.get("/admin/dashboard")
+def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(None)):
+    _check_admin(authorization)
+    today = _now().date().isoformat()
+    week_start = (_now().date() - timedelta(days=_now().weekday())).isoformat()
+
+    def count_status(status: str, date: str = None):
+        q = db.query(NailBooking).filter(NailBooking.status == status)
+        if date:
+            q = q.filter(NailBooking.slot_date == date)
+        return q.count()
+
+    today_confirmed = count_status("confirmed", today)
+    today_pending = count_status("pending_payment", today)
+    today_walkin = count_status("walkin", today)
+
+    from sqlalchemy import func as sqlfunc
+    week_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.slot_date >= week_start,
+        NailBooking.status.in_(["confirmed", "completed", "walkin"]),
+    ).scalar() or 0
+
+    total_bookings = db.query(NailBooking).filter(
+        NailBooking.status.in_(["confirmed", "completed", "walkin"])
+    ).count()
+
+    recent = (
+        db.query(NailBooking)
+        .filter(NailBooking.status.in_(["pending_payment", "confirmed", "held"]))
+        .order_by(NailBooking.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "today": {
+            "confirmed": today_confirmed,
+            "pending": today_pending,
+            "walkin": today_walkin,
+            "total": today_confirmed + today_pending + today_walkin,
+        },
+        "week_revenue": float(week_revenue),
+        "total_bookings": total_bookings,
+        "recent_bookings": [
+            {
+                "id": b.id,
+                "booking_ref": b.booking_ref,
+                "status": b.status,
+                "customer_name": b.customer_name,
+                "slot_date": b.slot_date,
+                "start_time": b.start_time,
+                "service_name": b.service_name,
+                "deposit_total": float(b.deposit_total or 0),
+            }
+            for b in recent
+        ],
+    }
+
+
+@router.post("/admin/bookings/{booking_id}/refund")
+def admin_refund_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    _check_admin(authorization)
+    booking = db.query(NailBooking).filter_by(id=booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="ไม่พบการจอง")
+    if booking.status not in ("pending_payment", "confirmed"):
+        raise HTTPException(status_code=409, detail=f"ไม่สามารถคืนเงินสถานะ: {booking.status}")
+    booking.status = "cancelled"
+    booking.admin_note = (booking.admin_note or "") + " [ยกเลิกและคืนเงินโดยแอดมิน]"
+    db.commit()
+    return {"ok": True, "message": "ยกเลิกและบันทึกการคืนเงินแล้ว"}
 
 
 class UpdateBookingBody(BaseModel):
@@ -766,6 +855,7 @@ class ShopSettingsBody(BaseModel):
     slot_duration_minutes: Optional[int] = None
     expired_at: Optional[str] = None   # ISO datetime string
     is_active: Optional[bool] = None
+    closed_dates: Optional[str] = None  # JSON array of "YYYY-MM-DD"
 
 
 @router.get("/admin/settings")
@@ -789,6 +879,7 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "slot_duration_minutes": shop.slot_duration_minutes or 60,
         "expired_at": shop.expired_at.isoformat() if shop.expired_at else None,
         "is_active": shop.is_active,
+        "closed_dates": shop.closed_dates or "[]",
     }
 
 

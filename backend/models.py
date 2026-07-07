@@ -240,6 +240,7 @@ class NailShopSettings(Base):
     expired_at = Column(DateTime(timezone=True), nullable=True)   # ใช้สำหรับระบบเช่า
     max_advance_days = Column(Integer, default=14)
     slot_duration_minutes = Column(Integer, default=60)
+    closed_dates = Column(Text, nullable=True)  # JSON array of "YYYY-MM-DD"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -296,6 +297,7 @@ class NailBooking(Base):
     staff_id = Column(Integer, ForeignKey("nail_staff.id"), nullable=True)
     customer_name = Column(String(255), nullable=False)
     customer_phone = Column(String(20), nullable=False)
+    customer_line = Column(String(100), nullable=True)
     customer_note = Column(Text, nullable=True)
     slot_date = Column(String(10), nullable=True)    # snapshot
     start_time = Column(String(5), nullable=True)    # snapshot

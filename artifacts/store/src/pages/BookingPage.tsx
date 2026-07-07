@@ -9,7 +9,7 @@ import {
   Instagram, Facebook, Clock, ChevronLeft, ChevronRight,
   Phone, User, StickyNote, Upload, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
-  MessageCircle, Video,
+  MessageCircle, Video, HelpCircle,
 } from "lucide-react";
 
 // ── Color tokens ────────────────────────────────────────────────────
@@ -77,6 +77,7 @@ interface BookingState {
   slot:     any | null;
   name:     string;
   phone:    string;
+  line:     string;
   note:     string;
   holdData: any | null;
 }
@@ -86,7 +87,7 @@ export default function BookingPage() {
   const [step, setStep] = useState<Step>("landing");
   const [booking, setBooking] = useState<BookingState>({
     service: null, date: null, slot: null,
-    name: "", phone: "", note: "", holdData: null,
+    name: "", phone: "", line: "", note: "", holdData: null,
   });
 
   const { data: shopSettings } = useQuery({ queryKey: ["nail-settings"], queryFn: api.settings });
@@ -146,10 +147,11 @@ export default function BookingPage() {
             key="info"
             name={booking.name}
             phone={booking.phone}
+            line={booking.line}
             note={booking.note}
             onBack={() => go("slot")}
-            onNext={(name, phone, note) => {
-              setBooking(b => ({ ...b, name, phone, note }));
+            onNext={(name, phone, line, note) => {
+              setBooking(b => ({ ...b, name, phone, line, note }));
               go("payment");
             }}
           />
@@ -166,7 +168,7 @@ export default function BookingPage() {
           <SuccessScreen
             key="success"
             holdData={booking.holdData}
-            onHome={() => { setBooking({ service: null, date: null, slot: null, name: "", phone: "", note: "", holdData: null }); go("landing"); }}
+            onHome={() => { setBooking({ service: null, date: null, slot: null, name: "", phone: "", line: "", note: "", holdData: null }); go("landing"); }}
           />
         )}
       </AnimatePresence>
@@ -209,10 +211,79 @@ function BackBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
+// ── Tutorial Popup ───────────────────────────────────────────────────
+const TUTORIAL_KEY = "nail_tutorial_seen_v1";
+
+const tutorialSteps = [
+  { icon: "💅", title: "เลือกบริการ", desc: "เลือกประเภทการทำเล็บที่ต้องการ เช่น เพนท์เจล, อะคริลิค" },
+  { icon: "📅", title: "เลือกวันและเวลา", desc: "เลือกวันที่สะดวกและช่วงเวลาที่ว่าง" },
+  { icon: "📝", title: "กรอกข้อมูล", desc: "ใส่ชื่อ เบอร์โทร และ LINE สำหรับติดต่อยืนยัน" },
+  { icon: "💳", title: "จ่ายมัดจำ", desc: "โอนค่ามัดจำและส่งสลิป ร้านจะยืนยันให้ภายใน 24 ชม." },
+];
+
+function TutorialPopup({ onClose }: { onClose: () => void }) {
+  const [step, setStep] = useState(0);
+  const isLast = step === tutorialSteps.length - 1;
+
+  const handleClose = () => {
+    localStorage.setItem(TUTORIAL_KEY, "1");
+    onClose();
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 9999, padding: "0 0 0 0" }}>
+      <motion.div initial={{ y: 200 }} animate={{ y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 28 }}
+        style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: "28px 24px 36px", width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: P.text, margin: 0 }}>วิธีจองคิวทำเล็บ</h2>
+            <p style={{ color: P.muted, fontSize: 12, margin: 0 }}>มีแค่ 4 ขั้นตอนง่ายๆ!</p>
+          </div>
+          <button onClick={handleClose} style={{ background: P.gray, border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={16} color={P.sub} />
+          </button>
+        </div>
+
+        {/* Steps */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+          {tutorialSteps.map((_, i) => (
+            <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? P.pink : P.gray, transition: "background 0.3s" }} />
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div key={step} initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2 }}
+            style={{ textAlign: "center", padding: "8px 0 24px" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>{tutorialSteps[step].icon}</div>
+            <div style={{ background: `${P.pink}15`, borderRadius: 100, padding: "4px 16px", display: "inline-block", marginBottom: 12 }}>
+              <span style={{ color: P.pink, fontSize: 12, fontWeight: 700 }}>ขั้นตอนที่ {step + 1}</span>
+            </div>
+            <h3 style={{ fontSize: 20, fontWeight: 700, color: P.text, marginBottom: 8 }}>{tutorialSteps[step].title}</h3>
+            <p style={{ color: P.sub, fontSize: 15, lineHeight: 1.6 }}>{tutorialSteps[step].desc}</p>
+          </motion.div>
+        </AnimatePresence>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          {step > 0 && (
+            <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, background: P.gray, border: "none", borderRadius: 14, padding: "14px", cursor: "pointer", fontFamily: "inherit", fontSize: 15, color: P.sub }}>
+              ← ก่อนหน้า
+            </button>
+          )}
+          <button onClick={() => isLast ? handleClose() : setStep(s => s + 1)}
+            style={{ flex: 2, background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 14, padding: "14px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 15 }}>
+            {isLast ? "เข้าใจแล้ว! เริ่มจองเลย 🎉" : "ถัดไป →"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // ── Landing Screen ───────────────────────────────────────────────────
 function LandingScreen({ settings, gallery, onBook }: any) {
   const [galleryIdx, setGalleryIdx] = useState(0);
   const galleryRef = useRef<HTMLDivElement>(null);
+  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_KEY));
 
   const socials = [
     { url: settings?.ig_url, icon: <Instagram size={20} />, label: "Instagram", color: "#E1306C" },
@@ -246,7 +317,16 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         >
           <Calendar size={18} /> จองคิวเลย <ArrowRight size={16} />
         </button>
+        <button onClick={() => setShowTutorial(true)}
+          style={{ marginTop: 14, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+          <HelpCircle size={14} /> วิธีจอง / คำแนะนำ
+        </button>
       </div>
+
+      {/* Tutorial Popup */}
+      <AnimatePresence>
+        {showTutorial && <TutorialPopup onClose={() => setShowTutorial(false)} />}
+      </AnimatePresence>
 
       {/* Social Links */}
       {socials.length > 0 && (
@@ -446,9 +526,10 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 }
 
 // ── Info Screen ──────────────────────────────────────────────────────
-function InfoScreen({ name, phone, note, onBack, onNext }: any) {
+function InfoScreen({ name, phone, line, note, onBack, onNext }: any) {
   const [n, setN] = useState(name);
   const [p, setP] = useState(phone);
+  const [ln, setLn] = useState(line || "");
   const [nt, setNt] = useState(note);
 
   const valid = n.trim() && p.trim().replace(/\D/g, "").length >= 9;
@@ -462,28 +543,22 @@ function InfoScreen({ name, phone, note, onBack, onNext }: any) {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Field label="ชื่อ-นามสกุล *" icon={<User size={16} />}>
-            <input
-              value={n} onChange={e => setN(e.target.value)} placeholder="กรอกชื่อของคุณ"
-              style={inputStyle}
-            />
+            <input value={n} onChange={e => setN(e.target.value)} placeholder="กรอกชื่อของคุณ" style={inputStyle} />
           </Field>
           <Field label="เบอร์โทรศัพท์ *" icon={<Phone size={16} />}>
-            <input
-              value={p} onChange={e => setP(e.target.value)} placeholder="0xx-xxx-xxxx" inputMode="tel"
-              style={inputStyle}
-            />
+            <input value={p} onChange={e => setP(e.target.value)} placeholder="0xx-xxx-xxxx" inputMode="tel" style={inputStyle} />
+          </Field>
+          <Field label="LINE ID (สำหรับติดต่อ)" icon={<MessageCircle size={16} />}>
+            <input value={ln} onChange={e => setLn(e.target.value)} placeholder="@yourline หรือ LINE ID" style={inputStyle} />
           </Field>
           <Field label="หมายเหตุ (ถ้ามี)" icon={<StickyNote size={16} />}>
-            <textarea
-              value={nt} onChange={e => setNt(e.target.value)} placeholder="เช่น สีที่อยากได้, ดีไซน์พิเศษ..."
-              rows={3}
-              style={{ ...inputStyle, resize: "none" }}
-            />
+            <textarea value={nt} onChange={e => setNt(e.target.value)} placeholder="เช่น สีที่อยากได้, ดีไซน์พิเศษ..." rows={3}
+              style={{ ...inputStyle, resize: "none" }} />
           </Field>
         </div>
 
         <button
-          onClick={() => valid && onNext(n.trim(), p.trim(), nt.trim())}
+          onClick={() => valid && onNext(n.trim(), p.trim(), ln.trim(), nt.trim())}
           disabled={!valid}
           style={{
             width: "100%", marginTop: 28,
@@ -534,6 +609,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
       service_id: booking.service?.id,
       customer_name: booking.name,
       customer_phone: booking.phone,
+      customer_line: booking.line || undefined,
       customer_note: booking.note,
     }),
     onSuccess: data => setHoldData(data),

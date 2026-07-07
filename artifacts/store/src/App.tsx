@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import StoreFront from "@/pages/StoreFront";
-import AdminPanel from "@/pages/AdminPanel";
+import AdminPanel from "@/pages/AdminPanel"; // kept for reference
 import AnnouncementPage from "@/pages/AnnouncementPage";
 import WalletPage from "@/pages/WalletPage";
 import BookingPage from "@/pages/BookingPage";
@@ -19,7 +19,7 @@ function Router() {
       <Route path="/shop" component={StoreFront} />
       <Route path="/announcements" component={AnnouncementPage} />
       <Route path="/wallet" component={WalletPage} />
-      <Route path="/admin" component={AdminPanel} />
+      <Route path="/admin" component={NailAdminPage} />
       <Route path="/nail-admin" component={NailAdminPage} />
       <Route component={NotFound} />
     </Switch>
