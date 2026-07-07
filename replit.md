@@ -4,6 +4,19 @@
 
 ---
 
+## 🔴 บันทึกสำคัญ — อ่านก่อนทำงานทุกครั้ง
+
+| ข้อ | รายละเอียด |
+|---|---|
+| 🚀 **Deploy แล้ว** | โปรเจกต์ถูก deploy บน **Render** อยู่แล้ว ใช้งานจริงในโปรดักชัน |
+| 🔑 **Secrets อยู่บน Render** | API Keys, Tokens, Passwords ทั้งหมดถูกตั้งไว้ใน Render Environment Variables — **ไม่ต้องขอจากเจ้าของร้าน** |
+| 🗄️ **ฐานข้อมูล** | ใช้ **Neon.tech** (PostgreSQL serverless) — `DATABASE_URL` ตั้งอยู่บน Render แล้ว |
+| ✏️ **บทบาท Replit** | Replit มีหน้าที่ **เขียน / แก้ไข / เพิ่มโค้ดเท่านั้น** — ไม่ต้องรัน server, ไม่ต้องขอ key ใดๆ หากไม่จำเป็นจริงๆ |
+
+> ⚠️ **ห้ามฝัง API Key / Token ใดๆ ลงในโค้ดโดยตรง** — secrets ทั้งหมดต้องอ้างอิงผ่าน environment variables เท่านั้น
+
+---
+
 ## บทบาทของ Replit Agent
 
 Replit มีหน้าที่:
@@ -12,7 +25,10 @@ Replit มีหน้าที่:
 - **แก้ไขโค้ดที่ผิดพลาด** — debug และแก้ไขปัญหาอย่างรวดเร็ว
 - **เพิ่มฟีเจอร์ใหม่** — ตามที่เจ้าของร้านต้องการ
 
-> ⚠️ **ห้าม** บังคับให้ใส่ API Key ใดๆ ในโค้ด โปรเจกต์นี้จะถูก push ขึ้น GitHub และ Deploy บน Render — secrets ทั้งหมดต้องตั้งใน Render Environment Variables เท่านั้น
+**ไม่ใช่หน้าที่ของ Replit:**
+- ❌ ขอ API Key / Token / Password จากเจ้าของร้าน (มีอยู่บน Render แล้ว)
+- ❌ รัน production server หรือ deploy เอง
+- ❌ แตะต้อง environment variables บน Render
 
 ---
 
@@ -21,8 +37,8 @@ Replit มีหน้าที่:
 | ชั้น | บริการ |
 |---|---|
 | **Source code** | GitHub (private repo) |
-| **Deploy / Hosting** | Render (Web Service) |
-| **Database** | Supabase (PostgreSQL) |
+| **Deploy / Hosting** | Render (Web Service) — **ที่นี่เก็บ secrets ทั้งหมด** |
+| **Database** | **Neon.tech** (PostgreSQL serverless) |
 | **Frontend build** | Vite + React (built by `build.sh`, served by FastAPI) |
 
 ---
@@ -75,7 +91,7 @@ artifacts/store/src/
 
 | ตัวแปร | หมายเหตุ |
 |---|---|
-| `DATABASE_URL` | Supabase connection string (postgresql+psycopg2://...) |
+| `DATABASE_URL` | Neon.tech connection string (postgresql+psycopg2://...) |
 | `SECRET_KEY` | JWT secret 32+ chars |
 | `ADMIN_PASSCODE` | รหัสเข้า Admin Panel |
 | `GAFIWSHOP_KEY_API` | API key จาก gafiwshop.xyz |

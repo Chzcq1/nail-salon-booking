@@ -1,2 +1,3 @@
 - [Email wallet auth](email-wallet-auth.md) — replaced Telegram OTP with email OTP + PIN for customer wallet; key decisions and env vars documented
 - [Nail Salon Booking System](nail-salon-system.md) — booking system built on existing stack; slot locking (SELECT FOR UPDATE), deposit random cents, rental expiry, admin auth guard
+- [Project deployment and Replit role](project-deployment.md) — deployed on Render, secrets already there, DB is Neon.tech; Replit writes code only, never ask for keys unless brand-new service
