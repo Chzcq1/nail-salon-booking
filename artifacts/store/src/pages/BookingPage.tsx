@@ -52,38 +52,53 @@ const WALLET_SESSION_KEY = "wallet_token";
 function getWalletToken(): string { return sessionStorage.getItem(WALLET_SESSION_KEY) || ""; }
 
 // ── API calls ────────────────────────────────────────────────────────
+/** แปลง detail จาก FastAPI/Pydantic เป็นข้อความที่อ่านได้ */
+async function parseApiError(r: Response): Promise<string> {
+  try {
+    const d = await r.json();
+    if (Array.isArray(d.detail)) return d.detail.map((e: any) => e.msg || JSON.stringify(e)).join(", ");
+    return String(d.detail || `เกิดข้อผิดพลาด (${r.status})`);
+  } catch {
+    return `เกิดข้อผิดพลาด (${r.status})`;
+  }
+}
+
 const api = {
   settings:  () => fetch("/api/nail/settings").then(r => r.json()),
   gallery:   () => fetch("/api/nail/gallery").then(r => r.json()),
   services:  () => fetch("/api/nail/services").then(r => r.json()),
   slots:     (date: string) => fetch(`/api/nail/slots?date=${date}`).then(r => r.json()),
-  hold:      (body: object) => {
+  hold:      async (body: object) => {
     const token = getWalletToken();
-    return fetch("/api/nail/booking/hold", {
+    const r = await fetch("/api/nail/booking/hold", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(body),
-    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; });
+    });
+    if (!r.ok) throw new Error(await parseApiError(r));
+    return r.json();
   },
-  pay:       (body: object) =>
-    fetch("/api/nail/booking/pay", {
+  pay:       async (body: object) => {
+    const r = await fetch("/api/nail/booking/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; }),
-  payWallet: (hold_token: string) => {
+    });
+    if (!r.ok) throw new Error(await parseApiError(r));
+    return r.json();
+  },
+  payWallet: async (hold_token: string) => {
     const token = getWalletToken();
-    return fetch("/api/nail/booking/pay-wallet", {
+    const r = await fetch("/api/nail/booking/pay-wallet", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ hold_token }),
-    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; });
+    });
+    if (!r.ok) throw new Error(await parseApiError(r));
+    return r.json();
   },
   uploadSlip: (base64: string) =>
     fetch("/api/upload/slip", {
@@ -116,7 +131,7 @@ export default function BookingPage() {
   });
 
   const { data: shopSettings, isError: settingsError } = useQuery({
-    queryKey: ["nail-settings"], queryFn: api.settings, staleTime: 60000, retry: 1,
+    queryKey: ["nail-settings"], queryFn: api.settings, staleTime: 15000, retry: 1,
   });
   const { data: gallery = [] } = useQuery({
     queryKey: ["nail-gallery"], queryFn: api.gallery, staleTime: 120000, retry: 1,
@@ -161,6 +176,7 @@ export default function BookingPage() {
           <DateScreen
             key="date"
             maxDays={shopSettings?.max_advance_days || 14}
+            closedDates={(() => { try { return JSON.parse(shopSettings?.closed_dates || "[]"); } catch { return []; } })()}
             selected={booking.date}
             onBack={() => go("landing")}
             onSelect={d => { setBooking(b => ({ ...b, date: d, slot: null })); go("slot"); }}
@@ -414,9 +430,10 @@ function LandingScreen({ settings, gallery, onBook }: any) {
 }
 
 // ── Date Screen ──────────────────────────────────────────────────────
-function DateScreen({ maxDays, selected, onBack, onSelect }: any) {
+function DateScreen({ maxDays, closedDates = [], selected, onBack, onSelect }: any) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const closedSet = new Set<string>(closedDates);
 
   const dates = Array.from({ length: maxDays }, (_, i) => {
     const d = new Date(today);
@@ -430,21 +447,31 @@ function DateScreen({ maxDays, selected, onBack, onSelect }: any) {
       <div style={{ padding: "0 20px" }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>เลือกวันนัด</h2>
         <p style={{ color: P.sub, marginBottom: 20, fontSize: 14 }}>จองได้ล่วงหน้าสูงสุด {maxDays} วัน</p>
+        {closedSet.size > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, fontSize: 12, color: P.muted }}>
+            <div style={{ width: 14, height: 14, borderRadius: 4, background: P.gray, border: `1px solid ${P.grayDark}` }} />
+            วันปิดร้าน — ไม่รับจอง
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {dates.map(d => {
             const iso = toISO(d);
             const isSelected = selected === iso;
             const isToday = iso === toISO(today);
+            const isClosed = closedSet.has(iso);
             return (
               <motion.button
                 key={iso}
-                whileTap={{ scale: 0.96 }}
-                onClick={() => onSelect(iso)}
+                whileTap={isClosed ? {} : { scale: 0.96 }}
+                onClick={() => !isClosed && onSelect(iso)}
                 style={{
-                  background: isSelected ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : "#fff",
-                  border: `2px solid ${isSelected ? P.pink : P.pinkBorder}`,
-                  borderRadius: 14, padding: "14px 12px", cursor: "pointer",
-                  textAlign: "center", color: isSelected ? "#fff" : P.text,
+                  background: isClosed ? P.gray : isSelected ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : "#fff",
+                  border: `2px solid ${isClosed ? P.grayDark : isSelected ? P.pink : P.pinkBorder}`,
+                  borderRadius: 14, padding: "14px 12px",
+                  cursor: isClosed ? "not-allowed" : "pointer",
+                  textAlign: "center",
+                  color: isClosed ? P.muted : isSelected ? "#fff" : P.text,
+                  opacity: isClosed ? 0.55 : 1,
                   boxShadow: isSelected ? `0 4px 16px ${P.pink}44` : "none",
                 }}
               >
@@ -456,6 +483,9 @@ function DateScreen({ maxDays, selected, onBack, onSelect }: any) {
                 <div style={{ fontSize: 12, opacity: 0.75 }}>
                   {d.toLocaleDateString("th-TH", { month: "short" })}
                 </div>
+                {isClosed && (
+                  <div style={{ fontSize: 10, marginTop: 4, color: P.muted, fontWeight: 600 }}>ปิดร้าน</div>
+                )}
               </motion.button>
             );
           })}
@@ -500,6 +530,7 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
             {slots.map((sl: any) => {
               const avail = sl.available;
               const isSelected = selected?.id === sl.id;
+              const remaining = sl.max_bookings > 1 ? Math.max(0, sl.max_bookings - sl.booked_count) : null;
               return (
                 <motion.button
                   key={sl.id}
@@ -516,7 +547,12 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
                 >
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{sl.start_time}</div>
                   <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>ถึง {sl.end_time}</div>
-                  {!avail && <div style={{ fontSize: 11, marginTop: 4, color: P.muted }}>เต็มแล้ว</div>}
+                  {!avail
+                    ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>🔴 เต็มแล้ว</div>
+                    : remaining !== null
+                      ? <div style={{ fontSize: 11, marginTop: 4, color: isSelected ? "rgba(255,255,255,0.85)" : P.pink }}>ว่าง {remaining} ที่</div>
+                      : null
+                  }
                   {isSelected && <CheckCircle size={16} style={{ margin: "4px auto 0" }} />}
                 </motion.button>
               );

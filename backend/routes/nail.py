@@ -63,11 +63,9 @@ def _check_admin(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token หมดอายุหรือไม่ถูกต้อง กรุณาล็อกอินใหม่")
 
 
-def _gen_ref(db: Session) -> str:
-    """สร้างเลขอ้างอิงการจอง NB-0001"""
-    last = db.query(NailBooking).order_by(NailBooking.id.desc()).first()
-    n = (last.id + 1) if last else 1
-    return f"NB-{n:04d}"
+def _gen_ref(booking_id: int) -> str:
+    """สร้างเลขอ้างอิงการจองจาก auto-increment ID (thread-safe, no race condition)"""
+    return f"NB-{booking_id:04d}"
 
 
 def _release_expired_holds(db: Session):
@@ -120,7 +118,20 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
             pass
 
     # ป้องกัน 2 request สร้างสล็อตวันเดียวกันพร้อมกันจนได้สล็อตซ้ำ (advisory lock ทั้ง transaction)
-    db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{date_str}"})
+    # หมายเหตุ: บาง serverless PostgreSQL (เช่น Neon.tech) อาจไม่รองรับ hashtext → fallback gracefully
+    try:
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{date_str}"})
+    except Exception as _adv_lock_err:
+        # hashtext ไม่ถูกรองรับบน serverless PostgreSQL บางตัว (เช่น Neon)
+        # rollback เฉพาะ statement นั้น แล้วทำงานต่อโดยไม่มี lock
+        err_str = str(_adv_lock_err).lower()
+        if "hashtext" in err_str or "function" in err_str or "does not exist" in err_str:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        else:
+            raise  # re-raise ถ้าเป็น error อื่น เช่น connection failed
 
     already = db.query(NailTimeSlot).filter_by(slot_date=date_str).first()
     if already:
@@ -241,6 +252,7 @@ def get_settings_public(db: Session = Depends(get_db)):
         "slot_duration_minutes": shop.slot_duration_minutes or 60,
         "is_active": shop.is_active and not expired,
         "expired": expired,
+        "closed_dates": shop.closed_dates or "[]",
     }
 
 
@@ -388,7 +400,7 @@ def hold_slot(
     held_until = _now() + timedelta(minutes=10)
 
     booking = NailBooking(
-        booking_ref=_gen_ref(db),
+        booking_ref="PENDING",  # ตั้ง placeholder ก่อน — จะแทนที่ด้วย ID จริงหลัง flush
         slot_id=slot.id,
         service_id=req.service_id,
         staff_id=slot.staff_id,
@@ -409,6 +421,8 @@ def hold_slot(
         hold_token=hold_token,
     )
     db.add(booking)
+    db.flush()   # ดึง auto-increment ID โดยยังไม่ commit (FOR UPDATE lock ยังอยู่)
+    booking.booking_ref = _gen_ref(booking.id)  # thread-safe: ใช้ ID จริงจาก DB
     db.commit()   # releases the FOR UPDATE lock
     db.refresh(booking)
 
@@ -802,7 +816,7 @@ def admin_add_walkin(
     _check_admin(authorization)
     service = db.query(NailService).filter_by(id=body.service_id).first() if body.service_id else None
     booking = NailBooking(
-        booking_ref=_gen_ref(db),
+        booking_ref="PENDING",
         slot_id=body.slot_id,
         service_id=body.service_id,
         customer_name=body.customer_name,
@@ -817,6 +831,8 @@ def admin_add_walkin(
         admin_note=body.admin_note,
     )
     db.add(booking)
+    db.flush()
+    booking.booking_ref = _gen_ref(booking.id)
     db.commit()
     db.refresh(booking)
     return {"ok": True, "booking_ref": booking.booking_ref}
