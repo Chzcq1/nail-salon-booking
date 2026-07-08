@@ -260,6 +260,8 @@ def _run_migrations(engine):
         )""",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_status ON nail_bookings (status)",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_hold_token ON nail_bookings (hold_token)",
+        # customer_line หายไปจาก CREATE TABLE เดิม — ทำให้ทุกการจองพัง (column does not exist) บนฐานข้อมูลที่สร้างตารางไว้ก่อนหน้านี้
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_line VARCHAR(100)",
         """CREATE TABLE IF NOT EXISTS nail_gallery (
             id SERIAL PRIMARY KEY,
             image_url VARCHAR(1000) NOT NULL,

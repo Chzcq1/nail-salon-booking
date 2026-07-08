@@ -200,6 +200,7 @@ export default function BookingPage() {
             phone={booking.phone}
             line={booking.line}
             note={booking.note}
+            defaultDeposit={shopSettings?.deposit_amount}
             onBack={() => go("slot")}
             onNext={(service, name, phone, line, note) => {
               setBooking(b => ({ ...b, service, name, phone, line, note }));
@@ -379,13 +380,6 @@ function LandingScreen({ settings, gallery, onBook }: any) {
           <Calendar size={18} /> จองคิวเลย <ArrowRight size={16} />
         </button>
 
-        {/* Deposit amount hint */}
-        {settings?.deposit_amount && (
-          <p style={{ color: "rgba(255,255,255,0.9)", fontSize: 13, marginTop: 10, marginBottom: 0 }}>
-            💳 ค่ามัดจำ <strong>฿{Number(settings.deposit_amount).toLocaleString()}</strong> (โอนหรือใช้เครดิตกระเป๋าเงิน)
-          </p>
-        )}
-
         <button onClick={() => setShowTutorial(true)}
           style={{ marginTop: 12, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
           <HelpCircle size={14} /> วิธีจอง / คำแนะนำ
@@ -559,6 +553,7 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {slots.map((sl: any) => {
               const avail = sl.available;
+              const isPast = !!sl.is_past;
               const isSelected = selected?.id === sl.id;
               const remaining = sl.max_bookings > 1 ? Math.max(0, sl.max_bookings - sl.booked_count) : null;
               return (
@@ -571,17 +566,19 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
                     border: `2px solid ${isSelected ? P.pink : avail ? P.pinkBorder : P.grayDark}`,
                     borderRadius: 14, padding: "16px 12px", cursor: avail ? "pointer" : "not-allowed",
                     textAlign: "center", color: !avail ? P.muted : isSelected ? "#fff" : P.text,
-                    opacity: !avail ? 0.6 : 1,
+                    opacity: !avail ? 0.55 : 1,
                     boxShadow: isSelected ? `0 4px 16px ${P.pink}44` : "none",
                   }}
                 >
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{sl.start_time}</div>
                   <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>ถึง {sl.end_time}</div>
-                  {!avail
-                    ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>🔴 เต็มแล้ว</div>
-                    : remaining !== null
-                      ? <div style={{ fontSize: 11, marginTop: 4, color: isSelected ? "rgba(255,255,255,0.85)" : P.pink }}>ว่าง {remaining} ที่</div>
-                      : null
+                  {isPast
+                    ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>⏱️ ผ่านไปแล้ว</div>
+                    : !avail
+                      ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>🔴 เต็มแล้ว</div>
+                      : remaining !== null
+                        ? <div style={{ fontSize: 11, marginTop: 4, color: isSelected ? "rgba(255,255,255,0.85)" : P.pink }}>ว่าง {remaining} ที่</div>
+                        : null
                   }
                   {isSelected && <CheckCircle size={16} style={{ margin: "4px auto 0" }} />}
                 </motion.button>
@@ -595,8 +592,9 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 }
 
 // ── Info Screen ──────────────────────────────────────────────────────
-function InfoScreen({ services, service, name, phone, line, note, onBack, onNext }: any) {
+function InfoScreen({ services, service, name, phone, line, note, defaultDeposit, onBack, onNext }: any) {
   const [sel, setSel] = useState<any>(service || null);
+  const depositAmount = sel?.deposit_amount ?? defaultDeposit ?? null;
   const [n, setN] = useState(name);
   const [p, setP] = useState(phone);
   const [ln, setLn] = useState(line || "");
@@ -690,6 +688,14 @@ function InfoScreen({ services, service, name, phone, line, note, onBack, onNext
               style={{ ...inputStyle, resize: "none" }} />
           </Field>
         </div>
+
+        {/* แสดงค่ามัดจำจริงของการจองนี้ ก่อนไปหน้าชำระเงิน — ให้ลูกค้ารู้ล่วงหน้าชัดเจน */}
+        {depositAmount != null && (
+          <div style={{ marginTop: 20, background: P.pinkPale, border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 13, color: P.sub, fontWeight: 500 }}>💳 ค่ามัดจำสำหรับการจองนี้</span>
+            <span style={{ fontSize: 18, fontWeight: 800, color: P.pinkDeep }}>฿{Number(depositAmount).toLocaleString()}</span>
+          </div>
+        )}
 
         <button
           onClick={() => valid && onNext(sel, n.trim(), p.trim(), ln.trim(), nt.trim())}

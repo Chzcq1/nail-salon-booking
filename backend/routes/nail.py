@@ -337,14 +337,15 @@ def get_slots(date: str, db: Session = Depends(get_db)):
 
     result = []
     for s in slots:
-        if is_today and s.start_time <= current_hm:
-            continue  # เวลานี้ผ่านไปแล้ว ห้ามจองย้อนหลัง
+        is_past = is_today and s.start_time <= current_hm
         confirmed = booking_counts.get(s.id, 0)
         result.append({
             "id": s.id,
             "start_time": s.start_time,
             "end_time": s.end_time,
-            "available": confirmed < (s.max_bookings or 1),
+            # เวลาที่ผ่านไปแล้ว ยังคงแสดงในรายการ (ไม่ซ่อน) แต่ห้ามจอง — กันลูกค้าที่เข้ามาดูงงว่าทำไมไม่มีคิวเลย
+            "available": (not is_past) and confirmed < (s.max_bookings or 1),
+            "is_past": is_past,
             "booked_count": confirmed,
             "max_bookings": s.max_bookings or 1,
         })

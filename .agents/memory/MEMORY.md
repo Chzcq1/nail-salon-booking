@@ -6,3 +6,4 @@
 - [Testing Neon DB from Replit dev](neon-db-local-testing.md) — use a NEON_DATABASE_URL secret (not DATABASE_URL) to probe real prod data when a save/persistence bug is reported
 - [Debugging opaque prod 500s without log access](opaque-prod-500-debugging.md) — add a FastAPI global exception handler that logs full tracebacks, since Render logs aren't reachable from Replit tools
 - [Thailand timezone handling](thailand-timezone-handling.md) — app stores naive UTC; any "today/now" business logic (e.g. past time-slot filtering) must convert via a dedicated UTC+7 helper, not assume server tz
+- [Schema drift between CREATE TABLE and prod tables](schema-drift-migrations.md) — new model columns need an explicit ALTER TABLE ADD COLUMN migration too, or prod tables silently miss them while dev looks fine
