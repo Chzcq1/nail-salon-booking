@@ -308,10 +308,21 @@ def _run_migrations(engine):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import time
     from backend.database import engine, Base
     if engine is not None:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified")
+        # Neon serverless อาจต้อง cold-start — retry สูงสุด 3 ครั้ง
+        for attempt in range(1, 4):
+            try:
+                Base.metadata.create_all(bind=engine)
+                logger.info("Database tables created/verified")
+                break
+            except Exception as e:
+                if attempt < 3:
+                    logger.warning(f"DB connect attempt {attempt} failed ({e}), retrying in 5s…")
+                    time.sleep(5)
+                else:
+                    logger.error(f"DB connect failed after 3 attempts: {e}")
         try:
             _run_migrations(engine)
             logger.info("Database migrations applied")

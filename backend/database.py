@@ -19,6 +19,7 @@ if _resolved_database_url:
         _resolved_database_url,
         pool_pre_ping=True,
         pool_recycle=300,
+        connect_args={"connect_timeout": 30},  # ให้ Neon มีเวลา wake up (cold start)
     )
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 else:
