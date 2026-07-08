@@ -1473,6 +1473,90 @@ def nail_admin_reject_topup(
     return {"ok": True}
 
 
+# ── Admin: customer wallet management ────────────────────────────────────────
+
+@router.get("/admin/customers")
+def nail_admin_list_customers(
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """รายชื่อลูกค้าทั้งหมด (nail admin auth)"""
+    _check_admin(authorization)
+    customers = db.query(Customer).order_by(Customer.id.desc()).limit(300).all()
+    return [
+        {
+            "id": c.id,
+            "email": c.email or "",
+            "display_name": c.display_name or "",
+            "phone_number": c.phone_number or "",
+            "balance": float(c.balance or 0),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in customers
+    ]
+
+
+@router.post("/admin/customers/{customer_id}/credit")
+def nail_admin_add_credit(
+    customer_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """เพิ่ม/ลด เครดิตให้ลูกค้าใดก็ได้ (nail admin auth)"""
+    _check_admin(authorization)
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="ไม่พบลูกค้า")
+    try:
+        amount = Decimal(str(body.get("amount", 0)))
+    except Exception:
+        raise HTTPException(status_code=400, detail="จำนวนเงินไม่ถูกต้อง")
+    if amount == 0:
+        raise HTTPException(status_code=400, detail="กรุณาระบุจำนวน")
+    reason = body.get("reason", "แอดมินเพิ่มเครดิต")
+    customer.balance = (customer.balance or Decimal("0")) + amount
+    db.add(CreditTransaction(
+        customer_id=customer.id,
+        txn_type="adjustment",
+        amount=amount,
+        description=f"[แอดมิน] {reason}",
+        ref_id=None,
+    ))
+    db.commit()
+    return {"ok": True, "balance": float(customer.balance)}
+
+
+@router.get("/admin/transactions")
+def nail_admin_list_transactions(
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+    limit: int = 100,
+):
+    """ประวัติธุรกรรมเครดิตทั้งหมด (nail admin auth)"""
+    _check_admin(authorization)
+    txns = (
+        db.query(CreditTransaction)
+        .order_by(CreditTransaction.id.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    result = []
+    for t in txns:
+        cust = db.query(Customer).filter(Customer.id == t.customer_id).first()
+        result.append({
+            "id": t.id,
+            "customer_id": t.customer_id,
+            "customer_email": cust.email if cust else None,
+            "customer_name": (cust.display_name or cust.email or "?") if cust else "?",
+            "txn_type": t.txn_type,
+            "amount": float(t.amount),
+            "description": t.description or "",
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        })
+    return result
+
+
 # ── Super-Admin endpoints (NAIL_SUPER_ADMIN_KEY required) ────────────────────
 
 @router.get("/superadmin/status")

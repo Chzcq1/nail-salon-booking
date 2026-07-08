@@ -1004,7 +1004,39 @@ const RENEWAL_STATUS_LABEL: Record<string, { label: string; color: string }> = {
 };
 
 // ─── Accounts / Wallet Management ────────────────────────────────────────────
+type AccountsView = "topups" | "credit" | "transactions";
+
 function AccountsTab({ token }: { token: string }) {
+  const [view, setView] = useState<AccountsView>("topups");
+  return (
+    <div style={{ padding: 16 }}>
+      {/* Sub-navigation */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2 }}>
+        {([
+          { key: "topups"       as const, label: "📋 คำขอเติมเงิน" },
+          { key: "credit"       as const, label: "💰 เพิ่มเครดิต" },
+          { key: "transactions" as const, label: "📊 ธุรกรรม" },
+        ]).map(({ key, label }) => (
+          <button key={key} onClick={() => setView(key)}
+            style={{
+              padding: "8px 14px", border: `1.5px solid ${view === key ? A.primary : A.border}`,
+              borderRadius: 100, background: view === key ? A.pale : "#fff",
+              color: view === key ? A.primary : A.sub, fontFamily: "inherit",
+              fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "topups"       && <TopupRequestsView token={token} />}
+      {view === "credit"       && <AddCreditView token={token} />}
+      {view === "transactions" && <TransactionsView token={token} />}
+    </div>
+  );
+}
+
+// ─── TopupRequestsView ────────────────────────────────────────────────────────
+function TopupRequestsView({ token }: { token: string }) {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"pending" | "all">("pending");
   const [approveAmounts, setApproveAmounts] = useState<Record<number, string>>({});
@@ -1014,30 +1046,28 @@ function AccountsTab({ token }: { token: string }) {
     queryFn: () => fetch(`/api/nail/admin/topup-requests?status=${statusFilter}`, { headers: authH(token) }).then(r => r.json()),
     staleTime: 15000,
   });
-
   const approveMutation = useMutation({
     mutationFn: ({ id, amount }: { id: number; amount: number }) =>
       fetch(`/api/nail/admin/topup-requests/${id}/approve`, { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify({ amount }) }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
   });
-
   const rejectMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/topup-requests/${id}/reject`, { method: "POST", headers: authH(token) }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
   });
 
-  const topupTypeLabel: Record<string, string> = { slip: "🏦 สลิปโอนเงิน", truemoney: "🧧 TrueMoney" };
-  const statusLabel: Record<string, { label: string; color: string }> = {
+  const ttLabel: Record<string, string> = { slip: "🏦 สลิปโอนเงิน", truemoney: "🧧 TrueMoney" };
+  const slabel: Record<string, { label: string; color: string }> = {
     pending:  { label: "รอตรวจสอบ", color: A.warning },
     approved: { label: "อนุมัติแล้ว", color: A.success },
     rejected: { label: "ปฏิเสธ",    color: A.error },
   };
 
   return (
-    <div style={{ padding: 16 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: A.text, margin: 0 }}>จัดการบัญชีลูกค้า</h2>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, margin: 0 }}>คำขอเติมเงิน</h3>
         <div style={{ display: "flex", gap: 6 }}>
           {(["pending", "all"] as const).map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
@@ -1050,7 +1080,6 @@ function AccountsTab({ token }: { token: string }) {
           </button>
         </div>
       </div>
-
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} className="animate-spin" color={A.primary} /></div>
       ) : topups.length === 0 ? (
@@ -1062,14 +1091,13 @@ function AccountsTab({ token }: { token: string }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {topups.map((t: any) => {
             const isPending = t.status === "pending";
-            const sl = statusLabel[t.status] || { label: t.status, color: A.sub };
+            const sl = slabel[t.status] || { label: t.status, color: A.sub };
             const defaultAmt = t.amount ? String(t.amount) : "";
             const inputAmt = approveAmounts[t.id] ?? defaultAmt;
             return (
               <div key={t.id} style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* ชื่อ + เบอร์ — ข้อมูลหลักที่ใช้จับคู่สลิป */}
                     {(t.customer_name || t.customer_phone) ? (
                       <div style={{ fontWeight: 700, color: A.text, fontSize: 15, marginBottom: 2 }}>
                         {t.customer_name || "ไม่ระบุชื่อ"}
@@ -1082,7 +1110,7 @@ function AccountsTab({ token }: { token: string }) {
                     )}
                     <div style={{ fontSize: 12, color: A.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.customer_email}</div>
                     <div style={{ fontSize: 12, color: A.sub }}>
-                      {topupTypeLabel[t.topup_type] || t.topup_type}
+                      {ttLabel[t.topup_type] || t.topup_type}
                       {t.amount ? ` · ฿${Number(t.amount).toLocaleString()}` : ""}
                       <span style={{ color: A.muted, marginLeft: 6 }}>
                         {t.created_at ? new Date(t.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : ""}
@@ -1091,8 +1119,6 @@ function AccountsTab({ token }: { token: string }) {
                   </div>
                   <span style={{ background: `${sl.color}18`, color: sl.color, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, flexShrink: 0, marginLeft: 8 }}>{sl.label}</span>
                 </div>
-
-                {/* สลิปหรือ voucher */}
                 {t.payment_proof && !t.payment_proof.startsWith("voucher:") && (
                   <img src={t.payment_proof} alt="slip" style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 10, border: `1px solid ${A.border}`, marginBottom: 10 }} />
                 )}
@@ -1101,30 +1127,226 @@ function AccountsTab({ token }: { token: string }) {
                     🧧 Voucher: {t.voucher_code || t.payment_proof?.replace("voucher:", "")}
                   </div>
                 )}
-
                 {isPending && (
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="number" min="1" step="0.01"
-                      value={inputAmt}
+                    <input type="number" min="1" step="0.01" value={inputAmt}
                       onChange={e => setApproveAmounts(prev => ({ ...prev, [t.id]: e.target.value }))}
                       placeholder="จำนวนเครดิต ฿"
-                      style={{ flex: 1, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", color: A.text }}
-                    />
-                    <button
-                      onClick={() => approveMutation.mutate({ id: t.id, amount: parseFloat(inputAmt || "0") })}
+                      style={{ flex: 1, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", color: A.text }} />
+                    <button onClick={() => approveMutation.mutate({ id: t.id, amount: parseFloat(inputAmt || "0") })}
                       disabled={!inputAmt || parseFloat(inputAmt) <= 0 || approveMutation.isPending}
                       style={{ background: A.success, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 5, opacity: !inputAmt || parseFloat(inputAmt) <= 0 ? 0.5 : 1 }}>
                       <CheckCircle size={14} /> อนุมัติ
                     </button>
-                    <button
-                      onClick={() => rejectMutation.mutate(t.id)}
-                      disabled={rejectMutation.isPending}
+                    <button onClick={() => rejectMutation.mutate(t.id)} disabled={rejectMutation.isPending}
                       style={{ background: A.errorBg, color: A.error, border: `1.5px solid ${A.error}44`, borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                       <XCircle size={14} /> ปฏิเสธ
                     </button>
                   </div>
                 )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AddCreditView ────────────────────────────────────────────────────────────
+function AddCreditView({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<any>(null);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const { data: customers = [], isLoading } = useQuery<any[]>({
+    queryKey: ["nail-admin-customers"],
+    queryFn: () => fetch("/api/nail/admin/customers", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      fetch(`/api/nail/admin/customers/${selected.id}/credit`, {
+        method: "POST",
+        headers: { ...authH(token), "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: parseFloat(amount), reason: reason || "แอดมินเพิ่มเครดิต" }),
+      }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; }),
+    onSuccess: (data) => {
+      setResult({ ok: true, message: `สำเร็จ! ยอดเครดิตใหม่: ฿${Number(data.balance).toFixed(2)}` });
+      setAmount(""); setReason("");
+      setSelected((s: any) => s ? { ...s, balance: data.balance } : null);
+      qc.invalidateQueries({ queryKey: ["nail-admin-customers"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-transactions"] });
+    },
+    onError: (e: any) => setResult({ ok: false, message: e.message || "เกิดข้อผิดพลาด" }),
+  });
+
+  const filtered = customers.filter(c => {
+    const q = search.toLowerCase();
+    return !q
+      || (c.email || "").toLowerCase().includes(q)
+      || (c.display_name || "").toLowerCase().includes(q)
+      || (c.phone_number || "").includes(q);
+  });
+
+  return (
+    <div>
+      <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, margin: "0 0 14px" }}>เพิ่ม / หักเครดิตให้ลูกค้า</h3>
+
+      {/* Customer search */}
+      <input value={search} onChange={e => { setSearch(e.target.value); setSelected(null); setResult(null); }}
+        placeholder="🔍 ค้นหาชื่อ, อีเมล, หรือเบอร์โทร..."
+        style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: A.text, boxSizing: "border-box", marginBottom: 8 }} />
+
+      {/* Customer list (when not selected) */}
+      {!selected && (
+        <div style={{ maxHeight: 260, overflowY: "auto", border: `1px solid ${A.border}`, borderRadius: 12, marginBottom: 14 }}>
+          {isLoading ? (
+            <div style={{ padding: 24, textAlign: "center" }}><Loader2 size={20} className="animate-spin" color={A.primary} /></div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: 20, textAlign: "center", color: A.muted, fontSize: 13 }}>ไม่พบลูกค้า</div>
+          ) : filtered.slice(0, 40).map((c: any) => (
+            <button key={c.id} onClick={() => { setSelected(c); setSearch(""); setResult(null); }}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "none", border: "none", borderBottom: `1px solid ${A.border}`, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 600, color: A.text, fontSize: 14 }}>{c.display_name || "ไม่ระบุชื่อ"}</div>
+                <div style={{ fontSize: 12, color: A.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.email}</div>
+                {c.phone_number && <div style={{ fontSize: 12, color: A.muted }}>{c.phone_number}</div>}
+              </div>
+              <span style={{ fontWeight: 700, color: A.primary, fontSize: 14, flexShrink: 0, marginLeft: 8 }}>฿{Number(c.balance).toFixed(2)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Selected customer + form */}
+      {selected && (
+        <div>
+          <div style={{ background: A.pale, border: `1.5px solid ${A.primary}44`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 700, color: A.text, fontSize: 15 }}>{selected.display_name || "ไม่ระบุชื่อ"}</div>
+                <div style={{ fontSize: 12, color: A.muted }}>{selected.email}</div>
+                {selected.phone_number && <div style={{ fontSize: 12, color: A.muted }}>{selected.phone_number}</div>}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: A.sub }}>เครดิตปัจจุบัน</div>
+                <div style={{ fontWeight: 800, color: A.primary, fontSize: 22 }}>฿{Number(selected.balance).toFixed(2)}</div>
+              </div>
+            </div>
+            <button onClick={() => { setSelected(null); setResult(null); }}
+              style={{ marginTop: 8, background: "none", border: "none", color: A.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline", padding: 0 }}>
+              เปลี่ยนลูกค้า
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <input type="number" step="1" value={amount}
+              onChange={e => { setAmount(e.target.value); setResult(null); }}
+              placeholder="จำนวน (เช่น 200 = เพิ่ม, -50 = หักออก)"
+              style={{ border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: A.text }} />
+            <input type="text" value={reason}
+              onChange={e => setReason(e.target.value)}
+              placeholder="เหตุผล (ไม่บังคับ)"
+              style={{ border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none", color: A.text }} />
+
+            {result && (
+              <div style={{ background: result.ok ? A.successBg : A.errorBg, border: `1px solid ${result.ok ? A.success : A.error}44`, borderRadius: 10, padding: "10px 14px", fontSize: 13, color: result.ok ? A.success : A.error, display: "flex", alignItems: "center", gap: 8 }}>
+                {result.ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />} {result.message}
+              </div>
+            )}
+
+            <button
+              onClick={() => addMutation.mutate()}
+              disabled={!amount || isNaN(parseFloat(amount)) || parseFloat(amount) === 0 || addMutation.isPending}
+              style={{
+                background: amount && !isNaN(parseFloat(amount)) && parseFloat(amount) !== 0
+                  ? (parseFloat(amount) < 0 ? A.error : `linear-gradient(135deg, ${A.primary}, ${A.deep})`)
+                  : A.gray,
+                color: amount && !isNaN(parseFloat(amount)) && parseFloat(amount) !== 0 ? "#fff" : A.muted,
+                border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700,
+                cursor: amount && !isNaN(parseFloat(amount)) && parseFloat(amount) !== 0 ? "pointer" : "not-allowed",
+                fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+              {addMutation.isPending
+                ? <><Loader2 size={16} className="animate-spin" /> กำลังดำเนินการ...</>
+                : !isNaN(parseFloat(amount || "x")) && parseFloat(amount || "0") < 0
+                  ? `หักเครดิต ฿${Math.abs(parseFloat(amount || "0")).toFixed(2)}`
+                  : `เพิ่มเครดิต ฿${isNaN(parseFloat(amount || "0")) ? "0.00" : parseFloat(amount || "0").toFixed(2)}`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TransactionsView ─────────────────────────────────────────────────────────
+function TransactionsView({ token }: { token: string }) {
+  const { data: txns = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["nail-admin-transactions"],
+    queryFn: () => fetch("/api/nail/admin/transactions?limit=100", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 15000,
+  });
+
+  const typeStyle: Record<string, { label: string; color: string; bg: string }> = {
+    topup:        { label: "เติมเงิน",   color: A.success, bg: A.successBg },
+    purchase:     { label: "ซื้อสินค้า", color: A.error,   bg: A.errorBg  },
+    adjustment:   { label: "ปรับยอด",    color: A.info,    bg: A.infoBg   },
+    nail_booking: { label: "มัดจำจอง",   color: A.warning, bg: A.warningBg },
+  };
+
+  const totalTopups   = txns.filter(t => t.txn_type === "topup").reduce((s, t) => s + t.amount, 0);
+  const totalDeposits = txns.filter(t => t.txn_type === "nail_booking" && t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, margin: 0 }}>ธุรกรรม (100 รายการล่าสุด)</h3>
+        <button onClick={() => refetch()} style={{ background: A.pale, border: "none", borderRadius: 10, padding: "7px 10px", cursor: "pointer", color: A.primary, display: "flex", alignItems: "center", gap: 4 }}>
+          <RefreshCw size={13} />
+        </button>
+      </div>
+
+      {/* Summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+        <div style={{ background: A.successBg, border: `1px solid ${A.success}33`, borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: A.success, fontWeight: 600, marginBottom: 4 }}>ยอดเติมเงินรวม</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: A.success }}>฿{totalTopups.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
+        </div>
+        <div style={{ background: A.warningBg, border: `1px solid ${A.warning}33`, borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: A.warning, fontWeight: 600, marginBottom: 4 }}>มัดจำที่หักแล้ว</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: A.warning }}>฿{totalDeposits.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} className="animate-spin" color={A.primary} /></div>
+      ) : txns.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40, color: A.muted }}>ไม่มีธุรกรรม</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {txns.map((t: any) => {
+            const ts = typeStyle[t.txn_type] || { label: t.txn_type, color: A.sub, bg: A.gray };
+            return (
+              <div key={t.id} style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, fontSize: 14, color: A.text }}>{t.customer_name || t.customer_email || "?"}</span>
+                    <span style={{ background: ts.bg, color: ts.color, borderRadius: 100, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>{ts.label}</span>
+                  </div>
+                  {t.description && <div style={{ fontSize: 12, color: A.muted, marginTop: 2 }}>{t.description}</div>}
+                  <div style={{ fontSize: 11, color: A.muted, marginTop: 1 }}>
+                    {t.created_at ? new Date(t.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : ""}
+                  </div>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 16, color: t.amount >= 0 ? A.success : A.error, flexShrink: 0 }}>
+                  {t.amount >= 0 ? "+" : ""}฿{Math.abs(t.amount).toFixed(2)}
+                </span>
               </div>
             );
           })}

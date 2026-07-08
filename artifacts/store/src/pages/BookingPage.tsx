@@ -378,8 +378,16 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         >
           <Calendar size={18} /> จองคิวเลย <ArrowRight size={16} />
         </button>
+
+        {/* Deposit amount hint */}
+        {settings?.deposit_amount && (
+          <p style={{ color: "rgba(255,255,255,0.9)", fontSize: 13, marginTop: 10, marginBottom: 0 }}>
+            💳 ค่ามัดจำ <strong>฿{Number(settings.deposit_amount).toLocaleString()}</strong> (โอนหรือใช้เครดิตกระเป๋าเงิน)
+          </p>
+        )}
+
         <button onClick={() => setShowTutorial(true)}
-          style={{ marginTop: 14, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+          style={{ marginTop: 12, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
           <HelpCircle size={14} /> วิธีจอง / คำแนะนำ
         </button>
 
@@ -593,6 +601,21 @@ function InfoScreen({ services, service, name, phone, line, note, onBack, onNext
   const [p, setP] = useState(phone);
   const [ln, setLn] = useState(line || "");
   const [nt, setNt] = useState(note);
+  const isLoggedIn = !!getWalletToken();
+
+  // Pre-fill from wallet profile if logged in and fields are still empty
+  useEffect(() => {
+    const token = getWalletToken();
+    if (!token) return;
+    fetch("/api/wallet/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) return;
+        if (d.display_name) setN((prev: string) => prev || d.display_name);
+        if (d.phone_number)  setP((prev: string) => prev || d.phone_number);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line
 
   const valid = n.trim() && p.trim().replace(/\D/g, "").length >= 9;
 
@@ -601,7 +624,24 @@ function InfoScreen({ services, service, name, phone, line, note, onBack, onNext
       <BackBtn onClick={onBack} />
       <div style={{ padding: "0 20px" }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>ข้อมูลการจอง</h2>
-        <p style={{ color: P.sub, marginBottom: 20, fontSize: 14 }}>กรอกข้อมูลเพื่อยืนยันการจอง</p>
+        <p style={{ color: P.sub, marginBottom: 16, fontSize: 14 }}>กรอกข้อมูลเพื่อยืนยันการจอง</p>
+
+        {/* Wallet prompt for non-logged-in users */}
+        {!isLoggedIn && (
+          <div style={{ background: P.pinkPale, border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: 14, marginBottom: 20, display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <Wallet size={18} color={P.pink} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 700, color: P.text, margin: "0 0 3px" }}>💳 มีกระเป๋าเงินแล้ว?</p>
+              <p style={{ fontSize: 12, color: P.sub, margin: "0 0 6px" }}>เข้าสู่ระบบก่อนเพื่อจ่ายมัดจำจากเครดิตทันที และระบบจะกรอกชื่อ-เบอร์ให้อัตโนมัติ</p>
+              <a href="/wallet" target="_blank" rel="noreferrer" style={{ fontSize: 12, color: P.pink, fontWeight: 700, textDecoration: "none" }}>สร้างบัญชี / เข้าสู่ระบบ →</a>
+            </div>
+          </div>
+        )}
+        {isLoggedIn && (
+          <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 14, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#15803D", display: "flex", alignItems: "center", gap: 8 }}>
+            <Wallet size={15} /> กรอกข้อมูลจากกระเป๋าเงินอัตโนมัติแล้ว — แก้ไขได้ด้านล่าง
+          </div>
+        )}
 
         {/* Service selector — moved here from separate step */}
         {services?.length > 0 && (
