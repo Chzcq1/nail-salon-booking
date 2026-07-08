@@ -2281,12 +2281,6 @@ function SettingsTab({ token }: { token: string }) {
       {F("max_advance_days", "จองล่วงหน้าได้สูงสุด (วัน)", "number", "14")}
       {F("slot_duration_minutes", "ระยะเวลาต่อ slot เริ่มต้น (นาที)", "number", "90")}
 
-      <Section title="ระบบเช่า / หมดอายุ" />
-      <div style={{ background: A.warningBg, border: `1px solid ${A.warning}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: A.warning }}>
-        ⚠️ ถ้าตั้งวันหมดอายุ ระบบจะล็อกหน้าเว็บลูกค้าเมื่อถึงเวลา
-      </div>
-      {F("expired_at", "วันหมดอายุ (ปล่อยว่าง = ไม่มีกำหนด)", "datetime-local")}
-
       <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
         style={{ width: "100%", marginTop: 8, background: saved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "15px", fontSize: 16, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}>
         {saveMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : saved ? <><CheckCircle size={18} /> บันทึกแล้ว!</> : <><Save size={18} /> บันทึกการตั้งค่า</>}

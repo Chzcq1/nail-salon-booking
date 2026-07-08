@@ -1429,7 +1429,6 @@ class ShopSettingsBody(BaseModel):
     bank_qr_url: Optional[str] = None
     max_advance_days: Optional[int] = None
     slot_duration_minutes: Optional[int] = None
-    expired_at: Optional[str] = None   # ISO datetime string
     is_active: Optional[bool] = None
     closed_dates: Optional[str] = None  # JSON array of "YYYY-MM-DD"
 
@@ -1453,7 +1452,6 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "bank_qr_url": shop.bank_qr_url,
         "max_advance_days": shop.max_advance_days or 14,
         "slot_duration_minutes": shop.slot_duration_minutes or 60,
-        "expired_at": shop.expired_at.isoformat() if shop.expired_at else None,
         "is_active": shop.is_active,
         "closed_dates": shop.closed_dates or "[]",
     }
