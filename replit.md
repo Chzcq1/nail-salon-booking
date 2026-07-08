@@ -55,6 +55,18 @@ pnpm --filter @workspace/store run dev &
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+### First-time setup (after a fresh clone / import)
+
+```bash
+# 1. Install Python dependencies
+pip install -r requirements.txt
+
+# 2. Install JS/TS dependencies (all workspaces)
+pnpm install
+```
+
+Both workflows (`Backend API` and `artifacts/store: web`) can then be started normally.
+
 **Dev DB note**: In this Replit workspace, `DATABASE_URL` points at Replit's own local dev Postgres (auto-provisioned, empty), *not* the production Neon.tech database. This keeps dev/preview isolated from real customer data. `ADMIN_PASSCODE`, `GAFIWSHOP_KEY_API`, `SMTP_*`, `BOT_TOKEN` etc. are unset here, so admin login (`/nail-admin`, `/admin`), the Gafiw product catalog, and OTP email/Telegram flows won't work until those are provided as Replit secrets — ask before adding them, don't invent values.
 
 The `artifacts/api-server` and `artifacts/mockup-sandbox` folders/workflows are unrelated platform scaffolding (not part of this app's real stack) and are left stopped.
