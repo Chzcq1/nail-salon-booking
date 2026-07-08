@@ -704,6 +704,258 @@ function ServicesTab({ token }: { token: string }) {
   );
 }
 
+// ─── Staff (ช่าง) ───────────────────────────────────────────────────────────
+function StaffTab({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const [show, setShow] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("#FF6B9D");
+
+  const { data: staff = [], isLoading, isError, refetch } = useQuery<any[]>({
+    queryKey: ["nail-admin-staff"],
+    queryFn: () => fetch("/api/nail/admin/staff", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
+  });
+
+  const openAdd = () => { setName(""); setColor("#FF6B9D"); setShow(true); };
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/nail/admin/staff", { method: "POST", headers: authH(token), body: JSON.stringify({ name, color }) }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }); setShow(false); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/nail/admin/staff/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }),
+  });
+
+  if (isError) {
+    return (
+      <div style={{ padding: 40, textAlign: "center" }}>
+        <AlertCircle size={32} color={A.error} style={{ margin: "0 auto 10px" }} />
+        <p style={{ color: A.sub, marginBottom: 12 }}>โหลดข้อมูลช่างไม่สำเร็จ กรุณาลองใหม่</p>
+        <button onClick={() => refetch()} style={{ background: A.pale, color: A.primary, border: "none", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+          <RefreshCw size={14} style={{ display: "inline", marginRight: 6 }} />ลองใหม่
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      <button onClick={openAdd}
+        style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontSize: 15, fontWeight: 700, cursor: "pointer", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}>
+        <Plus size={18} /> เพิ่มช่างใหม่
+      </button>
+
+      {isLoading ? (
+        <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} className="animate-spin" color={A.primary} /></div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {staff.filter((s: any) => s.is_active !== false).map((s: any) => (
+            <div key={s.id} style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: s.color || A.primary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#fff", fontWeight: 700 }}>
+                {(s.name || "?").charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0, fontWeight: 600, color: A.text, fontSize: 15 }}>{s.name}</div>
+              <button onClick={() => { if (confirm(`ลบช่าง "${s.name}"?`)) deleteMutation.mutate(s.id); }} style={{ background: A.errorBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", flexShrink: 0 }}>
+                <Trash2 size={14} color={A.error} />
+              </button>
+            </div>
+          ))}
+          {staff.filter((s: any) => s.is_active !== false).length === 0 && (
+            <div style={{ textAlign: "center", padding: 40, color: A.muted, fontSize: 14 }}>
+              <Users size={32} style={{ margin: "0 auto 8px" }} /><p>ยังไม่มีช่าง</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add Modal */}
+      {show && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", zIndex: 9999 }}>
+          <motion.div initial={{ y: 100 }} animate={{ y: 0 }} style={{ background: A.card, borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480, margin: "0 auto", fontFamily: "inherit" }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 16, color: A.text }}>เพิ่มช่างใหม่</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>ชื่อช่าง *</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="เช่น น้องมิ้นท์"
+                style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg, color: A.text }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>สีประจำตัว</label>
+              <input type="color" value={color} onChange={e => setColor(e.target.value)}
+                style={{ width: "100%", height: 42, border: `1.5px solid ${A.border}`, borderRadius: 10, cursor: "pointer", padding: 4, background: A.bg }} />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={() => setShow(false)} style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>ยกเลิก</button>
+              <button onClick={() => saveMutation.mutate()} disabled={!name || saveMutation.isPending}
+                style={{ flex: 1, background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", opacity: !name ? 0.5 : 1 }}>
+                {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <><Save size={14} style={{ display: "inline", marginRight: 6 }} />บันทึก</>}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Renewal (ต่ออายุ) ──────────────────────────────────────────────────────
+const RENEWAL_PLANS = [
+  { months: 1, price: 500 },
+  { months: 3, price: 1300 },
+  { months: 6, price: 2400 },
+  { months: 12, price: 4500 },
+];
+
+const RENEWAL_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  pending: { label: "รอตรวจสอบ", color: "#B5850A" },
+  approved: { label: "อนุมัติแล้ว", color: "#1E8E5A" },
+  rejected: { label: "ถูกปฏิเสธ", color: "#C0392B" },
+};
+
+function RenewalTab({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const [months, setMonths] = useState(1);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [fileError, setFileError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const { data: status, isLoading, isError, refetch } = useQuery<any>({
+    queryKey: ["nail-admin-rental-status"],
+    queryFn: () => fetch("/api/nail/admin/rental-status", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/nail/admin/renewal-request", { method: "POST", headers: authH(token), body: JSON.stringify({ duration_months: months, slip_image: preview }) }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] }); setPreview(null); },
+  });
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileError("");
+    if (file.size > 1.5 * 1024 * 1024) {
+      setFileError("รูปสลิปต้องไม่เกิน 1.5 MB");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ev => setPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  if (isError) {
+    return (
+      <div style={{ padding: 40, textAlign: "center" }}>
+        <AlertCircle size={32} color={A.error} style={{ margin: "0 auto 10px" }} />
+        <p style={{ color: A.sub, marginBottom: 12 }}>โหลดสถานะการเช่าไม่สำเร็จ กรุณาลองใหม่</p>
+        <button onClick={() => refetch()} style={{ background: A.pale, color: A.primary, border: "none", borderRadius: 10, padding: "8px 16px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+          <RefreshCw size={14} style={{ display: "inline", marginRight: 6 }} />ลองใหม่
+        </button>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} className="animate-spin" color={A.primary} /></div>;
+  }
+
+  const lastReq = status?.last_request;
+
+  return (
+    <div style={{ padding: 16 }}>
+      {/* Status Card */}
+      <div style={{
+        background: status?.is_expired ? A.errorBg : `linear-gradient(135deg, ${A.primary}, ${A.deep})`,
+        borderRadius: 16, padding: 20, marginBottom: 16, color: status?.is_expired ? A.error : "#fff",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <Crown size={18} />
+          <span style={{ fontWeight: 700, fontSize: 15 }}>สถานะการใช้งานระบบ</span>
+        </div>
+        {status?.is_expired ? (
+          <p style={{ fontWeight: 700, fontSize: 16 }}>หมดอายุการใช้งานแล้ว</p>
+        ) : status?.expired_at ? (
+          <p style={{ fontSize: 14, opacity: 0.95 }}>
+            เหลือ <b>{status.days_left}</b> วัน (หมดอายุ {fmtDate(status.expired_at.slice(0, 10))})
+          </p>
+        ) : (
+          <p style={{ fontSize: 14, opacity: 0.95 }}>ยังไม่มีกำหนดหมดอายุ</p>
+        )}
+      </div>
+
+      {/* Last request status */}
+      {lastReq && (
+        <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 8 }}>คำขอต่ออายุล่าสุด</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: A.sub }}>
+            <span>{lastReq.duration_months} เดือน · ฿{lastReq.amount.toLocaleString()}</span>
+            <span style={{
+              color: RENEWAL_STATUS_LABEL[lastReq.status]?.color || A.sub,
+              fontWeight: 700, background: `${RENEWAL_STATUS_LABEL[lastReq.status]?.color || A.sub}18`,
+              borderRadius: 100, padding: "2px 10px", fontSize: 12,
+            }}>
+              {RENEWAL_STATUS_LABEL[lastReq.status]?.label || lastReq.status}
+            </span>
+          </div>
+          {lastReq.admin_note && <p style={{ fontSize: 12, color: A.muted, marginTop: 6 }}>หมายเหตุ: {lastReq.admin_note}</p>}
+        </div>
+      )}
+
+      {/* Renewal form */}
+      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 12 }}>ต่ออายุการใช้งาน</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+          {RENEWAL_PLANS.map(p => (
+            <button key={p.months} onClick={() => setMonths(p.months)}
+              style={{
+                border: `1.5px solid ${months === p.months ? A.primary : A.border}`,
+                background: months === p.months ? A.pale : A.bg,
+                borderRadius: 10, padding: "10px 8px", cursor: "pointer", fontFamily: "inherit", textAlign: "center",
+              }}>
+              <div style={{ fontWeight: 700, color: A.text, fontSize: 14 }}>{p.months} เดือน</div>
+              <div style={{ fontSize: 12, color: A.primary, fontWeight: 600 }}>฿{p.price.toLocaleString()}</div>
+            </button>
+          ))}
+        </div>
+
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+        {fileError && (
+          <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13 }}>
+            {fileError}
+          </div>
+        )}
+        {preview ? (
+          <div style={{ marginBottom: 14 }}>
+            <img src={preview} alt="" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 12, border: `2px solid ${A.primary}` }} />
+            <button onClick={() => setPreview(null)} style={{ marginTop: 8, background: A.gray, border: "none", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>เปลี่ยนรูปสลิป</button>
+          </div>
+        ) : (
+          <button onClick={() => fileRef.current?.click()}
+            style={{ width: "100%", border: `2px dashed ${A.border}`, borderRadius: 14, padding: "18px", background: A.pale, cursor: "pointer", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: A.primary, fontWeight: 600, fontFamily: "inherit", fontSize: 14 }}>
+            <Upload size={18} /> อัปโหลดสลิปโอนเงิน
+          </button>
+        )}
+
+        <button onClick={() => submitMutation.mutate()} disabled={!preview || submitMutation.isPending}
+          style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !preview ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          {submitMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Save size={15} /> ส่งคำขอต่ออายุ</>}
+        </button>
+        {submitMutation.isSuccess && (
+          <p style={{ textAlign: "center", color: A.success, fontSize: 13, marginTop: 10 }}>ส่งคำขอสำเร็จ รอการตรวจสอบ</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Schedule (Slots + Closed Days) ──────────────────────────────────────────
 function ScheduleTab({ token }: { token: string }) {
   const qc = useQueryClient();
