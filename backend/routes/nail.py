@@ -1549,12 +1549,12 @@ class RenewalRequestBody(BaseModel):
 
 
 @router.post("/admin/renewal-request")
-def admin_submit_renewal(
+async def admin_submit_renewal(
     body: RenewalRequestBody,
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงินหรือซอง TrueMoney — เจ้าของร้านเลือกช่องทางชำระเงินเอง"""
+    """ส่งคำขอต่ออายุ — angpao ใช้ TrueMoney auto-redeem อัตโนมัติ, สลิปรอ super-admin ตรวจสอบ"""
     _check_admin(authorization)
     if body.payment_channel not in ("bank_slip", "angpao"):
         raise HTTPException(status_code=400, detail="ช่องทางชำระเงินไม่ถูกต้อง")
@@ -1562,22 +1562,103 @@ def admin_submit_renewal(
         raise HTTPException(status_code=400, detail="กรุณาแนบสลิปโอนเงิน")
     if body.payment_channel == "angpao" and not body.voucher_code:
         raise HTTPException(status_code=400, detail="กรุณาระบุลิงก์/รหัสซองอั่งเปา")
+
     shop = _get_shop(db)
-    amount = _effective_renewal_plans(shop).get(body.duration_months)
-    if not amount:
+    plan_price = _effective_renewal_plans(shop).get(body.duration_months)
+    if not plan_price:
         raise HTTPException(status_code=400, detail="ระยะเวลาไม่ถูกต้อง (เลือก 1, 3, 6 หรือ 12 เดือน)")
-    # เก็บ voucher ใน slip_image field โดยใช้ prefix "voucher:" เพื่อให้ super-admin แยกแยะได้ (backward compat)
-    image_or_voucher = body.slip_image or f"voucher:{body.voucher_code}"
+
+    # ── แยก & ตรวจสอบรูปแบบ voucher ก่อนสร้าง record ──────────────────────
+    if body.payment_channel == "angpao":
+        from backend.truemoney import (
+            extract_voucher_code as _extract_vc,
+            redeem_voucher as _redeem,
+        )
+        from backend.models import StoreSettings
+        voucher_code = _extract_vc(body.voucher_code)   # raise 400 ถ้า format ผิด
+        image_or_voucher = f"voucher:{voucher_code}"
+    else:
+        image_or_voucher = body.slip_image
+
     req = NailRenewalRequest(
         duration_months=body.duration_months,
-        amount=amount,
+        amount=plan_price,
         slip_image=image_or_voucher,
         payment_channel=body.payment_channel,
     )
     db.add(req)
     db.commit()
     db.refresh(req)
-    return {"ok": True, "id": req.id}
+
+    # ── TrueMoney Angpao: auto-redeem อัตโนมัติ (เหมือน wallet topup flow) ──
+    if body.payment_channel == "angpao":
+        try:
+            phone_row = db.query(StoreSettings).filter_by(key="truemoney_phone").first()
+            phone = (phone_row.value or "").strip() if phone_row else ""
+            result = await _redeem(voucher_code, phone) if phone else await _redeem(voucher_code)
+
+            logger.info(f"TrueMoney renewal #{req.id}: success={result['success']} amount={result.get('amount')}")
+
+            if result["success"]:
+                voucher_amount = Decimal(str(result["amount"]))
+                if voucher_amount >= Decimal(str(plan_price)):
+                    # ✅ อนุมัติอัตโนมัติ — ขยาย expired_at
+                    now = _now()
+                    base = shop.expired_at if (shop.expired_at and shop.expired_at > now) else now
+                    new_expiry = base + timedelta(days=body.duration_months * 30)
+                    shop.expired_at = new_expiry
+                    req.status = "approved"
+                    req.approved_at = now
+                    req.new_expired_at = new_expiry
+                    req.admin_note = f"อนุมัติอัตโนมัติ ซอง ฿{float(voucher_amount):,.0f}"
+                    db.commit()
+                    return {
+                        "ok": True,
+                        "auto_approved": True,
+                        "id": req.id,
+                        "new_expired_at": new_expiry.isoformat(),
+                        "voucher_amount": float(voucher_amount),
+                        "message": f"ต่ออายุสำเร็จ! แลกซอง ฿{float(voucher_amount):,.0f} อัตโนมัติ",
+                    }
+                else:
+                    # ซองมียอดน้อยกว่าราคา — รอ super-admin
+                    req.admin_note = f"ซองมียอด ฿{float(voucher_amount):,.0f} น้อยกว่าราคา ฿{float(plan_price):,.0f}"
+                    db.commit()
+                    return {
+                        "ok": True,
+                        "auto_approved": False,
+                        "id": req.id,
+                        "message": (
+                            f"ยอดในซอง ฿{float(voucher_amount):,.0f} น้อยกว่าราคา ฿{float(plan_price):,.0f} "
+                            "— บันทึกไว้แล้ว รอแอดมินตรวจสอบ"
+                        ),
+                    }
+            else:
+                # แลกไม่สำเร็จ — รอ super-admin
+                err_msg = result["error_message"] or "แลกซองไม่สำเร็จ"
+                req.admin_note = f"แลกซองไม่สำเร็จ: {err_msg}"
+                db.commit()
+                return {
+                    "ok": True,
+                    "auto_approved": False,
+                    "id": req.id,
+                    "message": f"แลกซองไม่สำเร็จ ({err_msg}) — บันทึกไว้แล้ว รอแอดมินตรวจสอบ",
+                }
+
+        except HTTPException:
+            raise   # format error ส่งกลับทันที
+        except Exception as e:
+            logger.warning(f"TrueMoney renewal auto-redeem error for #{req.id}: {e}")
+            db.commit()
+            return {
+                "ok": True,
+                "auto_approved": False,
+                "id": req.id,
+                "message": "ติดต่อ TrueMoney ไม่ได้ชั่วคราว — บันทึกไว้แล้ว รอแอดมินตรวจสอบ",
+            }
+
+    # bank_slip — รอ super-admin ตรวจสอบสลิป
+    return {"ok": True, "auto_approved": False, "id": req.id, "message": None}
 
 
 # ── Nail Admin: Wallet / Top-up management ───────────────────────────────────

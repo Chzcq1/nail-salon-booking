@@ -1528,18 +1528,44 @@ function RenewalTab({ token }: { token: string }) {
 
   const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
   const [voucher, setVoucher] = useState("");
+  const [submitResult, setSubmitResult] = useState<{
+    auto_approved: boolean;
+    message: string | null;
+    new_expired_at?: string;
+    voucher_amount?: number;
+  } | null>(null);
+
+  const selectedPlan = (plans as any[]).find(p => p.months === months);
 
   const submitMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body: any = {
         duration_months: months,
         payment_channel: payMethod === "slip" ? "bank_slip" : "angpao",
       };
       if (payMethod === "slip") body.slip_image = preview;
       else body.voucher_code = voucher.trim();
-      return fetch("/api/nail/admin/renewal-request", { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      const r = await fetch("/api/nail/admin/renewal-request", {
+        method: "POST",
+        headers: { ...authH(token), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] }); setPreview(null); setVoucher(""); },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] });
+      qc.invalidateQueries({ queryKey: ["shop-gate-settings"] });
+      setPreview(null);
+      setVoucher("");
+      setSubmitResult({
+        auto_approved: data.auto_approved,
+        message: data.message,
+        new_expired_at: data.new_expired_at,
+        voucher_amount: data.voucher_amount,
+      });
+    },
   });
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1673,17 +1699,60 @@ function RenewalTab({ token }: { token: string }) {
           </div>
         )}
 
-        {(() => {
-          const canSubmit = payMethod === "slip" ? !!preview : !!voucher.trim();
-          return (
-            <button onClick={() => submitMutation.mutate()} disabled={!canSubmit || submitMutation.isPending}
-              style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !canSubmit ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              {submitMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Save size={15} /> ส่งคำขอต่ออายุ</>}
+        {submitResult ? (
+          // ── ผลลัพธ์หลังกด submit ────────────────────────────────────────
+          <div style={{
+            background: submitResult.auto_approved ? A.successBg ?? "#f0fdf4" : A.pale,
+            border: `1.5px solid ${submitResult.auto_approved ? A.success : A.border}`,
+            borderRadius: 12, padding: 16, textAlign: "center",
+          }}>
+            {submitResult.auto_approved ? (
+              <>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                <p style={{ fontWeight: 700, color: A.success, fontSize: 15, marginBottom: 4 }}>ต่ออายุสำเร็จ!</p>
+                <p style={{ color: A.sub, fontSize: 13, marginBottom: 4 }}>{submitResult.message}</p>
+                {submitResult.new_expired_at && (
+                  <p style={{ color: A.text, fontSize: 13, fontWeight: 600 }}>
+                    หมดอายุใหม่: {fmtDate(submitResult.new_expired_at.slice(0, 10))}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>📋</div>
+                <p style={{ fontWeight: 700, color: A.text, fontSize: 14, marginBottom: 4 }}>
+                  {payMethod === "slip" ? "ส่งสลิปแล้ว รอแอดมินตรวจสอบ" : "บันทึกแล้ว รอแอดมินตรวจสอบ"}
+                </p>
+                {submitResult.message && (
+                  <p style={{ color: A.sub, fontSize: 13 }}>{submitResult.message}</p>
+                )}
+              </>
+            )}
+            <button onClick={() => setSubmitResult(null)}
+              style={{ marginTop: 12, background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: A.primary, fontWeight: 600 }}>
+              ต่ออายุเพิ่มเติม
             </button>
-          );
-        })()}
-        {submitMutation.isSuccess && (
-          <p style={{ textAlign: "center", color: A.success, fontSize: 13, marginTop: 10 }}>ส่งคำขอสำเร็จ รอการตรวจสอบ</p>
+          </div>
+        ) : (
+          (() => {
+            const canSubmit = payMethod === "slip" ? !!preview : !!voucher.trim();
+            return (
+              <>
+                <button onClick={() => submitMutation.mutate()} disabled={!canSubmit || submitMutation.isPending}
+                  style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !canSubmit ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  {submitMutation.isPending
+                    ? <><Loader2 size={15} className="animate-spin" /> {payMethod === "truemoney" ? "กำลังแลกซอง…" : "กำลังส่ง…"}</>
+                    : <><Save size={15} /> {payMethod === "truemoney" ? "แลกซองและต่ออายุ" : "ส่งคำขอต่ออายุ"}</>
+                  }
+                </button>
+                {submitMutation.isError && (
+                  <p style={{ textAlign: "center", color: A.error, fontSize: 13, marginTop: 8 }}>
+                    {(submitMutation.error as any)?.message ?? "เกิดข้อผิดพลาด กรุณาลองใหม่"}
+                  </p>
+                )}
+              </>
+            );
+          })()
         )}
       </div>
     </div>
