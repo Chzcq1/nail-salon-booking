@@ -3,3 +3,4 @@
 - [Project deployment and Replit role](project-deployment.md) — deployed on Render, secrets already there, DB is Neon.tech; Replit writes code only, never ask for keys unless brand-new service
 - [React Query shared queryKey pitfall](react-query-shared-querykey-pitfall.md) — never put setState in queryFn .then(); use useEffect on returned data to handle cached-data case
 - [Render ephemeral filesystem](render-ephemeral-filesystem.md) — files written to disk are lost on redeploy; store gallery images as base64 in DB (TEXT column), not filesystem URLs
+- [Testing Neon DB from Replit dev](neon-db-local-testing.md) — use a NEON_DATABASE_URL secret (not DATABASE_URL) to probe real prod data when a save/persistence bug is reported
