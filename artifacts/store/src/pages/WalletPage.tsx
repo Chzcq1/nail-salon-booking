@@ -1053,7 +1053,7 @@ export default function WalletPage() {
           </DialogHeader>
           <div className="px-6 pb-6 space-y-4">
             {!walletQuery.data?.display_name && (
-              <p className="text-sm text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3">
+              <p className="text-sm text-muted-foreground bg-amber-50 border border-amber-200 rounded-xl p-3">
                 แอดมินต้องทราบชื่อและเบอร์เพื่อยืนยันการเติมเงินของคุณ กรุณากรอกให้ครบก่อนใช้งาน
               </p>
             )}
