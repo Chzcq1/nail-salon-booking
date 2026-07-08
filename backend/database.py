@@ -1,4 +1,5 @@
 import logging
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from backend.config import get_settings
@@ -8,9 +9,14 @@ settings = get_settings()
 
 Base = declarative_base()
 
-if settings.database_url:
+# NEON_DATABASE_URL is a Replit-dev-only override so we can point this local
+# environment at the same Neon database Render uses, without touching the
+# production DATABASE_URL wiring (which Render sets directly).
+_resolved_database_url = settings.database_url or os.environ.get("NEON_DATABASE_URL")
+
+if _resolved_database_url:
     engine = create_engine(
-        settings.database_url,
+        _resolved_database_url,
         pool_pre_ping=True,
         pool_recycle=300,
     )
