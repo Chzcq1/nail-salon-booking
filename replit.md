@@ -45,14 +45,19 @@ Replit มีหน้าที่:
 
 ## Run & Operate (Replit dev environment)
 
+Two separate Replit workflows serve this app for dev/preview here: `Backend API` (defined in `.replit`, uvicorn on :8000 — this is what the `Project`/Run button starts) and `artifacts/store: web` (a Replit artifact workflow, Vite on its own assigned port, started/managed separately). If the frontend preview isn't loading, check whether `artifacts/store: web` is running and start it via the workflow tools if not. Restart either after dependency or code changes that require a reload.
+
+`artifacts/api-server` and `artifacts/mockup-sandbox` show as failed/stopped — that's expected and non-blocking; see below.
+
 ```bash
-# Start ทั้ง backend + frontend พร้อมกัน
+# Manual equivalent, if ever needed outside the workflows
 pnpm --filter @workspace/store run dev &
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
+**Dev DB note**: In this Replit workspace, `DATABASE_URL` points at Replit's own local dev Postgres (auto-provisioned, empty), *not* the production Neon.tech database. This keeps dev/preview isolated from real customer data. `ADMIN_PASSCODE`, `GAFIWSHOP_KEY_API`, `SMTP_*`, `BOT_TOKEN` etc. are unset here, so admin login (`/nail-admin`, `/admin`), the Gafiw product catalog, and OTP email/Telegram flows won't work until those are provided as Replit secrets — ask before adding them, don't invent values.
+
+The `artifacts/api-server` and `artifacts/mockup-sandbox` folders/workflows are unrelated platform scaffolding (not part of this app's real stack) and are left stopped.
 
 ---
 
