@@ -188,9 +188,14 @@ function AnnouncementFormModal({
               placeholder="พิมพ์เนื้อหาประกาศที่นี่..."
               value={form.content}
               onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-              className={`bg-muted border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none ${previewFontClass}`}
+              className="bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none"
             />
-            <p className="text-xs text-muted-foreground/60">ตัวอย่าง: ข้อความด้านบนแสดงขนาดจริงที่ลูกค้าเห็น</p>
+            {form.content && (
+              <div className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">ตัวอย่างขนาดจริงที่ลูกค้าเห็น</p>
+                <p className={`text-foreground/80 whitespace-pre-wrap leading-relaxed ${previewFontClass}`}>{form.content}</p>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">
