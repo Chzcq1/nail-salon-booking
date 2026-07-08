@@ -368,6 +368,19 @@ app.include_router(upload_router, prefix="/api")
 app.include_router(nail_router)
 app.include_router(webhook_router)
 
+
+# ต้องประกาศ route นี้ "ก่อน" catch-all SPA route (serve_spa) ด้านล่าง
+# ไม่งั้น FastAPI จะจับคู่ catch-all "/{full_path:path}" ก่อนเสมอ (จับคู่ตามลำดับที่ประกาศ)
+# ทำให้ /api/healthz (และ route อื่นที่ประกาศทีหลัง) เข้าไม่ถึงเลยบน production — เจอ 404 Not Found
+@app.get("/api/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "bot_configured": bool(settings.bot_token),
+        "database_configured": bool(settings.database_url),
+    }
+
+
 # On Vercel the filesystem is read-only except /tmp; use /tmp/uploads there.
 _IS_VERCEL = bool(os.environ.get("VERCEL"))
 UPLOADS_DIR = "/tmp/uploads" if _IS_VERCEL else os.path.join(os.path.dirname(__file__), "..", "uploads")
@@ -390,14 +403,5 @@ else:
     @app.get("/", include_in_schema=False)
     async def root():
         return {"message": "Digital Product Store API is running. Add env vars and build the frontend."}
-
-
-@app.get("/api/healthz")
-async def healthz():
-    return {
-        "status": "ok",
-        "bot_configured": bool(settings.bot_token),
-        "database_configured": bool(settings.database_url),
-    }
 
 
