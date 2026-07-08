@@ -19,6 +19,7 @@ from backend.database import get_db
 from backend.models import Customer, TopupRequest, CreditTransaction, StoreSettings, EmailOTPSession
 from backend.routes.admin import get_admin, _get_setting
 from backend.slip_verify import verify_slip
+from backend.truemoney import extract_voucher_code as _extract_voucher_code, redeem_voucher, TRUEMONEY_ERROR_MESSAGES
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,8 +40,6 @@ def _slim_verify_result(result: dict) -> dict:
         "receiver_match": result.get("receiver_match"),
         "error_message": result.get("error_message"),
     }
-
-TRUEMONEY_API = "https://gateway.autozy.app/api/giftvoucher/{code}/{phone}/"
 
 _JWT_SECRET = os.environ.get("SECRET_KEY", "wallet-pin-secret-change-in-production")
 _JWT_ALG = "HS256"
@@ -446,68 +445,52 @@ async def topup_truemoney(
     db.commit()
     db.refresh(topup)
 
-    phone_placeholder = "0800000000"
-    url = TRUEMONEY_API.format(code=voucher_code, phone=phone_placeholder)
-
     if settings.bot_token:
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(url)
-                data = resp.json()
-                topup.truemoney_result = json.dumps(data)
-                if data.get("status") == "SUCCESS":
-                    credit_raw = data.get("data", {}).get("voucher", {}).get("redeemAmount") or data.get("amount")
-                    if credit_raw:
-                        credit = Decimal(str(credit_raw))
-                        topup.amount = credit
-                        topup.status = "approved"
-                        customer.balance = (customer.balance or Decimal("0")) + credit
-                        db.add(CreditTransaction(
-                            customer_id=customer.id,
-                            txn_type="topup",
-                            amount=credit,
-                            description=f"แลกซอง TrueMoney อัตโนมัติ #{topup.id}",
-                            ref_id=topup.id,
-                        ))
-                        db.commit()
-                        return {
-                            "ok": True,
-                            "auto_approved": True,
-                            "amount": float(credit),
-                            "balance": float(customer.balance),
-                            "topup_id": topup.id,
-                        }
-                    else:
-                        msg_map = {
-                            "100": "ซองนี้ถูกใช้งานแล้ว",
-                            "101": "ไม่พบซองของขวัญ",
-                            "102": "ไม่สามารถใช้ซองของตัวเองได้",
-                            "103": "ซองนี้รับไปแล้ว",
-                            "104": "ข้อมูลไม่ถูกต้อง",
-                            "105": "ซองหมดอายุแล้ว",
-                        }
-                        err_code = str(data.get("code", ""))
-                        err_msg = msg_map.get(err_code, data.get("message", "แลกซองไม่สำเร็จ"))
-                        topup.status = "pending"
-                        db.commit()
-                        try:
-                            from backend import bot as bot_module
-                            await bot_module.send_topup_failed(
-                                topup_id=topup.id,
-                                customer_email=customer.email or str(customer.id),
-                                topup_type="truemoney",
-                                reason=err_msg,
-                                voucher_code=voucher_code,
-                            )
-                        except Exception as notify_err:
-                            logger.warning(f"Topup notify error: {notify_err}")
-                        return {
-                            "ok": True,
-                            "auto_approved": False,
-                            "topup_id": topup.id,
-                            "status": "pending",
-                            "message": f"แลกซองอัตโนมัติไม่ได้ ({err_msg}) — ส่งให้แอดมินตรวจสอบแล้ว",
-                        }
+            result = await redeem_voucher(voucher_code)
+            topup.truemoney_result = json.dumps(result["raw"])
+            if result["success"]:
+                credit = Decimal(str(result["amount"]))
+                topup.amount = credit
+                topup.status = "approved"
+                customer.balance = (customer.balance or Decimal("0")) + credit
+                db.add(CreditTransaction(
+                    customer_id=customer.id,
+                    txn_type="topup",
+                    amount=credit,
+                    description=f"แลกซอง TrueMoney อัตโนมัติ #{topup.id}",
+                    ref_id=topup.id,
+                ))
+                db.commit()
+                return {
+                    "ok": True,
+                    "auto_approved": True,
+                    "amount": float(credit),
+                    "balance": float(customer.balance),
+                    "topup_id": topup.id,
+                }
+            else:
+                err_msg = result["error_message"]
+                topup.status = "pending"
+                db.commit()
+                try:
+                    from backend import bot as bot_module
+                    await bot_module.send_topup_failed(
+                        topup_id=topup.id,
+                        customer_email=customer.email or str(customer.id),
+                        topup_type="truemoney",
+                        reason=err_msg,
+                        voucher_code=voucher_code,
+                    )
+                except Exception as notify_err:
+                    logger.warning(f"Topup notify error: {notify_err}")
+                return {
+                    "ok": True,
+                    "auto_approved": False,
+                    "topup_id": topup.id,
+                    "status": "pending",
+                    "message": f"แลกซองอัตโนมัติไม่ได้ ({err_msg}) — ส่งให้แอดมินตรวจสอบแล้ว",
+                }
 
         except HTTPException:
             raise
@@ -651,18 +634,6 @@ def get_my_orders(
         }
         for o in orders
     ]
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _extract_voucher_code(raw: str) -> str:
-    raw = raw.strip()
-    match = re.search(r"[?&]v=([A-Za-z0-9]+)", raw)
-    if match:
-        return match.group(1)
-    if re.match(r"^[A-Za-z0-9]+$", raw):
-        return raw
-    raise HTTPException(status_code=400, detail="รูปแบบลิงก์ซองไม่ถูกต้อง กรุณาวาง link เต็มหรือรหัสซอง")
 
 
 # ── Admin: topup requests ─────────────────────────────────────────────────────

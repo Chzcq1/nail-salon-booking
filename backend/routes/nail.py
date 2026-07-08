@@ -844,7 +844,7 @@ class ServiceBody(BaseModel):
 @router.get("/admin/services")
 def admin_list_services(db: Session = Depends(get_db), authorization: str = Header(None)):
     _check_admin(authorization)
-    items = db.query(NailService).order_by(NailService.sort_order, NailService.id).all()
+    items = db.query(NailService).filter(NailService.is_active == True).order_by(NailService.sort_order, NailService.id).all()
     return [{"id": s.id, "name": s.name, "description": s.description,
              "duration_minutes": s.duration_minutes, "price": float(s.price or 0),
              "color": s.color, "is_active": s.is_active, "sort_order": s.sort_order}

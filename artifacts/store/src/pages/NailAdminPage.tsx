@@ -84,6 +84,41 @@ const statusLabel: Record<string, string> = {
   walkin:          "Walk-in",
 };
 
+// ── Themed confirm dialog (replaces browser's native confirm() to match shop theme) ──
+function ConfirmDialog({ open, title, message, danger, onCancel, onConfirm, loading }: {
+  open: boolean; title?: string; message: string; danger?: boolean;
+  onCancel: () => void; onConfirm: () => void; loading?: boolean;
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(26,26,46,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: 20 }}
+          onClick={onCancel}>
+          <motion.div initial={{ scale: 0.9, y: 10, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+            onClick={e => e.stopPropagation()}
+            style={{ background: A.card, borderRadius: 20, padding: 26, maxWidth: 340, width: "100%", boxShadow: "0 16px 48px rgba(136,14,79,0.3)", textAlign: "center", fontFamily: "'Prompt', sans-serif" }}>
+            <div style={{ width: 54, height: 54, borderRadius: "50%", background: danger ? A.errorBg : A.pale, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 26 }}>
+              {danger ? "🗑️" : "💅"}
+            </div>
+            {title && <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 6 }}>{title}</h3>}
+            <p style={{ color: A.sub, fontSize: 14, marginBottom: 22, lineHeight: 1.5 }}>{message}</p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={onCancel} style={{ flex: 1, background: A.gray, border: "none", borderRadius: 12, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 600, color: A.text }}>
+                ยกเลิก
+              </button>
+              <button onClick={onConfirm} disabled={loading}
+                style={{ flex: 1, background: danger ? `linear-gradient(135deg, ${A.error}, #7A0000)` : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "12px", cursor: loading ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {loading ? <Loader2 size={15} className="animate-spin" /> : "ยืนยัน"}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 const authH = (token: string) => ({
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
@@ -236,8 +271,17 @@ export default function NailAdminPage() {
   ];
 
   return (
-    <div style={{ background: A.bg, minHeight: "100vh", fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');`}</style>
+    <div className="nail-admin-root" style={{ background: A.bg, minHeight: "100vh", fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+        .nail-admin-root input, .nail-admin-root textarea, .nail-admin-root select {
+          color: ${A.text} !important;
+        }
+        .nail-admin-root input::placeholder, .nail-admin-root textarea::placeholder {
+          color: ${A.muted} !important;
+          opacity: 1 !important;
+        }
+      `}</style>
 
       {/* Header */}
       <div style={{ background: `linear-gradient(135deg, ${A.primary} 0%, ${A.deep} 100%)`, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 16px rgba(136,14,79,0.25)" }}>
@@ -397,6 +441,7 @@ function BookingsTab({ token }: { token: string }) {
   const [wPhone, setWPhone] = useState("");
   const [wTime, setWTime] = useState("09:00");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [confirmRefundId, setConfirmRefundId] = useState<number | null>(null);
 
   const url = `/api/nail/admin/bookings?date=${filterDate}` + (filterStatus !== "all" ? `&status=${filterStatus}` : "");
   const { data: bookings = [], isLoading, refetch } = useQuery<any[]>({
@@ -416,7 +461,7 @@ function BookingsTab({ token }: { token: string }) {
   const refundMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/bookings/${id}/refund`, { method: "POST", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }); qc.invalidateQueries({ queryKey: ["nail-admin-dashboard"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }); qc.invalidateQueries({ queryKey: ["nail-admin-dashboard"] }); setConfirmRefundId(null); },
   });
 
   const walkinMutation = useMutation({
@@ -524,7 +569,7 @@ function BookingsTab({ token }: { token: string }) {
                           style={{ flex: 1, background: A.successBg, color: A.success, border: `1px solid ${A.success}44`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
                           <CheckCircle size={15} /> ยืนยันสลิป
                         </button>
-                        <button onClick={() => { if (confirm("ยืนยันการยกเลิกและคืนเงิน?")) refundMutation.mutate(b.id); }}
+                        <button onClick={() => setConfirmRefundId(b.id)}
                           style={{ flex: 1, background: A.errorBg, color: A.error, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
                           <RotateCcw size={15} /> คืนเงิน
                         </button>
@@ -536,7 +581,7 @@ function BookingsTab({ token }: { token: string }) {
                           style={{ flex: 1, background: "#F3E5F5", color: "#6A1B9A", border: "1px solid #CE93D844", borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
                           ✓ เสร็จสิ้น
                         </button>
-                        <button onClick={() => { if (confirm("ยืนยันการยกเลิกและคืนเงิน?")) refundMutation.mutate(b.id); }}
+                        <button onClick={() => setConfirmRefundId(b.id)}
                           style={{ background: A.errorBg, color: A.error, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
                           <RotateCcw size={15} /> คืนเงิน
                         </button>
@@ -596,6 +641,16 @@ function BookingsTab({ token }: { token: string }) {
           </motion.div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmRefundId !== null}
+        title="ยกเลิกและคืนเงิน?"
+        message="ระบบจะคืนเงินมัดจำให้ลูกค้าและยกเลิกคิวนี้"
+        danger
+        loading={refundMutation.isPending}
+        onCancel={() => setConfirmRefundId(null)}
+        onConfirm={() => confirmRefundId !== null && refundMutation.mutate(confirmRefundId)}
+      />
     </div>
   );
 }
@@ -631,10 +686,12 @@ function ServicesTab({ token }: { token: string }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services"] }); setShow(false); },
   });
 
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/services/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-services"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services"] }); setConfirmDelete(null); },
   });
 
   return (
@@ -660,7 +717,7 @@ function ServicesTab({ token }: { token: string }) {
               <button onClick={() => openEdit(s)} style={{ background: A.infoBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}>
                 <Edit2 size={14} color={A.info} />
               </button>
-              <button onClick={() => { if (confirm(`ลบบริการ "${s.name}"?`)) deleteMutation.mutate(s.id); }} style={{ background: A.errorBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}>
+              <button onClick={() => setConfirmDelete({ id: s.id, name: s.name })} style={{ background: A.errorBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}>
                 <Trash2 size={14} color={A.error} />
               </button>
             </div>
@@ -700,6 +757,16 @@ function ServicesTab({ token }: { token: string }) {
           </motion.div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="ลบบริการ?"
+        message={confirmDelete ? `ต้องการลบบริการ "${confirmDelete.name}" ใช่หรือไม่`: ""}
+        danger
+        loading={deleteMutation.isPending}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
+      />
     </div>
   );
 }
@@ -726,10 +793,12 @@ function StaffTab({ token }: { token: string }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }); setShow(false); },
   });
 
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/staff/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }); setConfirmDelete(null); },
   });
 
   if (isError) {
@@ -761,7 +830,7 @@ function StaffTab({ token }: { token: string }) {
                 {(s.name || "?").charAt(0).toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0, fontWeight: 600, color: A.text, fontSize: 15 }}>{s.name}</div>
-              <button onClick={() => { if (confirm(`ลบช่าง "${s.name}"?`)) deleteMutation.mutate(s.id); }} style={{ background: A.errorBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", flexShrink: 0 }}>
+              <button onClick={() => setConfirmDelete({ id: s.id, name: s.name })} style={{ background: A.errorBg, border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", flexShrink: 0 }}>
                 <Trash2 size={14} color={A.error} />
               </button>
             </div>
@@ -799,6 +868,16 @@ function StaffTab({ token }: { token: string }) {
           </motion.div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="ลบช่าง?"
+        message={confirmDelete ? `ต้องการลบช่าง "${confirmDelete.name}" ใช่หรือไม่`: ""}
+        danger
+        loading={deleteMutation.isPending}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete.id)}
+      />
     </div>
   );
 }
