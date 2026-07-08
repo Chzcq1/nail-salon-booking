@@ -361,3 +361,13 @@ class NailRenewalRequest(Base):
     requested_at = Column(DateTime(timezone=True), server_default=func.now())
     approved_at = Column(DateTime(timezone=True), nullable=True)
     new_expired_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class NailApiStats(Base):
+    """นับ API request สาธารณะต่อวัน — ใช้ประมาณการทราฟฟิก/โหลดของระบบ"""
+    __tablename__ = "nail_api_stats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stat_date = Column(String(10), nullable=False, unique=True, index=True)  # YYYY-MM-DD (Thai time)
+    request_count = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

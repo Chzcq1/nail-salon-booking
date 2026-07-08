@@ -285,16 +285,36 @@ function PricingSection({ sKey }: { sKey: string }) {
   );
 }
 
+// ── Mini bar chart ────────────────────────────────────────────────────────────
+function MiniBarChart({ data, color, label }: { data: { date: string; count: number }[]; color: string; label: string }) {
+  const max = Math.max(1, ...data.map(d => d.count));
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ color: S.sub, fontSize: 12, marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 52 }}>
+        {data.map(d => (
+          <div key={d.date} title={`${d.date}: ${d.count.toLocaleString()}`}
+            style={{ flex: 1, background: color, borderRadius: "3px 3px 0 0", minHeight: 3, height: `${Math.max(3, (d.count / max) * 52)}px`, opacity: 0.85 }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+        <span style={{ color: S.muted, fontSize: 10 }}>{data[0]?.date?.slice(5) ?? ""}</span>
+        <span style={{ color: S.muted, fontSize: 10 }}>{data[data.length - 1]?.date?.slice(5) ?? ""}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Usage / Monitoring ────────────────────────────────────────────────────────
 function UsageSection({ sKey }: { sKey: string }) {
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, refetch } = useQuery<any>({
     queryKey: ["sa-usage"],
     queryFn: () => saFetch(`${API}/superadmin/usage`, sKey),
     staleTime: 30000,
   });
 
-  const trend: any[] = data?.booking_trend_14d ?? [];
-  const maxCount = Math.max(1, ...trend.map(t => t.count));
+  const bookingTrend: any[] = data?.booking_trend_14d ?? [];
+  const apiTrend: any[] = data?.api_trend_14d ?? [];
 
   return (
     <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
@@ -302,40 +322,57 @@ function UsageSection({ sKey }: { sKey: string }) {
         <Activity size={18} color={S.accent} />
         <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>การใช้งานระบบ / โหลด</span>
         {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+        <button onClick={() => refetch()} title="รีเฟรช"
+          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: S.muted }}>
+          <RefreshCw size={13} />
+        </button>
       </div>
       {data && (
         <>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
-              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}><Database size={12} /> ขนาดฐานข้อมูล</div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.db_size_mb} MB</div>
+          {/* Stats grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                <Database size={12} /> ขนาดฐานข้อมูล
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>{data.db_size_mb} <span style={{ fontSize: 12, fontWeight: 400, color: S.muted }}>MB</span></div>
             </div>
-            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>API requests รวม</div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>
+                {(data.total_api_calls ?? 0).toLocaleString()}
+                <span style={{ fontSize: 12, fontWeight: 400, color: S.muted }}> ครั้ง</span>
+              </div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
               <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>การจองทั้งหมด</div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.total_bookings.toLocaleString()}</div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>{data.total_bookings.toLocaleString()}</div>
             </div>
-            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
-              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>จอง 30 วันล่าสุด</div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.bookings_last_30d.toLocaleString()}</div>
-            </div>
-            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
               <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>ลูกค้าทั้งหมด</div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.total_customers.toLocaleString()}</div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>{data.total_customers.toLocaleString()}</div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>จอง 30 วันล่าสุด</div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>{data.bookings_last_30d.toLocaleString()}</div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>Transactions รวม</div>
+              <div style={{ fontWeight: 700, fontSize: 17 }}>{(data.total_transactions ?? 0).toLocaleString()}</div>
             </div>
           </div>
 
-          {trend.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ color: S.sub, fontSize: 12, marginBottom: 8 }}>แนวโน้มการจอง 14 วันล่าสุด</div>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 60 }}>
-                {trend.map(t => (
-                  <div key={t.date} title={`${t.date}: ${t.count}`}
-                    style={{ flex: 1, background: S.accent, borderRadius: "3px 3px 0 0", height: `${Math.max(4, (t.count / maxCount) * 60)}px` }} />
-                ))}
-              </div>
-            </div>
+          {/* Traffic chart — API requests */}
+          {apiTrend.length > 0 && (
+            <MiniBarChart data={apiTrend} color={S.accent} label="ทราฟฟิก 14 วัน (API requests/วัน)" />
           )}
-          <p style={{ color: S.muted, fontSize: 11, marginTop: 8 }}>{data.note}</p>
+
+          {/* Booking chart */}
+          {bookingTrend.length > 0 && (
+            <MiniBarChart data={bookingTrend} color={S.success} label="การจองใหม่ 14 วัน" />
+          )}
+
+          <p style={{ color: S.muted, fontSize: 11, marginTop: 4 }}>{data.note}</p>
         </>
       )}
     </div>

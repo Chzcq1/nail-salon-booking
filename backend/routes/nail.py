@@ -12,7 +12,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -22,7 +22,7 @@ from backend.config import get_settings
 from backend.database import get_db
 from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot, NailSlotTemplate,
-    NailBooking, NailGallery, NailRenewalRequest, OTPSession,
+    NailBooking, NailGallery, NailRenewalRequest, NailApiStats, OTPSession,
     Customer, CreditTransaction,
 )
 from backend.auth import generate_otp, create_admin_token, verify_admin_token
@@ -44,6 +44,35 @@ TH_TZ = timezone(timedelta(hours=7))
 
 def _now_th() -> datetime:
     return _now().astimezone(TH_TZ)
+
+
+def _increment_api_counter() -> None:
+    """นับ public API request ต่อวัน (Thai time) — รันเป็น background task
+    ใช้ session แยก เพื่อไม่กระทบ transaction หลักของ request
+    ใช้ UPSERT เพื่อกันเงื่อนไข race condition"""
+    from backend.database import SessionLocal
+    if not SessionLocal:
+        return
+    db = SessionLocal()
+    try:
+        today = _now_th().strftime("%Y-%m-%d")
+        db.execute(
+            text(
+                """
+                INSERT INTO nail_api_stats (stat_date, request_count)
+                VALUES (:d, 1)
+                ON CONFLICT (stat_date)
+                DO UPDATE SET request_count = nail_api_stats.request_count + 1,
+                              updated_at = NOW()
+                """
+            ),
+            {"d": today},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _get_shop(db: Session) -> NailShopSettings:
@@ -236,12 +265,14 @@ def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
 # ─── Public endpoints ────────────────────────────────────────────────────────
 
 @router.get("/settings")
-def get_settings_public(db: Session = Depends(get_db)):
+def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     shop = _get_shop(db)
     # ตรวจสอบ rental expiry
     expired = False
     if shop.expired_at and _now() > shop.expired_at:
         expired = True
+    # นับ request เป็น background task — ไม่กระทบ transaction หลัก
+    background_tasks.add_task(_increment_api_counter)
     return {
         "shop_name": shop.shop_name,
         "shop_logo_url": shop.shop_logo_url,
@@ -1836,6 +1867,22 @@ def superadmin_usage(db: Session = Depends(get_db), x_super_admin_key: Optional[
     ), {"since": since}).fetchall()
     trend = [{"date": row[0], "count": row[1]} for row in trend_rows]
 
+    # แนวโน้ม API request 14 วันล่าสุด — วัดจาก nail_api_stats
+    api_trend_rows = db.execute(sa_text(
+        """
+        SELECT stat_date AS d, request_count AS c
+        FROM nail_api_stats
+        WHERE stat_date >= :since_str
+        ORDER BY stat_date
+        """
+    ), {"since_str": (_now() - timedelta(days=14)).strftime("%Y-%m-%d")}).fetchall()
+    api_trend = [{"date": row[0], "count": row[1]} for row in api_trend_rows]
+
+    # ยอดรวม request ทั้งหมด
+    total_api_calls = db.execute(sa_text(
+        "SELECT COALESCE(SUM(request_count), 0) FROM nail_api_stats"
+    )).scalar() or 0
+
     return {
         "db_size_bytes": int(db_size_bytes),
         "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
@@ -1844,7 +1891,9 @@ def superadmin_usage(db: Session = Depends(get_db), x_super_admin_key: Optional[
         "total_customers": total_customers,
         "total_transactions": total_transactions,
         "booking_trend_14d": trend,
-        "note": "วัดจากฐานข้อมูลจริง — ไม่รวม CPU/RAM ของเซิร์ฟเวอร์ Render (ต้องใช้ Render API Key เพิ่มถ้าต้องการดูค่านั้น)",
+        "api_trend_14d": api_trend,
+        "total_api_calls": int(total_api_calls),
+        "note": "วัดจากฐานข้อมูลจริง — ทราฟฟิกนับจาก public API requests ต่อวัน (Thai time)",
     }
 
 
