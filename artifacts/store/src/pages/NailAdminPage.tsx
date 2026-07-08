@@ -132,10 +132,78 @@ async function aFetch(url: string, token: string, opts?: RequestInit) {
   return d;
 }
 
+// ── Web Audio beep (no external file needed) ─────────────────────────────────
+function playBookingAlert() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const play = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(0.4, ctx.currentTime + start + 0.01);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur + 0.05);
+    };
+    play(880, 0, 0.18);
+    play(1100, 0.22, 0.18);
+    play(1320, 0.44, 0.3);
+  } catch { /* ignore in environments where AudioContext is unavailable */ }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function NailAdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState(() => localStorage.getItem("nail_admin_token") || "");
+  const [newBookingAlert, setNewBookingAlert] = useState(false);
+  const knownBookingIds = useRef<Set<number>>(new Set());
+  const isFirstPoll = useRef(true);
+  const lastPollDate = useRef("");
+
+  // ── Background booking poller (runs when admin is logged in) ──────────────
+  useEffect(() => {
+    if (!token) return;
+    // Reset detection state every time a new session starts
+    knownBookingIds.current = new Set();
+    isFirstPoll.current = true;
+    lastPollDate.current = "";
+
+    const poll = async () => {
+      const today = toISO(new Date());
+      // Reset on date rollover so midnight bookings don't trigger false alerts
+      if (lastPollDate.current && lastPollDate.current !== today) {
+        knownBookingIds.current = new Set();
+        isFirstPoll.current = true;
+      }
+      lastPollDate.current = today;
+      try {
+        const res = await fetch(`/api/nail/admin/bookings?date=${today}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const bookings: Array<{ id: number; status: string }> = await res.json();
+        if (isFirstPoll.current) {
+          // Seed known IDs on first load — don't alert for existing bookings
+          bookings.forEach(b => knownBookingIds.current.add(b.id));
+          isFirstPoll.current = false;
+          return;
+        }
+        const incoming = bookings.filter(b => !knownBookingIds.current.has(b.id));
+        if (incoming.length > 0) {
+          incoming.forEach(b => knownBookingIds.current.add(b.id));
+          playBookingAlert();
+          setNewBookingAlert(true);
+        }
+      } catch { /* silent — do not crash admin UI */ }
+    };
+    poll(); // immediate first poll
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [token]); // eslint-disable-line
 
   // login steps: "passcode" → "otp"
   const [loginStep, setLoginStep] = useState<"passcode" | "otp">("passcode");
@@ -285,8 +353,44 @@ export default function NailAdminPage() {
         }
       `}</style>
 
+      {/* New booking notification banner */}
+      <AnimatePresence>
+        {newBookingAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -48 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -48 }}
+            style={{
+              position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+              background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`,
+              color: "#fff", padding: "12px 20px",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              boxShadow: "0 4px 24px rgba(136,14,79,0.35)",
+            }}
+          >
+            <span style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+              🔔 มีการจองใหม่เข้ามา!
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => { setTab("bookings"); setNewBookingAlert(false); }}
+                style={{ background: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "5px 14px", color: "#fff", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 600 }}
+              >
+                ดูคิว
+              </button>
+              <button
+                onClick={() => setNewBookingAlert(false)}
+                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.8)", cursor: "pointer", padding: "4px 8px" }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div style={{ background: `linear-gradient(135deg, ${A.primary} 0%, ${A.deep} 100%)`, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 16px rgba(136,14,79,0.25)" }}>
+      <div style={{ background: `linear-gradient(135deg, ${A.primary} 0%, ${A.deep} 100%)`, padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 16px rgba(136,14,79,0.25)", marginTop: newBookingAlert ? 48 : 0, transition: "margin-top 0.3s" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>💅</div>
           <div>

@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wallet, Plus, ArrowDownLeft, ArrowUpRight, Gift, Upload, ChevronRight,
-  Loader, CheckCircle, XCircle, Info, X, ShoppingBag,
-  Lock, Eye, EyeOff, LogOut, ShieldCheck, Package, ExternalLink,
+  Loader, CheckCircle, XCircle, Info, X,
+  Lock, Eye, EyeOff, LogOut, ShieldCheck, ExternalLink,
   Mail, Copy, ChevronUp, Phone, User, Edit2,
 } from "lucide-react";
 
@@ -621,139 +621,6 @@ function GafiwOrderCard({ order }: { order: any }) {
   );
 }
 
-function MyOrdersTab({ token }: { token: string }) {
-  const authHeaders = { Authorization: `Bearer ${token}` };
-
-  const { data: manualOrders = [], isLoading: loadingManual } = useQuery<MyOrder[]>({
-    queryKey: ["wallet-my-orders", token],
-    queryFn: async () => {
-      const res = await fetch("/api/wallet/my-orders", { headers: authHeaders });
-      if (!res.ok) throw new Error("โหลดไม่ได้");
-      return res.json();
-    },
-    staleTime: 0,
-    gcTime: 5 * 60_000,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-  });
-
-  const { data: gafiwRaw, isLoading: loadingGafiw } = useQuery<any>({
-    queryKey: ["wallet-gafiw-history", token],
-    queryFn: async () => {
-      const res = await fetch("/api/gafiw/history?limit=30", { headers: authHeaders });
-      if (!res.ok) return { ok: false, data: [] };
-      return res.json();
-    },
-    staleTime: 0,
-    gcTime: 5 * 60_000,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    retry: false,
-  });
-
-  const isLoading = loadingManual || loadingGafiw;
-
-  // normalise gafiw list — ดึงจาก data[] หรือ root array
-  const gafiwOrders: any[] = (() => {
-    if (!gafiwRaw) return [];
-    if (Array.isArray(gafiwRaw)) return gafiwRaw;
-    if (Array.isArray(gafiwRaw.data)) return gafiwRaw.data;
-    return [];
-  })();
-
-  if (isLoading) {
-    return (
-      <div className="space-y-3">
-        {[1, 2, 3].map(i => <div key={i} className="h-24 bg-muted/30 animate-pulse rounded-xl" />)}
-      </div>
-    );
-  }
-
-  const hasAnything = manualOrders.length > 0 || gafiwOrders.length > 0;
-
-  if (!hasAnything) {
-    return (
-      <div className="bg-card border border-border rounded-xl p-10 text-center">
-        <Package size={32} className="text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm font-medium text-foreground">ยังไม่มีสินค้า</p>
-        <p className="text-xs text-muted-foreground mt-1">ซื้อสินค้าแล้วจะแสดงที่นี่</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      {/* ── สินค้าจาก API (gafiw) ── */}
-      {gafiwOrders.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            สินค้าที่ซื้อด้วยเครดิต ({gafiwOrders.length})
-          </p>
-          {gafiwOrders.map((order: any, i: number) => (
-            <GafiwOrderCard key={order.uid || order.order_id || i} order={order} />
-          ))}
-        </div>
-      )}
-
-      {/* ── สินค้าจากร้าน (manual) ── */}
-      {manualOrders.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            ออเดอร์ร้าน ({manualOrders.length})
-          </p>
-          {manualOrders.map(order => (
-            <motion.div key={order.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              className="bg-card border border-border rounded-xl p-4 space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">{order.product_name}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    ออเดอร์ #{order.id} •{" "}
-                    {order.created_at
-                      ? new Date(order.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" })
-                      : ""}
-                  </p>
-                </div>
-                <OrderStatusBadge status={order.status} />
-              </div>
-
-              {order.status === "approved" && order.invite_links.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">🔗 ลิงก์เข้ากลุ่ม (ใช้ได้ครั้งเดียว)</p>
-                  {order.invite_links.map((link: string, i: number) => (
-                    <a key={i} href={link} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-2 bg-primary/10 border border-primary/30 rounded-lg px-3 py-2.5 text-sm text-primary hover:bg-primary/20 transition-colors">
-                      <ExternalLink size={13} className="shrink-0" />
-                      <span className="truncate">{link}</span>
-                    </a>
-                  ))}
-                </div>
-              )}
-
-              {order.status === "approved" && order.invite_links.length === 0 && (
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2 text-xs text-yellow-400">
-                  อนุมัติแล้ว — แอดมินกำลังส่งลิงก์ กรุณารอสักครู่
-                </div>
-              )}
-
-              {order.status === "pending" && (
-                <div className="bg-muted/50 border border-border rounded-lg px-3 py-2 text-xs text-muted-foreground">
-                  รอแอดมินตรวจสอบการชำระเงิน
-                </div>
-              )}
-
-              {order.status === "rejected" && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-xs text-red-400">
-                  การชำระเงินไม่ผ่าน — ติดต่อแอดมินเพื่อตรวจสอบ
-                </div>
-              )}
-            </motion.div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface StoreSettings {
   topup_slip_enabled: string;
@@ -770,7 +637,6 @@ export default function WalletPage() {
   const [token, setToken] = useState(getStoredToken);
   const [email, setEmail] = useState("");
   const [logoutMsg, setLogoutMsg] = useState(false);
-  const [activeTab, setActiveTab] = useState<"wallet" | "orders">("wallet");
   const [topupModal, setTopupModal] = useState(false);
   const [topupType, setTopupType] = useState<"slip" | "truemoney">("truemoney");
   const [slipFile, setSlipFile] = useState<File | null>(null);
@@ -982,12 +848,9 @@ export default function WalletPage() {
               <span className="text-base font-normal text-muted-foreground ml-1">เครดิต</span>
             </p>
           )}
-          <div className="mt-4 flex gap-2">
-            <Button size="sm" className="flex-1 gap-1.5" onClick={handleTopupOpen} disabled={noTopupAvailable}>
+          <div className="mt-4">
+            <Button size="sm" className="w-full gap-1.5" onClick={handleTopupOpen} disabled={noTopupAvailable}>
               <Plus size={14} /> {noTopupAvailable ? "ปิดรับเติมเงินชั่วคราว" : "เติมเครดิต"}
-            </Button>
-            <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={() => setLocation("/")}>
-              <ShoppingBag size={14} /> ซื้อสินค้า
             </Button>
           </div>
         </motion.div>
@@ -999,62 +862,42 @@ export default function WalletPage() {
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="flex bg-muted rounded-xl p-1 gap-1">
-          {([
-            { key: "orders", label: "สินค้าของฉัน", icon: Package },
-            { key: "wallet", label: "ประวัติธุรกรรม", icon: Wallet },
-          ] as const).map(({ key, label, icon: Icon }) => (
-            <button key={key} onClick={() => setActiveTab(key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-              <Icon size={13} /> {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        <AnimatePresence mode="wait">
-          {activeTab === "orders" ? (
-            <motion.div key="orders" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
-              <MyOrdersTab token={token} />
-            </motion.div>
+        {/* Transaction history (no unused orders tab) */}
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-3">ประวัติธุรกรรม</p>
+          {walletQuery.isLoading ? (
+            <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-14 bg-muted/30 animate-pulse rounded-xl" />)}</div>
+          ) : transactions.length === 0 ? (
+            <div className="bg-card border border-border rounded-xl p-8 text-center">
+              <Wallet size={28} className="text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">ยังไม่มีธุรกรรม</p>
+              <p className="text-xs text-muted-foreground mt-1">เติมเครดิตเพื่อใช้เป็นมัดจำการจองคิว</p>
+            </div>
           ) : (
-            <motion.div key="wallet" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }}>
-              {walletQuery.isLoading ? (
-                <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-14 bg-muted/30 animate-pulse rounded-xl" />)}</div>
-              ) : transactions.length === 0 ? (
-                <div className="bg-card border border-border rounded-xl p-8 text-center">
-                  <Wallet size={28} className="text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">ยังไม่มีธุรกรรม</p>
-                  <p className="text-xs text-muted-foreground mt-1">เติมเครดิตเพื่อเริ่มซื้อสินค้า</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {transactions.map(t => (
-                    <motion.div key={t.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-                      className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${t.type === "topup" ? "bg-green-500/15" : t.type === "purchase" ? "bg-red-500/15" : "bg-muted"}`}>
-                        <TxnIcon type={t.type} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-foreground truncate">{t.description}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <TxnBadge type={t.type} />
-                          <span className="text-[11px] text-muted-foreground">
-                            {t.created_at ? new Date(t.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
-                          </span>
-                        </div>
-                      </div>
-                      <span className={`text-sm font-bold shrink-0 ${t.amount >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {t.amount >= 0 ? "+" : ""}{t.amount.toLocaleString("th-TH")}
+            <div className="space-y-2">
+              {transactions.map(t => (
+                <motion.div key={t.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                  className="bg-card border border-border rounded-xl px-4 py-3 flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${t.type === "topup" ? "bg-green-500/15" : t.type === "purchase" ? "bg-red-500/15" : "bg-muted"}`}>
+                    <TxnIcon type={t.type} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-foreground truncate">{t.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <TxnBadge type={t.type} />
+                      <span className="text-[11px] text-muted-foreground">
+                        {t.created_at ? new Date(t.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
                       </span>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
+                    </div>
+                  </div>
+                  <span className={`text-sm font-bold shrink-0 ${t.amount >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {t.amount >= 0 ? "+" : ""}{t.amount.toLocaleString("th-TH")}
+                  </span>
+                </motion.div>
+              ))}
+            </div>
           )}
-        </AnimatePresence>
+        </div>
       </main>
 
       {/* Top-up dialog */}

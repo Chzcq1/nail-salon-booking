@@ -113,6 +113,8 @@ class Customer(Base):
     telegram_user_id = Column(BigInteger, unique=True, nullable=True, index=True)
     balance = Column(Numeric(12, 2), nullable=False, default=0)
     pin_hash = Column(String(255), nullable=True)
+    display_name = Column(String(255), nullable=True)
+    phone_number = Column(String(30), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

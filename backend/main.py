@@ -176,6 +176,9 @@ def _run_migrations(engine):
         # closed_dates added to nail_shop_settings (วันปิดร้าน) — table already existed on
         # production before this column was added to the model, so create_all() never adds it
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS closed_dates TEXT",
+        # display_name / phone_number for customer wallet profile
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)",
 
         # ── Performance indexes ────────────────────────────────────────────────
         # orders: admin กรอง status บ่อย + เรียงตาม created_at
