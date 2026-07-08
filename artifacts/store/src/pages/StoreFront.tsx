@@ -447,6 +447,7 @@ function BuyModal({
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
       sessionStorage.setItem("wallet_token", data.token);
+      window.dispatchEvent(new CustomEvent("wallet-token-updated"));
       setToken(data.token);
       setPin(""); setMiniStep("email");
     } catch (e: any) {
@@ -607,7 +608,7 @@ function BuyModal({
 
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="text-xs"
-                    onClick={() => { sessionStorage.removeItem("wallet_token"); setToken(""); setMiniStep("email"); setError(""); }}>
+                    onClick={() => { sessionStorage.removeItem("wallet_token"); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
                     เปลี่ยนบัญชี
                   </Button>
                   <Button className="flex-1 font-bold"
@@ -893,6 +894,7 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
       sessionStorage.setItem("wallet_token", data.token);
+      window.dispatchEvent(new CustomEvent("wallet-token-updated"));
       setToken(data.token); setPin(""); setMiniStep("email");
     } catch (e: any) { setMiniError(e.message); setPin(""); } finally { setMiniLoading(false); }
   };
@@ -996,7 +998,7 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
                 {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">{error}</div>}
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="text-xs"
-                    onClick={() => { sessionStorage.removeItem("wallet_token"); setToken(""); setMiniStep("email"); setError(""); }}>
+                    onClick={() => { sessionStorage.removeItem("wallet_token"); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
                     เปลี่ยนบัญชี
                   </Button>
                   <Button className="flex-1 font-bold"
@@ -1473,7 +1475,12 @@ export default function StoreFront() {
   const totalSold = (storeStats?.total_orders ?? 0) + (storeStats?.fake_base ?? 12847);
   const memberCount = storeStats?.member_count ?? 18947;
 
-  const [headerToken] = useState(() => sessionStorage.getItem("wallet_token") || "");
+  const [headerToken, setHeaderToken] = useState(() => sessionStorage.getItem("wallet_token") || "");
+  useEffect(() => {
+    const onTokenUpdate = () => setHeaderToken(sessionStorage.getItem("wallet_token") || "");
+    window.addEventListener("wallet-token-updated", onTokenUpdate);
+    return () => window.removeEventListener("wallet-token-updated", onTokenUpdate);
+  }, []);
   const { data: headerWallet } = useQuery<{ balance: number }>({
     queryKey: ["wallet-header", headerToken],
     queryFn: async () => {

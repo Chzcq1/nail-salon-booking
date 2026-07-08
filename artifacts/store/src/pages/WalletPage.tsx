@@ -602,10 +602,9 @@ function GafiwOrderCard({ order }: { order: any }) {
                       {copied ? <><CheckCircle size={11} /> คัดลอกแล้ว!</> : <><Copy size={11} /> คัดลอกรหัส</>}
                     </button>
                   </div>
-                  <div
-                    className="text-xs text-foreground leading-relaxed bg-background/40 border border-border/50 rounded-lg p-2.5"
-                    dangerouslySetInnerHTML={{ __html: textdb }}
-                  />
+                  <div className="text-xs text-foreground leading-relaxed bg-background/40 border border-border/50 rounded-lg p-2.5 whitespace-pre-wrap">
+                    {stripHtml(textdb)}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -768,6 +767,7 @@ export default function WalletPage() {
   const qc = useQueryClient();
   const [token, setToken] = useState(getStoredToken);
   const [email, setEmail] = useState("");
+  const [logoutMsg, setLogoutMsg] = useState(false);
   const [activeTab, setActiveTab] = useState<"wallet" | "orders">("wallet");
   const [topupModal, setTopupModal] = useState(false);
   const [topupType, setTopupType] = useState<"slip" | "truemoney">("truemoney");
@@ -828,7 +828,18 @@ export default function WalletPage() {
 
   const tmMutation = useMutation({
     mutationFn: async () => {
-      if (!voucherLink.trim()) throw new Error("กรุณาใส่ลิงก์ซอง");
+      const link = voucherLink.trim();
+      if (!link) throw new Error("กรุณาใส่ลิงก์ซอง");
+      // Validate: either exact TrueMoney gift URL or a bare 18+ alphanumeric voucher code
+      let isValid = false;
+      try {
+        const u = new URL(link);
+        isValid = u.hostname === "gift.truemoney.com" && u.pathname === "/campaign/" && /^[A-Za-z0-9]+$/.test(u.searchParams.get("v") ?? "");
+      } catch {
+        // Not a URL — try bare code format
+        isValid = /^[A-Za-z0-9]{18,32}$/.test(link);
+      }
+      if (!isValid) throw new Error("ลิงก์ไม่ถูกต้อง ต้องเป็น https://gift.truemoney.com/campaign/?v=XXXX หรือรหัสซอง 18–32 ตัวอักษร");
       const res = await fetch("/api/wallet/topup/truemoney", {
         method: "POST", headers: authHeaders,
         body: JSON.stringify({ voucher: voucherLink.trim() }),
@@ -844,7 +855,7 @@ export default function WalletPage() {
     onError: (e: Error) => setTopupError(e.message),
   });
 
-  const handleLogout = () => { clearStoredToken(); setToken(""); setEmail(""); qc.clear(); };
+  const handleLogout = () => { clearStoredToken(); setToken(""); setEmail(""); qc.clear(); setLogoutMsg(true); };
   const handleTopupClose = () => {
     setTopupModal(false); setSlipFile(null); setSlipPreview(null);
     setVoucherLink(""); setTopupResult(null); setTopupError("");
@@ -862,7 +873,16 @@ export default function WalletPage() {
   const noTopupAvailable = !slipEnabled && !trueMoneyEnabled;
 
   if (!token) {
-    return <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); }} />;
+    return (
+      <>
+        {logoutMsg && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-green-600/90 text-white text-sm px-4 py-2 rounded-full shadow-lg animate-in fade-in slide-in-from-top-2">
+            ออกจากระบบแล้ว
+          </div>
+        )}
+        <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); setLogoutMsg(false); }} />
+      </>
+    );
   }
 
   const balance = walletQuery.data?.balance ?? 0;
