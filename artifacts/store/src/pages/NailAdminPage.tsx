@@ -1518,12 +1518,23 @@ function RenewalTab({ token }: { token: string }) {
     retry: 1,
   });
 
+  // ราคาจริงของร้านนี้ (super-admin อาจตั้งราคาพิเศษไว้) — fallback เป็นราคากลางถ้ายังโหลดไม่เสร็จ
+  const { data: plans = RENEWAL_PLANS } = useQuery<any[]>({
+    queryKey: ["nail-admin-renewal-plans"],
+    queryFn: () => fetch("/api/nail/admin/renewal-plans", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
+  });
+
   const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
   const [voucher, setVoucher] = useState("");
 
   const submitMutation = useMutation({
     mutationFn: () => {
-      const body: any = { duration_months: months };
+      const body: any = {
+        duration_months: months,
+        payment_channel: payMethod === "slip" ? "bank_slip" : "angpao",
+      };
       if (payMethod === "slip") body.slip_image = preview;
       else body.voucher_code = voucher.trim();
       return fetch("/api/nail/admin/renewal-request", { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
@@ -1607,7 +1618,7 @@ function RenewalTab({ token }: { token: string }) {
       <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16 }}>
         <h3 style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 12 }}>ต่ออายุการใช้งาน</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-          {RENEWAL_PLANS.map(p => (
+          {(plans as any[]).map(p => (
             <button key={p.months} onClick={() => setMonths(p.months)}
               style={{
                 border: `1.5px solid ${months === p.months ? A.primary : A.border}`,

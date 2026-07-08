@@ -413,6 +413,9 @@ def hold_slot(
         raise HTTPException(status_code=409, detail="ช่วงเวลานี้เต็มแล้ว กรุณาเลือกเวลาอื่น")
 
     shop = _get_shop(db)
+    # ป้องกันการจองใหม่ถ้าร้านถูกปิด/หมดอายุการเช่าระบบ (บังคับที่ฝั่งเซิร์ฟเวอร์ ไม่พึ่งแค่ frontend gate)
+    if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
+        raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
     service = db.query(NailService).filter_by(id=req.service_id).first() if req.service_id else None
 
     # ค่ามัดจำ: ใช้ของบริการถ้าตั้งไว้ ไม่งั้น fallback เป็นค่าเริ่มต้นของร้าน
@@ -1447,6 +1450,15 @@ def admin_update_settings(
 RENEWAL_PLANS = {1: 500.0, 3: 1300.0, 6: 2400.0, 12: 4500.0}
 
 
+def _effective_renewal_plans(shop: "NailShopSettings") -> dict:
+    """ราคาค่าเช่าจริงที่ใช้ — ใช้ราคาที่ super-admin ตั้งไว้เฉพาะร้านนี้ ถ้าไม่ได้ตั้งไว้ใช้ราคากลาง"""
+    custom = {1: shop.price_1m, 3: shop.price_3m, 6: shop.price_6m, 12: shop.price_12m}
+    return {
+        months: float(custom[months]) if custom.get(months) is not None else default
+        for months, default in RENEWAL_PLANS.items()
+    }
+
+
 def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
     cfg = get_settings()
     key = cfg.nail_super_admin_key
@@ -1481,6 +1493,7 @@ def admin_rental_status(db: Session = Depends(get_db), authorization: str = Head
             "duration_months": last_req.duration_months,
             "amount": float(last_req.amount),
             "status": last_req.status,
+            "payment_channel": last_req.payment_channel,
             "admin_note": last_req.admin_note,
             "requested_at": last_req.requested_at.isoformat() if last_req.requested_at else None,
             "new_expired_at": last_req.new_expired_at.isoformat() if last_req.new_expired_at else None,
@@ -1488,8 +1501,18 @@ def admin_rental_status(db: Session = Depends(get_db), authorization: str = Head
     }
 
 
+@router.get("/admin/renewal-plans")
+def admin_get_renewal_plans(db: Session = Depends(get_db), authorization: str = Header(None)):
+    """ราคาค่าเช่าที่ใช้จริงกับร้านนี้ (super-admin อาจตั้งราคาพิเศษเฉพาะร้านไว้)"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    plans = _effective_renewal_plans(shop)
+    return [{"months": m, "price": plans[m]} for m in (1, 3, 6, 12)]
+
+
 class RenewalRequestBody(BaseModel):
     duration_months: int
+    payment_channel: str                # "bank_slip" | "angpao"
     slip_image: Optional[str] = None    # base64 data URI (สำหรับโอนผ่านสลิป)
     voucher_code: Optional[str] = None  # TrueMoney gift voucher URL หรือรหัสซอง
 
@@ -1500,19 +1523,25 @@ def admin_submit_renewal(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงินหรือซอง TrueMoney"""
+    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงินหรือซอง TrueMoney — เจ้าของร้านเลือกช่องทางชำระเงินเอง"""
     _check_admin(authorization)
-    if not body.slip_image and not body.voucher_code:
-        raise HTTPException(status_code=400, detail="กรุณาแนบสลิปหรือรหัสซอง TrueMoney")
-    amount = RENEWAL_PLANS.get(body.duration_months)
+    if body.payment_channel not in ("bank_slip", "angpao"):
+        raise HTTPException(status_code=400, detail="ช่องทางชำระเงินไม่ถูกต้อง")
+    if body.payment_channel == "bank_slip" and not body.slip_image:
+        raise HTTPException(status_code=400, detail="กรุณาแนบสลิปโอนเงิน")
+    if body.payment_channel == "angpao" and not body.voucher_code:
+        raise HTTPException(status_code=400, detail="กรุณาระบุลิงก์/รหัสซองอั่งเปา")
+    shop = _get_shop(db)
+    amount = _effective_renewal_plans(shop).get(body.duration_months)
     if not amount:
         raise HTTPException(status_code=400, detail="ระยะเวลาไม่ถูกต้อง (เลือก 1, 3, 6 หรือ 12 เดือน)")
-    # เก็บ voucher ใน slip_image field โดยใช้ prefix "voucher:" เพื่อให้ super-admin แยกแยะได้
+    # เก็บ voucher ใน slip_image field โดยใช้ prefix "voucher:" เพื่อให้ super-admin แยกแยะได้ (backward compat)
     image_or_voucher = body.slip_image or f"voucher:{body.voucher_code}"
     req = NailRenewalRequest(
         duration_months=body.duration_months,
         amount=amount,
         slip_image=image_or_voucher,
+        payment_channel=body.payment_channel,
     )
     db.add(req)
     db.commit()
@@ -1732,9 +1761,91 @@ def superadmin_list_renewals(
             "approved_at": r.approved_at.isoformat() if r.approved_at else None,
             "new_expired_at": r.new_expired_at.isoformat() if r.new_expired_at else None,
             "slip_image": r.slip_image,
+            "payment_channel": r.payment_channel,
         }
         for r in items
     ]
+
+
+class ShopPricingBody(BaseModel):
+    price_1m: Optional[float] = None
+    price_3m: Optional[float] = None
+    price_6m: Optional[float] = None
+    price_12m: Optional[float] = None
+
+
+@router.get("/superadmin/pricing")
+def superadmin_get_pricing(db: Session = Depends(get_db), x_super_admin_key: Optional[str] = Header(None)):
+    """ราคาค่าเช่าที่ตั้งไว้เฉพาะร้านนี้ (null = ยังใช้ราคากลาง) + ราคากลางเริ่มต้น"""
+    _check_superadmin(x_super_admin_key)
+    shop = _get_shop(db)
+    return {
+        "custom": {
+            "price_1m": float(shop.price_1m) if shop.price_1m is not None else None,
+            "price_3m": float(shop.price_3m) if shop.price_3m is not None else None,
+            "price_6m": float(shop.price_6m) if shop.price_6m is not None else None,
+            "price_12m": float(shop.price_12m) if shop.price_12m is not None else None,
+        },
+        "default": RENEWAL_PLANS,
+        "effective": _effective_renewal_plans(shop),
+    }
+
+
+@router.put("/superadmin/pricing")
+def superadmin_set_pricing(
+    body: ShopPricingBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้งราคาค่าเช่าพิเศษเฉพาะร้านนี้ — ส่ง null เพื่อกลับไปใช้ราคากลาง"""
+    _check_superadmin(x_super_admin_key)
+    shop = _get_shop(db)
+    shop.price_1m = body.price_1m
+    shop.price_3m = body.price_3m
+    shop.price_6m = body.price_6m
+    shop.price_12m = body.price_12m
+    db.commit()
+    return {"ok": True, "effective": _effective_renewal_plans(shop)}
+
+
+@router.get("/superadmin/usage")
+def superadmin_usage(db: Session = Depends(get_db), x_super_admin_key: Optional[str] = Header(None)):
+    """
+    ข้อมูลการใช้งาน/โหลดของระบบร้านนี้ สำหรับ super-admin มอนิเตอร์ (ไม่รวมข้อมูลรายได้/ส่วนตัวของร้าน)
+    วัดจากฐานข้อมูลจริง — ใช้ประเมินว่าถึงเวลาต้องแนะนำอัปเกรดฐานข้อมูล/แผน deploy หรือยัง
+    """
+    _check_superadmin(x_super_admin_key)
+    from sqlalchemy import text as sa_text
+
+    db_size_bytes = db.execute(sa_text("SELECT pg_database_size(current_database())")).scalar() or 0
+    total_bookings = db.query(NailBooking).count()
+    total_customers = db.query(Customer).count()
+    total_transactions = db.query(CreditTransaction).count()
+
+    since = _now() - timedelta(days=30)
+    bookings_last_30d = db.query(NailBooking).filter(NailBooking.created_at >= since).count()
+
+    # แนวโน้มการจอง 14 วันล่าสุด (ใช้เป็นตัวชี้วัดทราฟฟิก/โหลดคร่าวๆ แทนเมตริกเซิร์ฟเวอร์จริง)
+    trend_rows = db.execute(sa_text(
+        """
+        SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d, COUNT(*) AS c
+        FROM nail_bookings
+        WHERE created_at >= :since
+        GROUP BY d ORDER BY d
+        """
+    ), {"since": since}).fetchall()
+    trend = [{"date": row[0], "count": row[1]} for row in trend_rows]
+
+    return {
+        "db_size_bytes": int(db_size_bytes),
+        "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
+        "total_bookings": total_bookings,
+        "bookings_last_30d": bookings_last_30d,
+        "total_customers": total_customers,
+        "total_transactions": total_transactions,
+        "booking_trend_14d": trend,
+        "note": "วัดจากฐานข้อมูลจริง — ไม่รวม CPU/RAM ของเซิร์ฟเวอร์ Render (ต้องใช้ Render API Key เพิ่มถ้าต้องการดูค่านั้น)",
+    }
 
 
 class ApproveBody(BaseModel):

@@ -300,6 +300,14 @@ def _run_migrations(engine):
         # ── Link nail bookings to customer wallet accounts ──────────────────────
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS wallet_refunded BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS price_1m NUMERIC(10,2)",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS price_3m NUMERIC(10,2)",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS price_6m NUMERIC(10,2)",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS price_12m NUMERIC(10,2)",
+        "ALTER TABLE nail_renewal_requests ADD COLUMN IF NOT EXISTS payment_channel VARCHAR(20) NOT NULL DEFAULT 'bank_slip'",
+        # ข้อมูลเก่า: คำขอที่จ่ายด้วยซอง TrueMoney ถูกเก็บโดยใส่ prefix "voucher:" ไว้ใน slip_image —
+        # แปลงเป็น payment_channel='angpao' ให้ตรงกับของจริง (รันครั้งเดียว ไม่กระทบแถวที่ตั้งค่าไว้แล้ว)
+        "UPDATE nail_renewal_requests SET payment_channel = 'angpao' WHERE slip_image LIKE 'voucher:%' AND payment_channel = 'bank_slip'",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'slip'",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_customer_id ON nail_bookings (customer_id)",
         # deposit_cents / deposit_total อาจหายถ้า table ถูกสร้างก่อน columns นี้จะถูกเพิ่ม

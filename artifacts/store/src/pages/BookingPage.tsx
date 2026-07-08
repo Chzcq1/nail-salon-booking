@@ -232,10 +232,10 @@ export default function BookingPage() {
 function ExpiredScreen({ shopName }: { shopName?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#fff", padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 64, marginBottom: 16 }}>🔒</div>
+      <div style={{ fontSize: 64, marginBottom: 16 }}>🌸</div>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: P.text, marginBottom: 8 }}>{shopName || "ร้านนี้"}</h1>
-      <p style={{ color: P.sub, marginBottom: 24 }}>ระบบจองคิวหมดอายุการใช้งานชั่วคราว</p>
-      <p style={{ color: P.muted, fontSize: 14 }}>กรุณาติดต่อเจ้าของร้านเพื่อต่ออายุ</p>
+      <p style={{ color: P.sub, marginBottom: 24 }}>ขออภัยค่ะ ระบบจองคิวออนไลน์ปิดปรับปรุงชั่วคราว</p>
+      <p style={{ color: P.muted, fontSize: 14 }}>กรุณาติดต่อร้านโดยตรงทางช่องทางโซเชียลมีเดียหรือเบอร์โทรของร้านนะคะ</p>
     </div>
   );
 }

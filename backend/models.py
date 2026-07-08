@@ -230,6 +230,11 @@ class NailShopSettings(Base):
     max_advance_days = Column(Integer, default=14)
     slot_duration_minutes = Column(Integer, default=60)
     closed_dates = Column(Text, nullable=True)  # JSON array of "YYYY-MM-DD"
+    # ราคาค่าเช่าระบบต่อรอบ (ตั้งโดย super-admin) — null = ใช้ราคาเริ่มต้นกลาง (RENEWAL_PLANS)
+    price_1m = Column(Numeric(10, 2), nullable=True)
+    price_3m = Column(Numeric(10, 2), nullable=True)
+    price_6m = Column(Numeric(10, 2), nullable=True)
+    price_12m = Column(Numeric(10, 2), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -349,7 +354,8 @@ class NailRenewalRequest(Base):
     shop_id = Column(Integer, nullable=False, default=1)
     duration_months = Column(Integer, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
-    slip_image = Column(Text, nullable=False)          # base64 data URI
+    slip_image = Column(Text, nullable=False)          # base64 data URI (หรือ "voucher:<code>")
+    payment_channel = Column(String(20), nullable=False, default="bank_slip")  # bank_slip | angpao
     status = Column(String(20), nullable=False, default="pending", index=True)
     admin_note = Column(Text, nullable=True)
     requested_at = Column(DateTime(timezone=True), server_default=func.now())

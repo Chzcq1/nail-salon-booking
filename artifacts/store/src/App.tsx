@@ -9,6 +9,7 @@ import WalletPage from "@/pages/WalletPage";
 import BookingPage from "@/pages/BookingPage";
 import MyBookingsPage from "@/pages/MyBookingsPage";
 import NailAdminPage from "@/pages/NailAdminPage";
+import NailSuperAdminPage from "@/pages/NailSuperAdminPage";
 
 const queryClient = new QueryClient();
 
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/my-bookings" component={MyBookingsPage} />
       <Route path="/admin" component={NailAdminPage} />
       <Route path="/nail-admin" component={NailAdminPage} />
+      <Route path="/superadmin" component={NailSuperAdminPage} />
       <Route component={NotFound} />
     </Switch>
   );

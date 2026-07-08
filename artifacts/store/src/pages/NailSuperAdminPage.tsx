@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, CheckCircle, XCircle, Clock, Loader2, RefreshCw,
   Calendar, AlertTriangle, Crown, LogOut, Eye, EyeOff, ExternalLink,
+  Tag, Activity, Database, Save,
 } from "lucide-react";
 
 // ── Design tokens (distinct dark-blue theme) ─────────────────────────────────
@@ -59,6 +60,17 @@ function statusBadge(status: string) {
   const [label, color, bg] = map[status] ?? [status, S.muted, S.surface];
   return (
     <span style={{ background: bg, color, borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>
+      {label}
+    </span>
+  );
+}
+
+function paymentChannelBadge(channel?: string) {
+  const isAngpao = channel === "angpao";
+  const label = isAngpao ? "🧧 อั่งเปา" : "🏦 สลิปธนาคาร";
+  const color = isAngpao ? "#F59E0B" : S.accent;
+  return (
+    <span style={{ background: `${color}22`, color, borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>
       {label}
     </span>
   );
@@ -193,6 +205,139 @@ function ApproveModal({ item, sKey, onDone, onClose }: { item: any; sKey: string
           </button>
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+// ── Pricing Editor ────────────────────────────────────────────────────────────
+function PricingSection({ sKey }: { sKey: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["sa-pricing"],
+    queryFn: () => saFetch(`${API}/superadmin/pricing`, sKey),
+    staleTime: 15000,
+  });
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (data) {
+      setVals({
+        price_1m: data.custom.price_1m?.toString() ?? "",
+        price_3m: data.custom.price_3m?.toString() ?? "",
+        price_6m: data.custom.price_6m?.toString() ?? "",
+        price_12m: data.custom.price_12m?.toString() ?? "",
+      });
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saFetch(`${API}/superadmin/pricing`, sKey, {
+        method: "PUT",
+        body: JSON.stringify({
+          price_1m: vals.price_1m ? Number(vals.price_1m) : null,
+          price_3m: vals.price_3m ? Number(vals.price_3m) : null,
+          price_6m: vals.price_6m ? Number(vals.price_6m) : null,
+          price_12m: vals.price_12m ? Number(vals.price_12m) : null,
+        }),
+      }),
+    onSuccess: () => { setMsg("✓ บันทึกราคาแล้ว"); qc.invalidateQueries({ queryKey: ["sa-pricing"] }); },
+    onError: (e: any) => setMsg(`⚠ ${e.message}`),
+  });
+
+  const plans = [
+    { key: "price_1m", months: 1, def: data?.default?.["1"] },
+    { key: "price_3m", months: 3, def: data?.default?.["3"] },
+    { key: "price_6m", months: 6, def: data?.default?.["6"] },
+    { key: "price_12m", months: 12, def: data?.default?.["12"] },
+  ];
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <Tag size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>ราคาค่าเช่าระบบ (เฉพาะร้านนี้)</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+      </div>
+      <p style={{ color: S.muted, fontSize: 12, marginBottom: 16 }}>เว้นว่างไว้ = ใช้ราคากลาง</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+        {plans.map(p => (
+          <div key={p.key}>
+            <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>
+              {p.months} เดือน <span style={{ color: S.muted }}>(กลาง ฿{p.def?.toLocaleString?.() ?? "-"})</span>
+            </label>
+            <input
+              type="number" min={0} placeholder={p.def?.toString()}
+              value={vals[p.key] ?? ""}
+              onChange={e => setVals(v => ({ ...v, [p.key]: e.target.value }))}
+              style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }}
+            />
+          </div>
+        ))}
+      </div>
+      {msg && <p style={{ color: msg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginBottom: 10 }}>{msg}</p>}
+      <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+        style={{ background: S.accent, border: "none", borderRadius: 8, padding: "9px 16px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+        {saveMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} บันทึกราคา
+      </button>
+    </div>
+  );
+}
+
+// ── Usage / Monitoring ────────────────────────────────────────────────────────
+function UsageSection({ sKey }: { sKey: string }) {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["sa-usage"],
+    queryFn: () => saFetch(`${API}/superadmin/usage`, sKey),
+    staleTime: 30000,
+  });
+
+  const trend: any[] = data?.booking_trend_14d ?? [];
+  const maxCount = Math.max(1, ...trend.map(t => t.count));
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <Activity size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>การใช้งานระบบ / โหลด</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+      </div>
+      {data && (
+        <>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}><Database size={12} /> ขนาดฐานข้อมูล</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.db_size_mb} MB</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>การจองทั้งหมด</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.total_bookings.toLocaleString()}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>จอง 30 วันล่าสุด</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.bookings_last_30d.toLocaleString()}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 110, background: S.card, borderRadius: 12, padding: 14 }}>
+              <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>ลูกค้าทั้งหมด</div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{data.total_customers.toLocaleString()}</div>
+            </div>
+          </div>
+
+          {trend.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: S.sub, fontSize: 12, marginBottom: 8 }}>แนวโน้มการจอง 14 วันล่าสุด</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 60 }}>
+                {trend.map(t => (
+                  <div key={t.date} title={`${t.date}: ${t.count}`}
+                    style={{ flex: 1, background: S.accent, borderRadius: "3px 3px 0 0", height: `${Math.max(4, (t.count / maxCount) * 60)}px` }} />
+                ))}
+              </div>
+            </div>
+          )}
+          <p style={{ color: S.muted, fontSize: 11, marginTop: 8 }}>{data.note}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -356,6 +501,12 @@ export default function NailSuperAdminPage() {
           )}
         </div>
 
+        {/* Usage / Monitoring */}
+        <UsageSection sKey={sKey} />
+
+        {/* Pricing */}
+        <PricingSection sKey={sKey} />
+
         {/* Renewal Requests */}
         <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -390,7 +541,10 @@ export default function NailSuperAdminPage() {
                     <div style={{ fontWeight: 700, fontSize: 15 }}>
                       ต่ออายุ {r.duration_months} เดือน — ฿{r.amount.toLocaleString()}
                     </div>
-                    <div style={{ color: S.muted, fontSize: 12, marginTop: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                      {paymentChannelBadge(r.payment_channel)}
+                    </div>
+                    <div style={{ color: S.muted, fontSize: 12, marginTop: 4 }}>
                       ส่งคำขอเมื่อ {fmtDate(r.requested_at)}
                     </div>
                     {r.approved_at && (
