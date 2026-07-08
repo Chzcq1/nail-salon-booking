@@ -22,8 +22,8 @@ const P = {
   white:     "#FFFFFF",
   offwhite:  "#FFF8FC",
   text:      "#1A1A2E",
-  sub:       "#6B6B8A",
-  muted:     "#A0A0B8",
+  sub:       "#505068",   // เพิ่มความเข้มจาก #6B6B8A — ผ่าน WCAG AA
+  muted:     "#707080",   // เพิ่มความเข้มจาก #A0A0B8 — ผ่าน WCAG AA
   gray:      "#E8E8F0",
   grayDark:  "#D0D0E0",
   success:   "#22C55E",
@@ -90,13 +90,30 @@ export default function BookingPage() {
     name: "", phone: "", line: "", note: "", holdData: null,
   });
 
-  const { data: shopSettings } = useQuery({ queryKey: ["nail-settings"], queryFn: api.settings });
-  const { data: gallery = [] } = useQuery({ queryKey: ["nail-gallery"], queryFn: api.gallery });
-  const { data: services = [] } = useQuery({ queryKey: ["nail-services"], queryFn: api.services });
+  const { data: shopSettings, isError: settingsError } = useQuery({
+    queryKey: ["nail-settings"], queryFn: api.settings, staleTime: 60000, retry: 1,
+  });
+  const { data: gallery = [] } = useQuery({
+    queryKey: ["nail-gallery"], queryFn: api.gallery, staleTime: 120000, retry: 1,
+  });
+  const { data: services = [] } = useQuery({
+    queryKey: ["nail-services"], queryFn: api.services, staleTime: 120000, retry: 1,
+  });
 
   // Rental expiry guard
   if (shopSettings?.expired === true) {
     return <ExpiredScreen shopName={shopSettings?.shop_name} />;
+  }
+
+  // Settings load error
+  if (settingsError && !shopSettings) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: P.offwhite, padding: 24, textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+        <p style={{ color: P.text, fontWeight: 600, fontSize: 18 }}>โหลดข้อมูลร้านไม่สำเร็จ</p>
+        <p style={{ color: P.muted, fontSize: 14, marginTop: 8 }}>กรุณารีเฟรชหน้า หรือลองใหม่ภายหลัง</p>
+      </div>
+    );
   }
 
   const go = (s: Step) => { setStep(s); window.scrollTo({ top: 0, behavior: "smooth" }); };
@@ -366,45 +383,6 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         >
           <Calendar size={20} /> จองคิวทำเล็บ
         </button>
-      </div>
-    </PageWrap>
-  );
-}
-
-// ── Service Screen ───────────────────────────────────────────────────
-function ServiceScreen({ services, selected, onBack, onSelect }: any) {
-  return (
-    <PageWrap>
-      <BackBtn onClick={onBack} />
-      <div style={{ padding: "0 20px" }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>เลือกบริการ</h2>
-        <p style={{ color: P.sub, marginBottom: 20, fontSize: 14 }}>เลือกประเภทการทำเล็บที่ต้องการ</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {services.map((s: any) => (
-            <motion.button
-              key={s.id}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => onSelect(s)}
-              style={{
-                background: "#fff", border: `2px solid ${selected?.id === s.id ? P.pink : P.pinkBorder}`,
-                borderRadius: 16, padding: "16px 18px", cursor: "pointer", textAlign: "left",
-                display: "flex", alignItems: "center", gap: 14,
-                boxShadow: selected?.id === s.id ? `0 0 0 3px ${P.pink}22` : "none",
-              }}
-            >
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: `${s.color}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>💅</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, color: P.text, fontSize: 16 }}>{s.name}</div>
-                {s.description && <div style={{ color: P.sub, fontSize: 13, marginTop: 2 }}>{s.description}</div>}
-                <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-                  <span style={{ background: P.pinkPale, color: P.pink, borderRadius: 100, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>฿{s.price.toLocaleString()}</span>
-                  <span style={{ background: P.gray, color: P.sub, borderRadius: 100, padding: "2px 10px", fontSize: 12 }}><Clock size={11} style={{ display: "inline" }} /> {s.duration_minutes} นาที</span>
-                </div>
-              </div>
-              {selected?.id === s.id && <CheckCircle size={22} color={P.pink} />}
-            </motion.button>
-          ))}
-        </div>
       </div>
     </PageWrap>
   );

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     brevo_api_key: Optional[str] = Field(default=None)
 
     gafiwshop_key_api: Optional[str] = Field(default=None)
+    nail_super_admin_key: Optional[str] = Field(default=None)  # key สำหรับ super-admin ระบบเช่า
 
     class Config:
         env_file = ".env"

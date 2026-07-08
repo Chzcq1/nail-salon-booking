@@ -161,6 +161,23 @@ def _run_migrations(engine):
         "CREATE INDEX IF NOT EXISTS ix_gafiw_orders_customer_id ON gafiw_orders (customer_id)",
         # nail_gallery: change image_url to TEXT so base64 images can be stored directly
         "ALTER TABLE nail_gallery ALTER COLUMN image_url TYPE TEXT",
+        # nail_renewal_requests: คำขอต่ออายุการเช่าระบบ
+        """CREATE TABLE IF NOT EXISTS nail_renewal_requests (
+            id SERIAL PRIMARY KEY,
+            shop_id INTEGER NOT NULL DEFAULT 1,
+            duration_months INTEGER NOT NULL,
+            amount NUMERIC(10,2) NOT NULL,
+            slip_image TEXT NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            admin_note TEXT,
+            requested_at TIMESTAMPTZ DEFAULT NOW(),
+            approved_at TIMESTAMPTZ,
+            new_expired_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_nail_renewal_requests_status ON nail_renewal_requests (status)",
+        # nail_bookings: composite indexes for common filter patterns
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_slot_status ON nail_bookings (slot_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_date_status ON nail_bookings (slot_date, status)",
 
         # ── Performance indexes ────────────────────────────────────────────────
         # orders: admin กรอง status บ่อย + เรียงตาม created_at

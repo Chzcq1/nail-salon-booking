@@ -21,7 +21,7 @@ from backend.config import get_settings
 from backend.database import get_db
 from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot,
-    NailBooking, NailGallery, OTPSession,
+    NailBooking, NailGallery, NailRenewalRequest, OTPSession,
 )
 from backend.slip_verify import verify_slip
 from backend.auth import generate_otp, create_admin_token, verify_admin_token
@@ -226,9 +226,25 @@ def get_slots(date: str, db: Session = Depends(get_db)):
         .order_by(NailTimeSlot.start_time)
         .all()
     )
+    # ── Single GROUP BY query replaces N+1 _count_confirmed_bookings calls ──
+    from sqlalchemy import func as sqlfunc
+    slot_ids = [s.id for s in slots]
+    booking_counts: dict = {}
+    if slot_ids:
+        rows = (
+            db.query(NailBooking.slot_id, sqlfunc.count(NailBooking.id).label("cnt"))
+            .filter(
+                NailBooking.slot_id.in_(slot_ids),
+                NailBooking.status.in_(["held", "pending_payment", "confirmed"]),
+            )
+            .group_by(NailBooking.slot_id)
+            .all()
+        )
+        booking_counts = {r.slot_id: r.cnt for r in rows}
+
     result = []
     for s in slots:
-        confirmed = _count_confirmed_bookings(db, s.id)
+        confirmed = booking_counts.get(s.id, 0)
         result.append({
             "id": s.id,
             "start_time": s.start_time,
@@ -438,6 +454,8 @@ def booking_status(hold_token: str, db: Session = Depends(get_db)):
 def admin_list_bookings(
     date: Optional[str] = None,
     status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
@@ -454,7 +472,7 @@ def admin_list_bookings(
             ["held", "pending_payment", "confirmed", "completed", "walkin"]
         ))
 
-    bookings = q.order_by(NailBooking.slot_date, NailBooking.start_time, NailBooking.id).all()
+    bookings = q.order_by(NailBooking.slot_date, NailBooking.start_time, NailBooking.id).limit(limit).offset(offset).all()
 
     result = []
     for b in bookings:
@@ -643,9 +661,25 @@ def admin_list_slots(
     if date:
         q = q.filter_by(slot_date=date)
     slots = q.order_by(NailTimeSlot.slot_date, NailTimeSlot.start_time).all()
+    # ── Single GROUP BY query replaces N+1 calls ──
+    from sqlalchemy import func as sqlfunc
+    slot_ids = [s.id for s in slots]
+    booking_counts: dict = {}
+    if slot_ids:
+        rows = (
+            db.query(NailBooking.slot_id, sqlfunc.count(NailBooking.id).label("cnt"))
+            .filter(
+                NailBooking.slot_id.in_(slot_ids),
+                NailBooking.status.in_(["held", "pending_payment", "confirmed"]),
+            )
+            .group_by(NailBooking.slot_id)
+            .all()
+        )
+        booking_counts = {r.slot_id: r.cnt for r in rows}
+
     result = []
     for s in slots:
-        confirmed = _count_confirmed_bookings(db, s.id)
+        confirmed = booking_counts.get(s.id, 0)
         result.append({
             "id": s.id,
             "slot_date": s.slot_date,
@@ -978,3 +1012,194 @@ def admin_update_settings(
             setattr(shop, field, val)
     db.commit()
     return {"ok": True}
+
+
+# ── Rental / Renewal System ──────────────────────────────────────────────────
+
+RENEWAL_PLANS = {1: 500.0, 3: 1300.0, 6: 2400.0, 12: 4500.0}
+
+
+def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
+    cfg = get_settings()
+    key = cfg.nail_super_admin_key
+    if not key:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
+    if x_super_admin_key != key:
+        raise HTTPException(status_code=403, detail="Key ไม่ถูกต้อง")
+
+
+@router.get("/admin/rental-status")
+def admin_rental_status(db: Session = Depends(get_db), authorization: str = Header(None)):
+    """สถานะการเช่าระบบ + คำขอต่ออายุล่าสุด"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    now = _now()
+    expired = bool(shop.expired_at and now > shop.expired_at)
+    days_left: Optional[int] = None
+    if shop.expired_at and not expired:
+        days_left = (shop.expired_at - now).days
+
+    last_req = (
+        db.query(NailRenewalRequest)
+        .order_by(NailRenewalRequest.requested_at.desc())
+        .first()
+    )
+    return {
+        "expired_at": shop.expired_at.isoformat() if shop.expired_at else None,
+        "is_expired": expired,
+        "days_left": days_left,
+        "last_request": {
+            "id": last_req.id,
+            "duration_months": last_req.duration_months,
+            "amount": float(last_req.amount),
+            "status": last_req.status,
+            "admin_note": last_req.admin_note,
+            "requested_at": last_req.requested_at.isoformat() if last_req.requested_at else None,
+            "new_expired_at": last_req.new_expired_at.isoformat() if last_req.new_expired_at else None,
+        } if last_req else None,
+    }
+
+
+class RenewalRequestBody(BaseModel):
+    duration_months: int
+    slip_image: str   # base64 data URI
+
+
+@router.post("/admin/renewal-request")
+def admin_submit_renewal(
+    body: RenewalRequestBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงิน"""
+    _check_admin(authorization)
+    amount = RENEWAL_PLANS.get(body.duration_months)
+    if not amount:
+        raise HTTPException(status_code=400, detail="ระยะเวลาไม่ถูกต้อง (เลือก 1, 3, 6 หรือ 12 เดือน)")
+    req = NailRenewalRequest(
+        duration_months=body.duration_months,
+        amount=amount,
+        slip_image=body.slip_image,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return {"ok": True, "id": req.id}
+
+
+# ── Super-Admin endpoints (NAIL_SUPER_ADMIN_KEY required) ────────────────────
+
+@router.get("/superadmin/status")
+def superadmin_status(
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    _check_superadmin(x_super_admin_key)
+    shop = _get_shop(db)
+    now = _now()
+    expired = bool(shop.expired_at and now > shop.expired_at)
+    return {
+        "shop_name": shop.shop_name,
+        "expired_at": shop.expired_at.isoformat() if shop.expired_at else None,
+        "is_expired": expired,
+        "days_left": (shop.expired_at - now).days if shop.expired_at and not expired else None,
+        "is_active": shop.is_active,
+    }
+
+
+@router.get("/superadmin/renewals")
+def superadmin_list_renewals(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    _check_superadmin(x_super_admin_key)
+    q = db.query(NailRenewalRequest)
+    if status:
+        q = q.filter_by(status=status)
+    items = q.order_by(NailRenewalRequest.requested_at.desc()).limit(50).all()
+    return [
+        {
+            "id": r.id,
+            "duration_months": r.duration_months,
+            "amount": float(r.amount),
+            "status": r.status,
+            "admin_note": r.admin_note,
+            "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+            "approved_at": r.approved_at.isoformat() if r.approved_at else None,
+            "new_expired_at": r.new_expired_at.isoformat() if r.new_expired_at else None,
+            "slip_image": r.slip_image,
+        }
+        for r in items
+    ]
+
+
+class ApproveBody(BaseModel):
+    duration_months_override: Optional[int] = None
+
+
+@router.post("/superadmin/renewals/{req_id}/approve")
+def superadmin_approve_renewal(
+    req_id: int,
+    body: ApproveBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    _check_superadmin(x_super_admin_key)
+    req = db.query(NailRenewalRequest).filter_by(id=req_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอ")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail=f"สถานะปัจจุบัน: {req.status}")
+
+    months = body.duration_months_override or req.duration_months
+    shop = _get_shop(db)
+    now = _now()
+    base = shop.expired_at if (shop.expired_at and shop.expired_at > now) else now
+    new_expiry = base + timedelta(days=months * 30)
+
+    shop.expired_at = new_expiry
+    req.status = "approved"
+    req.approved_at = now
+    req.new_expired_at = new_expiry
+    db.commit()
+    return {"ok": True, "new_expired_at": new_expiry.isoformat()}
+
+
+class RejectBody(BaseModel):
+    reason: Optional[str] = "ไม่ผ่านการตรวจสอบ"
+
+
+@router.post("/superadmin/renewals/{req_id}/reject")
+def superadmin_reject_renewal(
+    req_id: int,
+    body: RejectBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    _check_superadmin(x_super_admin_key)
+    req = db.query(NailRenewalRequest).filter_by(id=req_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอ")
+    req.status = "rejected"
+    req.admin_note = body.reason
+    db.commit()
+    return {"ok": True}
+
+
+class SetExpiryBody(BaseModel):
+    expired_at: Optional[str] = None   # ISO datetime string หรือ null = ไม่มีกำหนด
+
+
+@router.put("/superadmin/set-expiry")
+def superadmin_set_expiry(
+    body: SetExpiryBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้งวันหมดอายุตรงๆ (bypass renewal flow) — ใช้สำหรับ super-admin เปิด/ปิดได้ทันที"""
+    _check_superadmin(x_super_admin_key)
+    shop = _get_shop(db)
+    shop.expired_at = datetime.fromisoformat(body.expired_at) if body.expired_at else None
+    db.commit()
+    return {"ok": True, "expired_at": shop.expired_at.isoformat() if shop.expired_at else None}

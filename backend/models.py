@@ -329,3 +329,19 @@ class NailGallery(Base):
     sort_order = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class NailRenewalRequest(Base):
+    """คำขอต่ออายุการเช่าระบบ"""
+    __tablename__ = "nail_renewal_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, nullable=False, default=1)
+    duration_months = Column(Integer, nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    slip_image = Column(Text, nullable=False)          # base64 data URI
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    admin_note = Column(Text, nullable=True)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now())
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    new_expired_at = Column(DateTime(timezone=True), nullable=True)

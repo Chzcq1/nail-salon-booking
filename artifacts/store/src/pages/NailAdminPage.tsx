@@ -11,7 +11,7 @@ import {
   Plus, Trash2, CheckCircle, XCircle, Loader2, RefreshCw,
   Phone, User, AlertCircle, Upload, ChevronRight, TrendingUp,
   Banknote, Users, ArrowLeft, Edit2, Save, X, Ban, RotateCcw,
-  MessageCircle,
+  MessageCircle, Package, Crown, ChevronLeft, Palette,
 } from "lucide-react";
 
 // ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
@@ -24,8 +24,8 @@ const A = {
   bg:        "#FFF5F8",
   card:      "#FFFFFF",
   text:      "#1A1A2E",
-  sub:       "#5A5A7A",
-  muted:     "#9090A8",
+  sub:       "#45455F",    // เพิ่มความเข้มจาก #5A5A7A — ผ่าน WCAG AA
+  muted:     "#666680",    // เพิ่มความเข้มจาก #9090A8 — ผ่าน WCAG AA
   gray:      "#F0F0F8",
   grayBorder:"#E0E0EE",
   success:   "#2E7D32",
@@ -38,7 +38,7 @@ const A = {
   infoBg:    "#E3F2FD",
 } as const;
 
-type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings";
+type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal";
 
 function toISO(d: Date) { return d.toISOString().split("T")[0]; }
 function fmtDate(s: string) {
@@ -166,50 +166,51 @@ export default function NailAdminPage() {
           <h1 style={{ fontSize: 22, fontWeight: 700, color: A.text, marginBottom: 4 }}>หลังร้านทำเล็บ</h1>
 
           {loginStep === "passcode" ? (
-            <>
+            <form onSubmit={e => { e.preventDefault(); handlePasscode(); }}>
               <p style={{ color: A.sub, fontSize: 14, marginBottom: 28 }}>กรุณาใส่รหัสผ่าน Admin</p>
               <input
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 value={passcodeInput}
                 onChange={e => setPasscodeInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handlePasscode()}
                 placeholder="รหัสผ่าน Admin"
                 style={inputStyle}
                 autoFocus
               />
               {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
-              <button onClick={handlePasscode} disabled={loading}
+              <button type="submit" disabled={loading}
                 style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {loading ? <Loader2 size={18} className="animate-spin" /> : null}
                 {loading ? "กำลังตรวจสอบ…" : "ต่อไป →"}
               </button>
-            </>
+            </form>
           ) : (
-            <>
+            <form onSubmit={e => { e.preventDefault(); handleOTP(); }}>
               <p style={{ color: A.sub, fontSize: 14, marginBottom: 8 }}>ส่ง OTP ไปยัง Telegram แล้ว</p>
               <p style={{ color: A.muted, fontSize: 12, marginBottom: 24 }}>กรุณาเปิด Telegram group admin และกรอกรหัส 6 หลักที่ได้รับ</p>
               <input
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={6}
                 value={otpInput}
                 onChange={e => setOtpInput(e.target.value.replace(/\D/g, ""))}
-                onKeyDown={e => e.key === "Enter" && handleOTP()}
                 placeholder="รหัส OTP 6 หลัก"
                 style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: 700 }}
                 autoFocus
               />
               {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
-              <button onClick={handleOTP} disabled={loading || otpInput.length < 6}
+              <button type="submit" disabled={loading || otpInput.length < 6}
                 style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: (loading || otpInput.length < 6) ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: (loading || otpInput.length < 6) ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {loading ? <Loader2 size={18} className="animate-spin" /> : null}
                 {loading ? "กำลังยืนยัน…" : "เข้าสู่ระบบ"}
               </button>
-              <button onClick={() => { setLoginStep("passcode"); setOtpInput(""); setAuthError(""); }}
+              <button type="button" onClick={() => { setLoginStep("passcode"); setOtpInput(""); setAuthError(""); }}
                 style={{ marginTop: 10, background: "none", border: "none", color: A.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
                 ← กลับใส่รหัสผ่านใหม่
               </button>
-            </>
+            </form>
           )}
         </div>
       </div>
@@ -221,8 +222,10 @@ export default function NailAdminPage() {
     { id: "bookings",  label: "คิว",        icon: <Calendar size={17} /> },
     { id: "services",  label: "บริการ",     icon: <Scissors size={17} /> },
     { id: "schedule",  label: "ตารางเวลา",  icon: <Clock size={17} /> },
+    { id: "staff",     label: "ช่าง",       icon: <Users size={17} /> },
     { id: "gallery",   label: "แกลเลอรี",  icon: <Image size={17} /> },
     { id: "settings",  label: "ตั้งค่า",    icon: <Settings size={17} /> },
+    { id: "renewal",   label: "ต่ออายุ",   icon: <Crown size={17} /> },
   ];
 
   return (
@@ -268,8 +271,10 @@ export default function NailAdminPage() {
             {tab === "bookings"  && <BookingsTab token={token} />}
             {tab === "services"  && <ServicesTab token={token} />}
             {tab === "schedule"  && <ScheduleTab token={token} />}
+            {tab === "staff"     && <StaffTab token={token} />}
             {tab === "gallery"   && <GalleryTab token={token} />}
             {tab === "settings"  && <SettingsTab token={token} />}
+            {tab === "renewal"   && <RenewalTab token={token} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -812,11 +817,23 @@ function ScheduleTab({ token }: { token: string }) {
         <Clock size={16} color={A.primary} /> ช่วงเวลาจอง
       </h3>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
+        <button
+          onClick={() => { const d = new Date(selDate + "T00:00:00"); d.setDate(d.getDate() - 1); setSelDate(toISO(d)); }}
+          style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "9px 11px", cursor: "pointer", color: A.primary, fontFamily: "inherit", flexShrink: 0, fontSize: 16, lineHeight: 1 }}
+          title="วันก่อนหน้า">
+          <ChevronLeft size={16} />
+        </button>
         <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)}
           style={{ flex: 1, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, fontFamily: "inherit", background: A.card }} />
+        <button
+          onClick={() => { const d = new Date(selDate + "T00:00:00"); d.setDate(d.getDate() + 1); setSelDate(toISO(d)); }}
+          style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "9px 11px", cursor: "pointer", color: A.primary, fontFamily: "inherit", flexShrink: 0, fontSize: 16, lineHeight: 1 }}
+          title="วันถัดไป">
+          <ChevronRight size={16} />
+        </button>
         <button onClick={() => setShowAdd(true)}
-          style={{ background: A.primary, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+          style={{ background: A.primary, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>
           <Plus size={15} /> เพิ่ม
         </button>
       </div>
