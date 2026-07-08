@@ -178,6 +178,9 @@ def _run_migrations(engine):
         # nail_bookings: composite indexes for common filter patterns
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_slot_status ON nail_bookings (slot_id, status)",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_date_status ON nail_bookings (slot_date, status)",
+        # closed_dates added to nail_shop_settings (วันปิดร้าน) — table already existed on
+        # production before this column was added to the model, so create_all() never adds it
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS closed_dates TEXT",
 
         # ── Performance indexes ────────────────────────────────────────────────
         # orders: admin กรอง status บ่อย + เรียงตาม created_at
