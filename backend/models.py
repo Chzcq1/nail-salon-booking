@@ -324,6 +324,7 @@ class NailBooking(Base):
     hold_token = Column(String(64), unique=True, nullable=True, index=True)
     admin_note = Column(Text, nullable=True)
     is_walkin = Column(Boolean, default=False, nullable=False)
+    wallet_refunded = Column(Boolean, nullable=False, default=False)  # กันคืนเครดิตซ้ำ (ล็อกแถวก่อนเช็ค/ตั้งค่า)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

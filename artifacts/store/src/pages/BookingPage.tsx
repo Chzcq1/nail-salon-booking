@@ -386,7 +386,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         </button>
 
         {/* Wallet button — แสดงเสมอ (logged in: แสดงยอด, ไม่ได้ login: เชิญชวนเติมเงิน) */}
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <a href="/wallet"
             style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
             <Wallet size={16} />
@@ -394,6 +394,10 @@ function LandingScreen({ settings, gallery, onBook }: any) {
               ? <>กระเป๋าเงิน · <span style={{ fontWeight: 800 }}>฿{walletBalance.toFixed(2)}</span></>
               : "กระเป๋าเงิน / เติมเงินมัดจำ"
             }
+          </a>
+          <a href="/my-bookings"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
+            <Calendar size={16} /> การจองของฉัน
           </a>
         </div>
       </div>

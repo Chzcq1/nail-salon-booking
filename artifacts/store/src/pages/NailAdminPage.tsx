@@ -550,6 +550,9 @@ function BookingsTab({ token }: { token: string }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmRefundId, setConfirmRefundId] = useState<number | null>(null);
   const [changeServiceFor, setChangeServiceFor] = useState<any | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [deletePasscode, setDeletePasscode] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   const url = `/api/nail/admin/bookings?date=${filterDate}` + (filterStatus !== "all" ? `&status=${filterStatus}` : "");
   const { data: bookings = [], isLoading, refetch } = useQuery<any[]>({
@@ -602,6 +605,23 @@ function BookingsTab({ token }: { token: string }) {
     mutationFn: () =>
       fetch("/api/nail/admin/bookings/walkin", { method: "POST", headers: authH(token), body: JSON.stringify({ customer_name: wName, customer_phone: wPhone, slot_date: filterDate, start_time: wTime }) }).then(r => r.json()),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }); setShowWalkin(false); setWName(""); setWPhone(""); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/nail/admin/bookings/${id}/delete`, {
+        method: "POST", headers: authH(token), body: JSON.stringify({ passcode: deletePasscode }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`);
+      return d;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-dashboard"] });
+      setDeleteTarget(null); setDeletePasscode(""); setDeleteError("");
+    },
+    onError: (e: Error) => setDeleteError(e.message),
   });
 
   const pendingCount = bookings.filter(b => b.status === "pending_payment").length;
@@ -739,6 +759,11 @@ function BookingsTab({ token }: { token: string }) {
                         <Scissors size={14} /> เปลี่ยนบริการ
                       </button>
                     )}
+                    <button onClick={() => { setDeleteTarget({ id: b.id, name: b.customer_name }); setDeletePasscode(""); setDeleteError(""); }}
+                      title="ลบรายการนี้ออกจากระบบถาวร"
+                      style={{ background: A.gray, color: A.error, border: `1px solid ${A.error}33`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                      <Trash2 size={14} /> ลบถาวร
+                    </button>
                   </div>
 
                   {/* Slip Image */}
@@ -791,6 +816,45 @@ function BookingsTab({ token }: { token: string }) {
         onCancel={() => setConfirmRefundId(null)}
         onConfirm={() => confirmRefundId !== null && refundMutation.mutate(confirmRefundId)}
       />
+
+      {/* Delete Booking Modal — ต้องใส่รหัสยืนยันของร้านซ้ำก่อนลบถาวร */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(26,26,46,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: 20 }}
+            onClick={() => setDeleteTarget(null)}>
+            <motion.div initial={{ scale: 0.9, y: 10, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              style={{ background: A.card, borderRadius: 20, padding: 26, maxWidth: 340, width: "100%", boxShadow: "0 16px 48px rgba(136,14,79,0.3)", fontFamily: "'Prompt', sans-serif" }}>
+              <div style={{ width: 54, height: 54, borderRadius: "50%", background: A.errorBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 26 }}>🗑️</div>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 6, textAlign: "center" }}>ลบรายการถาวร?</h3>
+              <p style={{ color: A.sub, fontSize: 13, marginBottom: 14, lineHeight: 1.5, textAlign: "center" }}>
+                จะลบการจองของ <strong>{deleteTarget.name}</strong> ออกจากระบบถาวร (ไม่ใช่แค่ยกเลิก) และคืนเครดิตกระเป๋าเงินให้ลูกค้าถ้าจ่ายด้วยเครดิต
+                <br />กรุณาใส่<strong>รหัสผ่านร้าน</strong>เพื่อยืนยัน
+              </p>
+              <input
+                type="password"
+                value={deletePasscode}
+                onChange={e => { setDeletePasscode(e.target.value); setDeleteError(""); }}
+                placeholder="รหัสผ่านร้าน"
+                autoFocus
+                style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }}
+              />
+              {deleteError && <p style={{ color: A.error, fontSize: 12, marginBottom: 10 }}>{deleteError}</p>}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setDeleteTarget(null)} style={{ flex: 1, background: A.gray, border: "none", borderRadius: 12, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 600, color: A.text }}>
+                  ยกเลิก
+                </button>
+                <button onClick={() => deleteTarget && deletePasscode.trim() && deleteMutation.mutate(deleteTarget.id)}
+                  disabled={!deletePasscode.trim() || deleteMutation.isPending}
+                  style={{ flex: 1, background: `linear-gradient(135deg, ${A.error}, #7A0000)`, color: "#fff", border: "none", borderRadius: 12, padding: "12px", cursor: deleteMutation.isPending ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !deletePasscode.trim() || deleteMutation.isPending ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  {deleteMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : "ยืนยันลบ"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Change Service Modal — ลูกค้าอยากเปลี่ยนไปทำบริการอื่นหน้าร้าน */}
       {changeServiceFor && (

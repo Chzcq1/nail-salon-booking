@@ -780,7 +780,7 @@ export default function WalletPage() {
             ออกจากระบบแล้ว
           </div>
         )}
-        <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); setLogoutMsg(false); }} />
+        <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); setLogoutMsg(false); setLocation("/"); }} />
       </>
     );
   }

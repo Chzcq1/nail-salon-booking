@@ -25,7 +25,6 @@ from backend.models import (
     NailBooking, NailGallery, NailRenewalRequest, OTPSession,
     Customer, CreditTransaction,
 )
-from backend.slip_verify import verify_slip
 from backend.auth import generate_otp, create_admin_token, verify_admin_token
 from backend.routes.wallet import get_wallet_customer
 import backend.bot as bot_module
@@ -503,30 +502,9 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
 
     booking.payment_proof = req.payment_proof
 
-    # ตรวจสลิปอัตโนมัติ
-    shop = _get_shop(db)
-    settings = get_settings()
-    if settings.slip2go_api_key:
-        try:
-            result = await verify_slip(
-                req.payment_proof,
-                expected_amount=float(booking.deposit_total or 0),
-                bank_account=shop.bank_account_number,
-            )
-            booking.slip_verify_status = result.get("status")
-            booking.slip_verify_result = json.dumps(result, ensure_ascii=False)
-
-            if result.get("success"):
-                booking.status = "confirmed"
-            else:
-                booking.status = "pending_payment"
-        except Exception as e:
-            logger.warning(f"slip verify error: {e}")
-            booking.status = "pending_payment"
-            booking.slip_verify_status = "error"
-    else:
-        # ไม่มี slip2go → รอแอดมินอนุมัติ
-        booking.status = "pending_payment"
+    # ไม่ตรวจสลิปอัตโนมัติแล้ว — แอดมินตรวจสอบยอดเงินและยืนยันเองทุกครั้ง
+    # (เผื่ออนาคตอยากเปิดใช้ Slip2Go อัตโนมัติอีกครั้ง ดู backend/slip_verify.py)
+    booking.status = "pending_payment"
 
     db.commit()
     db.refresh(booking)
@@ -671,6 +649,36 @@ def booking_status(hold_token: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/booking/my")
+def my_bookings(
+    db: Session = Depends(get_db),
+    customer: Customer = Depends(get_wallet_customer),
+):
+    """ประวัติการจองของลูกค้าที่ล็อกอินอยู่ — กันลืมวันเวลาที่จองไว้"""
+    bookings = (
+        db.query(NailBooking)
+        .filter(NailBooking.customer_id == customer.id)
+        .order_by(NailBooking.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": b.id,
+            "booking_ref": b.booking_ref,
+            "status": b.status,
+            "slot_date": b.slot_date,
+            "start_time": b.start_time,
+            "end_time": b.end_time,
+            "service_name": b.service_name,
+            "deposit_total": float(b.deposit_total or 0),
+            "payment_method": b.payment_method,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b in bookings
+    ]
+
+
 # ─── Admin endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/admin/bookings")
@@ -782,6 +790,40 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
     }
 
 
+def _refund_wallet_if_needed(db: Session, booking: "NailBooking", note: str) -> None:
+    """
+    คืนเครดิตเข้ากระเป๋าลูกค้า ถ้าการจองนี้จ่ายด้วยเครดิตในกระเป๋าเงิน
+    ข้อกำหนด: `booking` ต้องถูกโหลดด้วย SELECT FOR UPDATE (with_for_update()) โดยผู้เรียก
+    อยู่แล้ว ก่อนเรียกฟังก์ชันนี้ — เพื่อให้การเช็คสถานะ (refundable) กับการเช็ค/ตั้งค่า
+    wallet_refunded อยู่บนแถวที่ถูกล็อกเดียวกัน กันคืนเงินซ้ำเมื่อมีการเรียก refund/delete พร้อมกัน
+    """
+    if not booking or booking.payment_method != "wallet" or not booking.customer_id:
+        return
+    if booking.wallet_refunded:
+        return  # กันคืนเงินซ้ำ — ตั้งค่าไว้แล้วในทรานแซกชันก่อนหน้า
+    customer = (
+        db.query(Customer)
+        .filter_by(id=booking.customer_id)
+        .with_for_update()
+        .first()
+    )
+    if not customer:
+        return
+    deposit = Decimal(str(booking.deposit_total or 0))
+    if deposit <= 0:
+        booking.wallet_refunded = True
+        return
+    customer.balance = (customer.balance or Decimal("0")) + deposit
+    db.add(CreditTransaction(
+        customer_id=customer.id,
+        txn_type="nail_booking_refund",
+        amount=deposit,
+        description=f"คืนมัดจำจองคิวทำเล็บ #{booking.booking_ref} ({note})",
+        ref_id=booking.id,
+    ))
+    booking.wallet_refunded = True
+
+
 @router.post("/admin/bookings/{booking_id}/refund")
 def admin_refund_booking(
     booking_id: int,
@@ -789,15 +831,52 @@ def admin_refund_booking(
     authorization: str = Header(None),
 ):
     _check_admin(authorization)
-    booking = db.query(NailBooking).filter_by(id=booking_id).first()
+    booking = db.query(NailBooking).filter_by(id=booking_id).with_for_update().first()
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบการจอง")
     if booking.status not in ("pending_payment", "confirmed"):
         raise HTTPException(status_code=409, detail=f"ไม่สามารถคืนเงินสถานะ: {booking.status}")
+    _refund_wallet_if_needed(db, booking, "ยกเลิกโดยแอดมิน")
     booking.status = "cancelled"
     booking.admin_note = (booking.admin_note or "") + " [ยกเลิกและคืนเงินโดยแอดมิน]"
     db.commit()
     return {"ok": True, "message": "ยกเลิกและบันทึกการคืนเงินแล้ว"}
+
+
+class DeleteBookingBody(BaseModel):
+    passcode: str
+
+
+@router.post("/admin/bookings/{booking_id}/delete")
+def admin_delete_booking(
+    booking_id: int,
+    body: DeleteBookingBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """
+    ลบการจองออกจากระบบถาวร (ใช้ล้างรายการทดสอบ/รายการผิดพลาด) — ต้องใส่รหัสผ่านร้าน
+    (ADMIN_PASSCODE) ซ้ำอีกครั้งเพื่อยืนยัน นอกเหนือจาก session token ปกติ
+    ถ้าการจองนี้จ่ายด้วยเครดิตในกระเป๋าเงิน จะคืนเครดิตให้ลูกค้าก่อนลบ
+    """
+    _check_admin(authorization)
+
+    cfg = get_settings()
+    passcode = cfg.admin_passcode
+    if not passcode:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
+    import hmac as _hmac
+    if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
+        raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+
+    booking = db.query(NailBooking).filter_by(id=booking_id).with_for_update().first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="ไม่พบการจอง")
+
+    _refund_wallet_if_needed(db, booking, "ลบรายการโดยแอดมิน")
+    db.delete(booking)
+    db.commit()
+    return {"ok": True, "message": "ลบการจองแล้ว"}
 
 
 class UpdateBookingBody(BaseModel):

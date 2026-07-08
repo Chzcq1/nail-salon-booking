@@ -56,6 +56,8 @@ def _run_cleanup(engine):
         "DELETE FROM nail_bookings WHERE status = 'cancelled' AND created_at < NOW() - INTERVAL '14 days'",
         # ลบ held ที่หมดเวลานานเกิน 1 วันโดยไม่ได้จ่ายเงิน
         "DELETE FROM nail_bookings WHERE status = 'held' AND held_until < NOW() - INTERVAL '1 day'",
+        # ลบการจองที่เสร็จสิ้น/walk-in เก่าเกิน 180 วัน — กันประวัติการจองลูกค้าโตไม่มีที่สิ้นสุด
+        "DELETE FROM nail_bookings WHERE status IN ('completed', 'walkin') AND created_at < NOW() - INTERVAL '180 days'",
 
         # ── Nail Time Slots ───────────────────────────────────────────────────
         # ลบ slot วันที่ผ่านมาเกิน 60 วัน — ไม่มีประโยชน์เก็บอีกต่อไป
@@ -297,6 +299,7 @@ def _run_migrations(engine):
 
         # ── Link nail bookings to customer wallet accounts ──────────────────────
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)",
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS wallet_refunded BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'slip'",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_customer_id ON nail_bookings (customer_id)",
         # deposit_cents / deposit_total อาจหายถ้า table ถูกสร้างก่อน columns นี้จะถูกเพิ่ม

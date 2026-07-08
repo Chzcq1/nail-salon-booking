@@ -7,6 +7,7 @@ import StoreFront from "@/pages/StoreFront";
 import AnnouncementPage from "@/pages/AnnouncementPage";
 import WalletPage from "@/pages/WalletPage";
 import BookingPage from "@/pages/BookingPage";
+import MyBookingsPage from "@/pages/MyBookingsPage";
 import NailAdminPage from "@/pages/NailAdminPage";
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/shop" component={StoreFront} />
       <Route path="/announcements" component={AnnouncementPage} />
       <Route path="/wallet" component={WalletPage} />
+      <Route path="/my-bookings" component={MyBookingsPage} />
       <Route path="/admin" component={NailAdminPage} />
       <Route path="/nail-admin" component={NailAdminPage} />
       <Route component={NotFound} />
