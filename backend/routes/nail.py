@@ -39,6 +39,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ประเทศไทยอยู่ UTC+7 ตลอดปี (ไม่มี DST) — ใช้คำนวณ "วันนี้/เวลานี้" ให้ตรงกับความเป็นจริงของร้าน
+TH_TZ = timezone(timedelta(hours=7))
+
+
+def _now_th() -> datetime:
+    return _now().astimezone(TH_TZ)
+
+
 def _get_shop(db: Session) -> NailShopSettings:
     shop = db.query(NailShopSettings).filter_by(id=1).first()
     if not shop:
@@ -280,6 +288,7 @@ def get_services(db: Session = Depends(get_db)):
             "id": s.id, "name": s.name, "description": s.description,
             "duration_minutes": s.duration_minutes,
             "price": float(s.price or 0), "color": s.color,
+            "deposit_amount": float(s.deposit_amount) if s.deposit_amount is not None else None,
         }
         for s in items
     ]
@@ -321,8 +330,15 @@ def get_slots(date: str, db: Session = Depends(get_db)):
         )
         booking_counts = {r.slot_id: r.cnt for r in rows}
 
+    # ── ถ้าเป็น "วันนี้" (ตามเวลาไทย) ให้ตัดช่วงเวลาที่ผ่านไปแล้วออก ──────────
+    now_th = _now_th()
+    is_today = date == now_th.strftime("%Y-%m-%d")
+    current_hm = now_th.strftime("%H:%M")
+
     result = []
     for s in slots:
+        if is_today and s.start_time <= current_hm:
+            continue  # เวลานี้ผ่านไปแล้ว ห้ามจองย้อนหลัง
         confirmed = booking_counts.get(s.id, 0)
         result.append({
             "id": s.id,
@@ -384,6 +400,13 @@ def hold_slot(
     if not slot:
         raise HTTPException(status_code=404, detail="ไม่พบช่วงเวลาที่เลือก")
 
+    # ── ห้ามจองช่วงเวลาที่ผ่านไปแล้ว (กันเผื่อ client ส่ง slot ของวันนี้ที่เวลาผ่านไปแล้วมา) ──
+    now_th = _now_th()
+    if slot.slot_date < now_th.strftime("%Y-%m-%d") or (
+        slot.slot_date == now_th.strftime("%Y-%m-%d") and slot.start_time <= now_th.strftime("%H:%M")
+    ):
+        raise HTTPException(status_code=409, detail="ช่วงเวลานี้ผ่านไปแล้ว กรุณาเลือกเวลาอื่น")
+
     # Count inside the same transaction (consistent read after lock)
     confirmed = _count_confirmed_bookings(db, slot.id)
     if confirmed >= (slot.max_bookings or 1):
@@ -392,7 +415,11 @@ def hold_slot(
     shop = _get_shop(db)
     service = db.query(NailService).filter_by(id=req.service_id).first() if req.service_id else None
 
-    base_deposit = float(shop.deposit_amount or 200)
+    # ค่ามัดจำ: ใช้ของบริการถ้าตั้งไว้ ไม่งั้น fallback เป็นค่าเริ่มต้นของร้าน
+    if service is not None and service.deposit_amount is not None:
+        base_deposit = float(service.deposit_amount)
+    else:
+        base_deposit = float(shop.deposit_amount or 200)
     rand_cents = random.randint(1, 99)  # สุ่มเศษสตางค์ 01–99 เพื่อระบุตัวตน
     deposit_total = round(base_deposit + rand_cents / 100, 2)
 
@@ -775,6 +802,7 @@ def admin_refund_booking(
 class UpdateBookingBody(BaseModel):
     status: Optional[str] = None
     admin_note: Optional[str] = None
+    service_id: Optional[int] = None  # ใช้ตอนลูกค้าขอเปลี่ยนบริการหน้าร้าน
 
 
 @router.put("/admin/bookings/{booking_id}")
@@ -792,8 +820,28 @@ def admin_update_booking(
         booking.status = body.status
     if body.admin_note is not None:
         booking.admin_note = body.admin_note
+
+    deposit_diff = None
+    if body.service_id is not None and body.service_id != booking.service_id:
+        new_service = db.query(NailService).filter_by(id=body.service_id).first()
+        if not new_service:
+            raise HTTPException(status_code=404, detail="ไม่พบบริการที่ต้องการเปลี่ยน")
+        old_name = booking.service_name or "-"
+        old_deposit = float(booking.deposit_amount or 0)
+        new_deposit = float(new_service.deposit_amount) if new_service.deposit_amount is not None else None
+        booking.service_id = new_service.id
+        booking.service_name = new_service.name
+        note = f"[เปลี่ยนบริการ: {old_name} → {new_service.name}]"
+        if new_deposit is not None:
+            deposit_diff = round(new_deposit - old_deposit, 2)
+            if deposit_diff > 0:
+                note += f" ต้องเก็บมัดจำเพิ่ม ฿{deposit_diff:.2f}"
+            elif deposit_diff < 0:
+                note += f" ต้องคืนมัดจำส่วนต่าง ฿{abs(deposit_diff):.2f}"
+        booking.admin_note = ((booking.admin_note or "") + " " + note).strip()
+
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "deposit_diff": deposit_diff}
 
 
 class WalkInBody(BaseModel):
@@ -1132,6 +1180,7 @@ class ServiceBody(BaseModel):
     description: Optional[str] = None
     duration_minutes: Optional[int] = 60
     price: Optional[float] = 0
+    deposit_amount: Optional[float] = None  # ถ้าไม่ระบุ (None) จะใช้ค่ามัดจำเริ่มต้นของร้าน
     color: Optional[str] = "#FF6B9D"
     sort_order: Optional[int] = 0
 
@@ -1142,6 +1191,7 @@ def admin_list_services(db: Session = Depends(get_db), authorization: str = Head
     items = db.query(NailService).filter(NailService.is_active == True).order_by(NailService.sort_order, NailService.id).all()
     return [{"id": s.id, "name": s.name, "description": s.description,
              "duration_minutes": s.duration_minutes, "price": float(s.price or 0),
+             "deposit_amount": float(s.deposit_amount) if s.deposit_amount is not None else None,
              "color": s.color, "is_active": s.is_active, "sort_order": s.sort_order}
             for s in items]
 
@@ -1156,7 +1206,9 @@ def admin_create_service(
     s = NailService(
         name=body.name, description=body.description,
         duration_minutes=body.duration_minutes or 60,
-        price=body.price or 0, color=body.color or "#FF6B9D",
+        price=body.price or 0,
+        deposit_amount=body.deposit_amount if body.deposit_amount is not None else None,
+        color=body.color or "#FF6B9D",
         sort_order=body.sort_order or 0,
     )
     db.add(s)
@@ -1180,6 +1232,7 @@ def admin_update_service(
     s.description = body.description
     s.duration_minutes = body.duration_minutes or 60
     s.price = body.price or 0
+    s.deposit_amount = body.deposit_amount if body.deposit_amount is not None else None
     s.color = body.color or "#FF6B9D"
     s.sort_order = body.sort_order or 0
     db.commit()

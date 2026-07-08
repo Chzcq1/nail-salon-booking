@@ -243,6 +243,7 @@ class NailService(Base):
     description = Column(Text, nullable=True)
     duration_minutes = Column(Integer, default=60, nullable=False)
     price = Column(Numeric(10, 2), default=0, nullable=False)
+    deposit_amount = Column(Numeric(10, 2), nullable=True)  # ถ้าไม่ตั้ง จะใช้ค่ามัดจำเริ่มต้นของร้าน (nail_shop_settings.deposit_amount)
     color = Column(String(20), default="#FF6B9D", nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     sort_order = Column(Integer, default=0, nullable=False)

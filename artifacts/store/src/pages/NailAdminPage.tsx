@@ -549,6 +549,7 @@ function BookingsTab({ token }: { token: string }) {
   const [wTime, setWTime] = useState("09:00");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmRefundId, setConfirmRefundId] = useState<number | null>(null);
+  const [changeServiceFor, setChangeServiceFor] = useState<any | null>(null);
 
   const url = `/api/nail/admin/bookings?date=${filterDate}` + (filterStatus !== "all" ? `&status=${filterStatus}` : "");
   const { data: bookings = [], isLoading, refetch } = useQuery<any[]>({
@@ -559,10 +560,36 @@ function BookingsTab({ token }: { token: string }) {
     retry: 1,
   });
 
+  const { data: services = [] } = useQuery<any[]>({
+    queryKey: ["nail-admin-services"],
+    queryFn: () => fetch("/api/nail/admin/services", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
+  });
+
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
       fetch(`/api/nail/admin/bookings/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ status }) }).then(r => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }),
+  });
+
+  const [changeServiceResult, setChangeServiceResult] = useState<string | null>(null);
+  const changeServiceMutation = useMutation({
+    mutationFn: ({ id, service_id }: { id: number; service_id: number }) =>
+      fetch(`/api/nail/admin/bookings/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ service_id }) }).then(r => r.json()),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] });
+      setChangeServiceFor(null);
+      if (data?.deposit_diff != null && data.deposit_diff !== 0) {
+        setChangeServiceResult(
+          data.deposit_diff > 0
+            ? `เปลี่ยนบริการสำเร็จ — เก็บมัดจำเพิ่มจากลูกค้าอีก ฿${data.deposit_diff.toFixed(2)}`
+            : `เปลี่ยนบริการสำเร็จ — คืนมัดจำส่วนต่างให้ลูกค้า ฿${Math.abs(data.deposit_diff).toFixed(2)}`
+        );
+      } else {
+        setChangeServiceResult("เปลี่ยนบริการสำเร็จ");
+      }
+    },
   });
 
   const refundMutation = useMutation({
@@ -706,6 +733,12 @@ function BookingsTab({ token }: { token: string }) {
                         ✓ เสร็จสิ้น
                       </button>
                     )}
+                    {["pending_payment", "confirmed", "held", "walkin"].includes(b.status) && (
+                      <button onClick={() => setChangeServiceFor(b)}
+                        style={{ flex: 1, background: A.infoBg, color: A.info, border: `1px solid ${A.info}44`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                        <Scissors size={14} /> เปลี่ยนบริการ
+                      </button>
+                    )}
                   </div>
 
                   {/* Slip Image */}
@@ -758,6 +791,49 @@ function BookingsTab({ token }: { token: string }) {
         onCancel={() => setConfirmRefundId(null)}
         onConfirm={() => confirmRefundId !== null && refundMutation.mutate(confirmRefundId)}
       />
+
+      {/* Change Service Modal — ลูกค้าอยากเปลี่ยนไปทำบริการอื่นหน้าร้าน */}
+      {changeServiceFor && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 9999 }}>
+          <motion.div initial={{ y: 100 }} animate={{ y: 0 }} style={{ background: A.card, borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480 }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, color: A.text }}>เปลี่ยนบริการ</h3>
+            <p style={{ fontSize: 13, color: A.sub, marginBottom: 14 }}>
+              คิวปัจจุบันของ {changeServiceFor.customer_name}: <strong>{changeServiceFor.service_name || "-"}</strong> (มัดจำ ฿{Number(changeServiceFor.deposit_amount || 0).toFixed(2)})
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+              {services.map((s: any) => (
+                <button
+                  key={s.id}
+                  onClick={() => changeServiceMutation.mutate({ id: changeServiceFor.id, service_id: s.id })}
+                  disabled={changeServiceMutation.isPending || s.id === changeServiceFor.service_id}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    border: `1.5px solid ${s.id === changeServiceFor.service_id ? A.primary : A.border}`,
+                    background: s.id === changeServiceFor.service_id ? A.pale : A.bg,
+                    borderRadius: 12, padding: "12px 14px", cursor: s.id === changeServiceFor.service_id ? "default" : "pointer",
+                    fontFamily: "inherit", textAlign: "left", opacity: changeServiceMutation.isPending ? 0.6 : 1,
+                  }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: A.text }}>{s.name}</span>
+                  <span style={{ fontSize: 12, color: A.sub }}>
+                    ฿{s.price.toLocaleString()} • มัดจำ {s.deposit_amount != null ? `฿${Number(s.deposit_amount).toLocaleString()}` : "ค่าเริ่มต้นร้าน"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setChangeServiceFor(null)} style={{ width: "100%", marginTop: 16, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>
+              ปิด
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={changeServiceResult !== null}
+        title="สำเร็จ"
+        message={changeServiceResult || ""}
+        onCancel={() => setChangeServiceResult(null)}
+        onConfirm={() => setChangeServiceResult(null)}
+      />
     </div>
   );
 }
@@ -771,6 +847,7 @@ function ServicesTab({ token }: { token: string }) {
   const [desc, setDesc] = useState("");
   const [price, setPrice] = useState("0");
   const [dur, setDur] = useState("60");
+  const [deposit, setDeposit] = useState("");
 
   const { data: services = [] } = useQuery<any[]>({
     queryKey: ["nail-admin-services"],
@@ -779,12 +856,15 @@ function ServicesTab({ token }: { token: string }) {
     retry: 1,
   });
 
-  const openAdd = () => { setEditId(null); setName(""); setDesc(""); setPrice("0"); setDur("60"); setShow(true); };
-  const openEdit = (s: any) => { setEditId(s.id); setName(s.name); setDesc(s.description || ""); setPrice(String(s.price)); setDur(String(s.duration_minutes)); setShow(true); };
+  const openAdd = () => { setEditId(null); setName(""); setDesc(""); setPrice("0"); setDur("60"); setDeposit(""); setShow(true); };
+  const openEdit = (s: any) => { setEditId(s.id); setName(s.name); setDesc(s.description || ""); setPrice(String(s.price)); setDur(String(s.duration_minutes)); setDeposit(s.deposit_amount != null ? String(s.deposit_amount) : ""); setShow(true); };
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const body = JSON.stringify({ name, description: desc, price: parseFloat(price), duration_minutes: parseInt(dur) });
+      const body = JSON.stringify({
+        name, description: desc, price: parseFloat(price), duration_minutes: parseInt(dur),
+        deposit_amount: deposit.trim() === "" ? null : parseFloat(deposit),
+      });
       if (editId) {
         return fetch(`/api/nail/admin/services/${editId}`, { method: "PUT", headers: authH(token), body }).then(r => r.json());
       }
@@ -815,9 +895,12 @@ function ServicesTab({ token }: { token: string }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, color: A.text, fontSize: 15 }}>{s.name}</div>
               {s.description && <div style={{ fontSize: 13, color: A.sub }}>{s.description}</div>}
-              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                 <span style={{ background: A.pale, color: A.primary, borderRadius: 100, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>฿{s.price.toLocaleString()}</span>
                 <span style={{ background: A.gray, color: A.sub, borderRadius: 100, padding: "2px 10px", fontSize: 12 }}>⏱ {s.duration_minutes} นาที</span>
+                <span style={{ background: A.warningBg, color: A.warning, borderRadius: 100, padding: "2px 10px", fontSize: 12 }}>
+                  มัดจำ {s.deposit_amount != null ? `฿${Number(s.deposit_amount).toLocaleString()}` : "ค่าเริ่มต้นร้าน"}
+                </span>
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -847,6 +930,7 @@ function ServicesTab({ token }: { token: string }) {
               { label: "คำอธิบาย", val: desc, set: setDesc, ph: "รายละเอียดบริการ", type: "text" },
               { label: "ราคา (฿)", val: price, set: setPrice, ph: "350", type: "number" },
               { label: "ระยะเวลา (นาที)", val: dur, set: setDur, ph: "90", type: "number" },
+              { label: "ค่ามัดจำ (฿) — เว้นว่าง = ใช้ค่าเริ่มต้นของร้าน", val: deposit, set: setDeposit, ph: "เช่น 100", type: "number" },
             ].map(f => (
               <div key={f.label} style={{ marginBottom: 12 }}>
                 <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>{f.label}</label>

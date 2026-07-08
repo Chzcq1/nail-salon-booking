@@ -4,3 +4,5 @@
 - [React Query shared queryKey pitfall](react-query-shared-querykey-pitfall.md) — never put setState in queryFn .then(); use useEffect on returned data to handle cached-data case
 - [Render ephemeral filesystem](render-ephemeral-filesystem.md) — files written to disk are lost on redeploy; store gallery images as base64 in DB (TEXT column), not filesystem URLs
 - [Testing Neon DB from Replit dev](neon-db-local-testing.md) — use a NEON_DATABASE_URL secret (not DATABASE_URL) to probe real prod data when a save/persistence bug is reported
+- [Debugging opaque prod 500s without log access](opaque-prod-500-debugging.md) — add a FastAPI global exception handler that logs full tracebacks, since Render logs aren't reachable from Replit tools
+- [Thailand timezone handling](thailand-timezone-handling.md) — app stores naive UTC; any "today/now" business logic (e.g. past time-slot filtering) must convert via a dedicated UTC+7 helper, not assume server tz

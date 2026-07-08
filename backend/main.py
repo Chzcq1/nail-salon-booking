@@ -300,6 +300,9 @@ def _run_migrations(engine):
         # deposit_cents / deposit_total อาจหายถ้า table ถูกสร้างก่อน columns นี้จะถูกเพิ่ม
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_cents INTEGER",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_total NUMERIC(10,2)",
+
+        # ── ค่ามัดจำแยกตามบริการ — บริการที่ราคาต่างกันควรมัดจำไม่เท่ากัน ──────────
+        "ALTER TABLE nail_services ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2)",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
@@ -368,6 +371,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def _log_unhandled_exceptions(request: Request, exc: Exception):
+    """
+    ดักทุก error ที่ไม่ได้ถูกจัดการไว้แล้ว log ให้เห็น traceback เต็มๆ ใน server log
+    (ไม่งั้นฝั่งลูกค้าจะเห็นแค่ "เกิดข้อผิดพลาด (500)" โดยไม่รู้สาเหตุ และหาสาเหตุยากมาก)
+    """
+    logger.exception(f"Unhandled error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "เกิดข้อผิดพลาดที่เซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง"},
+    )
 
 from backend.routes.products import router as products_router
 from backend.routes.orders import router as orders_router
