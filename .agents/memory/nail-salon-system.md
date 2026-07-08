@@ -36,6 +36,13 @@ Base deposit (admin-configurable, default 200 ฿) + random 1–99 satang. e.g.,
 ## DB migrations
 All nail tables are created via `_run_migrations()` in `backend/main.py`. The migration runner uses `conn.rollback()` on each failure to prevent cascade abort. Tables are also created by SQLAlchemy `create_all()` on startup.
 
+## Tab components must actually exist
+`NailAdminPage.tsx` routes tabs via `{tab === "x" && <XTab .../>}`. Found `staff`/`renewal` tabs referencing `StaffTab`/`RenewalTab` that were never defined anywhere — a silent `ReferenceError` crash (blank/black screen) on click, easy to miss since TS/build didn't catch it in this file's config.
+
+**Why:** No test coverage or CI clicks through every admin tab, so an incomplete tab wire-up shipped unnoticed.
+
+**How to apply:** When a user reports a specific admin page going blank/black, grep the tab-routing switch for the component name and confirm it's actually defined (not just imported/referenced) before assuming an infra/DB cause.
+
 ## Colors (BookingPage)
 - Primary: `#FF6B9D` (candy pink)
 - Deep: `#E0457B`
