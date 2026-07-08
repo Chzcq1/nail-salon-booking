@@ -275,6 +275,25 @@ def _run_migrations(engine):
         "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('อะคริลิค', 'ต่อเล็บอะคริลิค', 120, 550, '#C084FC', TRUE, 2) ON CONFLICT (name) DO NOTHING",
         "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('เพนท์ธรรมดา', 'เพนท์สีทาเล็บทั่วไป', 45, 150, '#FB7185', TRUE, 3) ON CONFLICT (name) DO NOTHING",
         "INSERT INTO nail_services (name, description, duration_minutes, price, color, is_active, sort_order) VALUES ('ออกแบบลาย', 'ออกแบบลายเล็บพิเศษ', 60, 200, '#F472B6', TRUE, 4) ON CONFLICT (name) DO NOTHING",
+
+        # ── Weekly recurring slot templates ─────────────────────────────────────
+        """CREATE TABLE IF NOT EXISTS nail_slot_templates (
+            id SERIAL PRIMARY KEY,
+            day_of_week INTEGER NOT NULL UNIQUE,
+            is_open BOOLEAN NOT NULL DEFAULT FALSE,
+            start_time VARCHAR(5) NOT NULL DEFAULT '09:00',
+            rounds_count INTEGER NOT NULL DEFAULT 0,
+            round_minutes INTEGER NOT NULL DEFAULT 60,
+            gap_minutes INTEGER NOT NULL DEFAULT 0,
+            max_bookings INTEGER NOT NULL DEFAULT 1,
+            staff_id INTEGER REFERENCES nail_staff(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ
+        )""",
+
+        # ── Link nail bookings to customer wallet accounts ──────────────────────
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)",
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'slip'",
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_customer_id ON nail_bookings (customer_id)",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

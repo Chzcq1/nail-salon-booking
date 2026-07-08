@@ -11,7 +11,7 @@ import {
   Plus, Trash2, CheckCircle, XCircle, Loader2, RefreshCw,
   Phone, User, AlertCircle, Upload, ChevronRight, TrendingUp,
   Banknote, Users, ArrowLeft, Edit2, Save, X, Ban, RotateCcw,
-  MessageCircle, Package, Crown, ChevronLeft, Palette,
+  MessageCircle, Package, Crown, ChevronLeft, Palette, ChevronUp, ChevronDown,
 } from "lucide-react";
 
 // ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
@@ -1035,6 +1035,135 @@ function RenewalTab({ token }: { token: string }) {
   );
 }
 
+// ─── Weekly recurring slot template ──────────────────────────────────────────
+const DAY_NAMES_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
+
+function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenerated: () => void }) {
+  const qc = useQueryClient();
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [genResult, setGenResult] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const { data, isLoading } = useQuery<any[]>({
+    queryKey: ["nail-admin-slot-templates"],
+    queryFn: () => fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  useEffect(() => {
+    if (data && !rows) setRows(data.map((d: any) => ({ ...d })));
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/nail/admin/slot-templates", {
+        method: "PUT",
+        headers: authH(token),
+        body: JSON.stringify({ templates: rows }),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates"] });
+    },
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/nail/admin/slot-templates/generate", {
+        method: "POST",
+        headers: authH(token),
+        body: JSON.stringify({ days: 30 }),
+      }).then(r => r.json()),
+    onSuccess: (d: any) => {
+      setGenResult(`สร้างสล็อตให้แล้ว ${d.generated_count} วัน (จาก 30 วันข้างหน้า)`);
+      onGenerated();
+      setTimeout(() => setGenResult(null), 4000);
+    },
+  });
+
+  const updateRow = (day_of_week: number, patch: object) => {
+    setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? { ...r, ...patch } : r));
+  };
+
+  if (isLoading || !rows) {
+    return (
+      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16, textAlign: "center" }}>
+        <Loader2 size={20} color={A.primary} className="animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+      <button onClick={() => setExpanded(e => !e)} style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "inherit" }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+          <Calendar size={16} color={A.primary} /> เทมเพลตสล็อตประจำสัปดาห์
+        </h3>
+        {expanded ? <ChevronUp size={18} color={A.muted} /> : <ChevronDown size={18} color={A.muted} />}
+      </button>
+      <p style={{ color: A.sub, fontSize: 12, marginTop: 8, marginBottom: expanded ? 12 : 0 }}>
+        ตั้งค่าครั้งเดียว ระบบจะสร้างสล็อตให้อัตโนมัติทุกสัปดาห์ตามวัน — ถ้าวันไหนแก้เองแล้วจะไม่ถูกเขียนทับ
+      </p>
+
+      {expanded && (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {rows.map(r => (
+              <div key={r.day_of_week} style={{ border: `1.5px solid ${r.is_open ? A.border : A.grayBorder}`, borderRadius: 12, padding: 12, background: r.is_open ? A.pale : A.gray }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: r.is_open ? 10 : 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: A.text }}>วัน{DAY_NAMES_TH[r.day_of_week]}</span>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: A.sub }}>
+                    <input type="checkbox" checked={r.is_open} onChange={e => updateRow(r.day_of_week, { is_open: e.target.checked })} />
+                    เปิดร้าน
+                  </label>
+                </div>
+                {r.is_open && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่ม</label>
+                      <input type="time" value={r.start_time} onChange={e => updateRow(r.day_of_week, { start_time: e.target.value })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>กี่รอบ</label>
+                      <input type="number" min={0} value={r.rounds_count} onChange={e => updateRow(r.day_of_week, { rounds_count: Number(e.target.value) })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>นาที/รอบ</label>
+                      <input type="number" min={1} value={r.round_minutes} onChange={e => updateRow(r.day_of_week, { round_minutes: Number(e.target.value) })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/รอบ</label>
+                      <input type="number" min={1} value={r.max_bookings} onChange={e => updateRow(r.day_of_week, { max_bookings: Number(e.target.value) })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+            style={{ width: "100%", background: saved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "11px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+            {saveMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : saved ? <><CheckCircle size={15} /> บันทึกแล้ว</> : <><Save size={15} /> บันทึกเทมเพลต</>}
+          </button>
+
+          <button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}
+            style={{ width: "100%", background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+            {generateMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "สร้างสล็อตล่วงหน้า 30 วันตามเทมเพลตทันที"}
+          </button>
+          {genResult && <p style={{ textAlign: "center", color: A.success, fontSize: 12, marginTop: 8 }}>{genResult}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Schedule (Slots + Closed Days) ──────────────────────────────────────────
 function ScheduleTab({ token }: { token: string }) {
   const qc = useQueryClient();
@@ -1150,10 +1279,16 @@ function ScheduleTab({ token }: { token: string }) {
         </button>
       </div>
 
+      {/* Weekly recurring slot template */}
+      <WeeklyTemplateSection token={token} onGenerated={() => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] })} />
+
       {/* Slots Section */}
       <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-        <Clock size={16} color={A.primary} /> ช่วงเวลาจอง
+        <Clock size={16} color={A.primary} /> ช่วงเวลาจอง (แก้ไขเฉพาะวัน)
       </h3>
+      <p style={{ color: A.sub, fontSize: 12, marginBottom: 10, marginTop: -6 }}>
+        แก้ไข/เพิ่ม/ลบเฉพาะวันที่เลือกด้านล่าง — จะไม่ถูกเทมเพลตประจำสัปดาห์เขียนทับ
+      </p>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center" }}>
         <button

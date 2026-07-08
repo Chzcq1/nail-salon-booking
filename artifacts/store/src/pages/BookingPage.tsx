@@ -47,24 +47,44 @@ function toISO(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+// ── Wallet session (แชร์ token เดียวกับ /wallet) ────────────────────────
+const WALLET_SESSION_KEY = "wallet_token";
+function getWalletToken(): string { return sessionStorage.getItem(WALLET_SESSION_KEY) || ""; }
+
 // ── API calls ────────────────────────────────────────────────────────
 const api = {
   settings:  () => fetch("/api/nail/settings").then(r => r.json()),
   gallery:   () => fetch("/api/nail/gallery").then(r => r.json()),
   services:  () => fetch("/api/nail/services").then(r => r.json()),
   slots:     (date: string) => fetch(`/api/nail/slots?date=${date}`).then(r => r.json()),
-  hold:      (body: object) =>
-    fetch("/api/nail/booking/hold", {
+  hold:      (body: object) => {
+    const token = getWalletToken();
+    return fetch("/api/nail/booking/hold", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(body),
-    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; }),
+    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; });
+  },
   pay:       (body: object) =>
     fetch("/api/nail/booking/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; }),
+  payWallet: (hold_token: string) => {
+    const token = getWalletToken();
+    return fetch("/api/nail/booking/pay-wallet", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ hold_token }),
+    }).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "เกิดข้อผิดพลาด"); return d; });
+  },
   uploadSlip: (base64: string) =>
     fetch("/api/upload/slip", {
       method: "POST",
@@ -684,6 +704,16 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
     onError: (e: any) => { setUploading(false); setPayError(e.message); },
   });
 
+  const isLoggedIn = !!getWalletToken();
+  const walletBalance: number | null = holdData?.wallet_balance ?? null;
+  const walletSufficient: boolean = !!holdData?.wallet_sufficient;
+
+  const payWalletMutation = useMutation({
+    mutationFn: () => api.payWallet(holdData.hold_token),
+    onSuccess: () => onSuccess(holdData),
+    onError: (e: any) => setPayError(e.message),
+  });
+
   if (holdMutation.isPending) {
     return (
       <PageWrap>
@@ -770,6 +800,42 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
             </div>
           )}
         </div>
+
+        {/* จ่ายด้วยเครดิตในกระเป๋าเงิน (ถ้าล็อกอินอยู่) */}
+        {isLoggedIn && (
+          <div style={{ background: walletSufficient ? "#F0FDF4" : "#FFFBEB", border: `1.5px solid ${walletSufficient ? "#BBF7D0" : "#FDE68A"}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: P.text }}>💳 เครดิตในกระเป๋าเงิน</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: walletSufficient ? "#16A34A" : "#B45309" }}>
+                ฿{walletBalance?.toFixed(2) ?? "0.00"}
+              </span>
+            </div>
+            {walletSufficient ? (
+              <button
+                onClick={() => payWalletMutation.mutate()}
+                disabled={payWalletMutation.isPending}
+                style={{
+                  width: "100%", background: "linear-gradient(135deg, #22C55E, #16A34A)", color: "#fff",
+                  border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 700,
+                  cursor: payWalletMutation.isPending ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                {payWalletMutation.isPending ? <><Loader2 size={18} className="animate-spin" /> กำลังยืนยัน...</> : "จ่ายด้วยเครดิตทันที ✓"}
+              </button>
+            ) : (
+              <div>
+                <p style={{ fontSize: 13, color: "#B45309", marginBottom: 8 }}>
+                  เครดิตไม่พอ ต้องเติมเงินเพิ่มอีก ฿{((holdData?.deposit_total ?? 0) - (walletBalance ?? 0)).toFixed(2)} ก่อนถึงจะจ่ายด้วยเครดิตได้
+                </p>
+                <a href="/wallet" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: P.pinkDeep, fontWeight: 600, fontSize: 14, textDecoration: "underline" }}>
+                  เติมเครดิตที่หน้ากระเป๋าเงิน <ArrowRight size={14} />
+                </a>
+              </div>
+            )}
+            <div style={{ textAlign: "center", fontSize: 12, color: P.muted, marginTop: 10 }}>— หรือโอนเงินและอัปโหลดสลิปด้านล่างแทน —</div>
+          </div>
+        )}
 
         {/* Upload slip */}
         <div style={{ marginBottom: 20 }}>

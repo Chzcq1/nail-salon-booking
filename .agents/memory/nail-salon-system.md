@@ -43,6 +43,20 @@ All nail tables are created via `_run_migrations()` in `backend/main.py`. The mi
 
 **How to apply:** When a user reports a specific admin page going blank/black, grep the tab-routing switch for the component name and confirm it's actually defined (not just imported/referenced) before assuming an infra/DB cause.
 
+## Weekly recurring slot templates
+`NailSlotTemplate` (one row per weekday 0–6) drives `_ensure_slots_for_date()`, which auto-generates that day's `NailTimeSlot` rows **only if the date has zero existing slots** — preserves any manual admin edit for that specific date going forward.
+
+**Why:** Admin needs to override individual days (holidays, special hours) without the weekly template silently re-generating and wiping their edits.
+
+**How to apply:** Any new code touching slot generation must keep the "skip if any slot row exists for that date" guard, and must take the `pg_advisory_xact_lock(hashtext('nail_slot_gen:'+date))` before the existence check to avoid duplicate-row races under concurrent requests for the same date.
+
+## Wallet-linked payments need row-locked balance mutations
+Any endpoint that deducts from `Customer.balance` (e.g. nail booking wallet payment) must `SELECT ... FOR UPDATE` the customer row before reading/checking/deducting balance, in addition to locking whatever resource (booking/order) it's paying for.
+
+**Why:** Locking only the booking/order row is not enough — two concurrent payment requests from the same customer can still both read the same pre-deduction balance and both succeed, causing a double-spend/under-deduction.
+
+**How to apply:** Lock both rows (the resource being paid for, and the customer) in the same transaction before any balance comparison, and require an explicit reject with the shortfall amount if balance is insufficient — no partial-payment fallback for wallet-authenticated flows unless explicitly requested.
+
 ## Colors (BookingPage)
 - Primary: `#FF6B9D` (candy pink)
 - Deep: `#E0457B`

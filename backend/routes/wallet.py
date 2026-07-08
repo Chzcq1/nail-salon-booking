@@ -447,7 +447,8 @@ async def topup_truemoney(
 
     if settings.bot_token:
         try:
-            result = await redeem_voucher(voucher_code)
+            phone = (_get_setting(db, "truemoney_phone") or "").strip()
+            result = await redeem_voucher(voucher_code, phone) if phone else await redeem_voucher(voucher_code)
             topup.truemoney_result = json.dumps(result["raw"])
             if result["success"]:
                 credit = Decimal(str(result["amount"]))

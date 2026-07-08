@@ -10,21 +10,24 @@ import random
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Optional
 
 from backend.config import get_settings
 from backend.database import get_db
 from backend.models import (
-    NailShopSettings, NailService, NailStaff, NailTimeSlot,
+    NailShopSettings, NailService, NailStaff, NailTimeSlot, NailSlotTemplate,
     NailBooking, NailGallery, NailRenewalRequest, OTPSession,
+    Customer, CreditTransaction,
 )
 from backend.slip_verify import verify_slip
 from backend.auth import generate_otp, create_admin_token, verify_admin_token
+from backend.routes.wallet import get_wallet_customer
 import backend.bot as bot_module
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,69 @@ def _count_confirmed_bookings(db: Session, slot_id: int) -> int:
         NailBooking.slot_id == slot_id,
         NailBooking.status.in_(["held", "pending_payment", "confirmed"]),
     ).count()
+
+
+DAY_NAMES_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
+
+
+def _ensure_templates_exist(db: Session):
+    """สร้างแถวเทมเพลต 7 วัน (จันทร์–อาทิตย์) ถ้ายังไม่มี"""
+    existing_days = {t.day_of_week for t in db.query(NailSlotTemplate).all()}
+    changed = False
+    for dow in range(7):
+        if dow not in existing_days:
+            db.add(NailSlotTemplate(day_of_week=dow, is_open=False))
+            changed = True
+    if changed:
+        db.commit()
+
+
+def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
+    """
+    สร้างสล็อตอัตโนมัติจากเทมเพลตประจำสัปดาห์ — ทำงานเฉพาะตอนที่ 'ยังไม่มีสล็อตใดๆ' ของวันนั้นเลย
+    เพื่อไม่ไปทับ/ลบสล็อตที่แอดมินเคยแก้ไขเองแล้ว (แก้ครั้งเดียวหลังจากนั้นคุมเองได้เต็มที่)
+    """
+    if shop.closed_dates:
+        try:
+            closed = json.loads(shop.closed_dates)
+            if date_str in closed:
+                return
+        except Exception:
+            pass
+
+    # ป้องกัน 2 request สร้างสล็อตวันเดียวกันพร้อมกันจนได้สล็อตซ้ำ (advisory lock ทั้ง transaction)
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{date_str}"})
+
+    already = db.query(NailTimeSlot).filter_by(slot_date=date_str).first()
+    if already:
+        return
+
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return
+
+    tmpl = db.query(NailSlotTemplate).filter_by(day_of_week=d.weekday(), is_open=True).first()
+    if not tmpl or tmpl.rounds_count <= 0:
+        return
+
+    try:
+        cursor = datetime.strptime(tmpl.start_time, "%H:%M")
+    except ValueError:
+        return
+
+    for i in range(tmpl.rounds_count):
+        start = cursor + timedelta(minutes=i * (tmpl.round_minutes + tmpl.gap_minutes))
+        end = start + timedelta(minutes=tmpl.round_minutes)
+        db.add(NailTimeSlot(
+            slot_date=date_str,
+            start_time=start.strftime("%H:%M"),
+            end_time=end.strftime("%H:%M"),
+            max_bookings=tmpl.max_bookings or 1,
+            staff_id=tmpl.staff_id,
+            is_available=True,
+        ))
+    db.commit()
 
 # ─── Admin Auth (2-step: passcode → OTP → JWT) ──────────────────────────────
 
@@ -220,6 +286,7 @@ def get_slots(date: str, db: Session = Depends(get_db)):
                 return []
         except Exception:
             pass
+    _ensure_slots_for_date(db, shop, date)
     slots = (
         db.query(NailTimeSlot)
         .filter_by(slot_date=date, is_available=True)
@@ -267,8 +334,24 @@ class HoldRequest(BaseModel):
     customer_note: Optional[str] = None
 
 
+def _optional_wallet_customer(
+    authorization: str = Header(None), db: Session = Depends(get_db)
+) -> Optional[Customer]:
+    """เหมือน get_wallet_customer แต่ไม่บังคับล็อกอิน (คืน None ถ้าไม่มี/token ไม่ถูกต้อง)"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        return get_wallet_customer(authorization=authorization, db=db)
+    except HTTPException:
+        return None
+
+
 @router.post("/booking/hold")
-def hold_slot(req: HoldRequest, db: Session = Depends(get_db)):
+def hold_slot(
+    req: HoldRequest,
+    db: Session = Depends(get_db),
+    customer: Optional[Customer] = Depends(_optional_wallet_customer),
+):
     """
     Step 1: ล็อก slot ไว้ 10 นาที
     ใช้ SELECT FOR UPDATE เพื่อป้องกัน race condition
@@ -309,6 +392,7 @@ def hold_slot(req: HoldRequest, db: Session = Depends(get_db)):
         slot_id=slot.id,
         service_id=req.service_id,
         staff_id=slot.staff_id,
+        customer_id=customer.id if customer else None,
         customer_name=req.customer_name,
         customer_phone=req.customer_phone,
         customer_line=req.customer_line,
@@ -344,6 +428,8 @@ def hold_slot(req: HoldRequest, db: Session = Depends(get_db)):
         "end_time": slot.end_time,
         "service_name": service.name if service else None,
         "customer_name": req.customer_name,
+        "wallet_balance": float(customer.balance or 0) if customer else None,
+        "wallet_sufficient": (float(customer.balance or 0) >= deposit_total) if customer else False,
     }
 
 
@@ -433,6 +519,101 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     }
 
 
+class WalletPayRequest(BaseModel):
+    hold_token: str
+
+
+@router.post("/booking/pay-wallet")
+async def submit_payment_wallet(
+    req: WalletPayRequest,
+    db: Session = Depends(get_db),
+    customer: Customer = Depends(get_wallet_customer),
+):
+    """
+    ชำระมัดจำด้วยเครดิตในกระเป๋าเงิน (ต้องล็อกอินและมีเครดิตพอ) — ยืนยันคิวทันที ไม่ต้องรอแอดมินตรวจสลิป
+    """
+    booking = (
+        db.query(NailBooking)
+        .filter_by(hold_token=req.hold_token)
+        .with_for_update()
+        .first()
+    )
+    if not booking:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง")
+
+    if booking.status == "cancelled":
+        raise HTTPException(status_code=410, detail="การจองหมดเวลา กรุณาจองใหม่")
+
+    if booking.status not in ("held", "pending_payment"):
+        raise HTTPException(status_code=409, detail=f"สถานะไม่สามารถอัปเดตได้: {booking.status}")
+
+    if booking.held_until and _now() > booking.held_until and booking.status == "held":
+        booking.status = "cancelled"
+        db.commit()
+        raise HTTPException(status_code=410, detail="การจองหมดเวลาแล้ว กรุณาจองใหม่")
+
+    # ล็อกแถวลูกค้าไว้ด้วย เพื่อกันการหักเครดิตซ้ำซ้อนถ้ามีการชำระเงินพร้อมกันหลาย request
+    locked_customer = (
+        db.query(Customer)
+        .filter_by(id=customer.id)
+        .with_for_update()
+        .first()
+    )
+    if not locked_customer:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลลูกค้า")
+    customer = locked_customer
+
+    deposit = Decimal(str(booking.deposit_total or 0))
+    balance = customer.balance or Decimal("0")
+    if balance < deposit:
+        shortfall = deposit - balance
+        raise HTTPException(
+            status_code=402,
+            detail=f"เครดิตไม่พอ กรุณาเติมเงินเพิ่มอีก {float(shortfall):.2f} บาท (มี {float(balance):.2f} ต้องใช้ {float(deposit):.2f})",
+        )
+
+    customer.balance = balance - deposit
+    booking.customer_id = customer.id
+    booking.payment_method = "wallet"
+    booking.status = "confirmed"
+    booking.slip_verify_status = "wallet_paid"
+    db.add(CreditTransaction(
+        customer_id=customer.id,
+        txn_type="nail_booking",
+        amount=-deposit,
+        description=f"มัดจำจองคิวทำเล็บ #{booking.booking_ref}",
+        ref_id=booking.id,
+    ))
+    db.commit()
+    db.refresh(booking)
+    db.refresh(customer)
+
+    try:
+        from backend.bot import send_nail_slip_notify
+        await send_nail_slip_notify(
+            booking_ref=booking.booking_ref,
+            customer_name=booking.customer_name or "ไม่ระบุ",
+            customer_phone=booking.customer_phone or "ไม่ระบุ",
+            customer_line=booking.customer_line,
+            slot_date=booking.slot_date or "",
+            start_time=booking.start_time or "",
+            end_time=booking.end_time or "",
+            service_name=booking.service_name,
+            deposit_total=float(booking.deposit_total or 0),
+            payment_proof="[ชำระด้วยเครดิตในกระเป๋าเงิน]",
+            slip_verify_status="wallet_paid",
+        )
+    except Exception as e:
+        logger.warning(f"Telegram wallet-pay notify failed (non-critical): {e}")
+
+    return {
+        "booking_ref": booking.booking_ref,
+        "status": booking.status,
+        "balance": float(customer.balance),
+        "message": "จองคิวสำเร็จ! ชำระด้วยเครดิตเรียบร้อยแล้วค่ะ",
+    }
+
+
 @router.get("/booking/status/{hold_token}")
 def booking_status(hold_token: str, db: Session = Depends(get_db)):
     booking = db.query(NailBooking).filter_by(hold_token=hold_token).first()
@@ -488,6 +669,8 @@ def admin_list_bookings(
             "customer_phone": b.customer_phone,
             "customer_line": b.customer_line,
             "customer_note": b.customer_note,
+            "customer_id": b.customer_id,
+            "payment_method": b.payment_method,
             "deposit_total": float(b.deposit_total or 0),
             "slip_verify_status": b.slip_verify_status,
             "admin_note": b.admin_note,
@@ -657,6 +840,8 @@ def admin_list_slots(
 ):
     _check_admin(authorization)
     _release_expired_holds(db)
+    if date:
+        _ensure_slots_for_date(db, _get_shop(db), date)
     q = db.query(NailTimeSlot)
     if date:
         q = q.filter_by(slot_date=date)
@@ -690,6 +875,100 @@ def admin_list_slots(
             "booked_count": confirmed,
         })
     return result
+
+
+# ── Weekly recurring slot templates ─────────────────────────────────────────
+
+class SlotTemplateItem(BaseModel):
+    day_of_week: int
+    is_open: bool = False
+    start_time: str = "09:00"
+    rounds_count: int = 0
+    round_minutes: int = 60
+    gap_minutes: int = 0
+    max_bookings: int = 1
+    staff_id: Optional[int] = None
+
+
+class SlotTemplateBulkBody(BaseModel):
+    templates: List[SlotTemplateItem]
+
+
+@router.get("/admin/slot-templates")
+def admin_get_slot_templates(db: Session = Depends(get_db), authorization: str = Header(None)):
+    """ดึงเทมเพลตประจำสัปดาห์ (7 วัน) — ใช้ตั้งค่า 'เปิดกี่รอบ รอบละกี่นาที' ของแต่ละวัน"""
+    _check_admin(authorization)
+    _ensure_templates_exist(db)
+    rows = db.query(NailSlotTemplate).order_by(NailSlotTemplate.day_of_week).all()
+    return [
+        {
+            "id": t.id,
+            "day_of_week": t.day_of_week,
+            "day_name": DAY_NAMES_TH[t.day_of_week],
+            "is_open": t.is_open,
+            "start_time": t.start_time,
+            "rounds_count": t.rounds_count,
+            "round_minutes": t.round_minutes,
+            "gap_minutes": t.gap_minutes,
+            "max_bookings": t.max_bookings,
+            "staff_id": t.staff_id,
+        }
+        for t in rows
+    ]
+
+
+@router.put("/admin/slot-templates")
+def admin_update_slot_templates(
+    body: SlotTemplateBulkBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """บันทึกเทมเพลตประจำสัปดาห์ — จะมีผลกับสล็อตของวันที่ยัง 'ไม่เคยถูกสร้าง' เท่านั้น
+    วันที่แอดมินเคยแก้ไขสล็อตเองแล้วจะไม่ถูกสร้างทับ (ต้องแก้ผ่าน /admin/slots เอง)"""
+    _check_admin(authorization)
+    for item in body.templates:
+        if not (0 <= item.day_of_week <= 6):
+            continue
+        row = db.query(NailSlotTemplate).filter_by(day_of_week=item.day_of_week).first()
+        if not row:
+            row = NailSlotTemplate(day_of_week=item.day_of_week)
+            db.add(row)
+        row.is_open = item.is_open
+        row.start_time = item.start_time
+        row.rounds_count = max(0, item.rounds_count)
+        row.round_minutes = max(1, item.round_minutes)
+        row.gap_minutes = max(0, item.gap_minutes)
+        row.max_bookings = max(1, item.max_bookings)
+        row.staff_id = item.staff_id
+    db.commit()
+    return {"ok": True}
+
+
+class GenerateSlotsBody(BaseModel):
+    days: int = 30
+
+
+@router.post("/admin/slot-templates/generate")
+def admin_generate_slots_from_template(
+    body: GenerateSlotsBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """สร้างสล็อตล่วงหน้าจากเทมเพลตทันที (แทนที่จะรอให้ลูกค้าเปิดหน้าจองก่อน) —
+    ข้ามวันที่มีสล็อตอยู่แล้ว (ทั้งจากเทมเพลตเดิมหรือที่แอดมินสร้างเอง)"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    today = _now().date()
+    days = max(1, min(body.days, 90))
+    generated = []
+    for i in range(days):
+        date_str = (today + timedelta(days=i)).isoformat()
+        before = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
+        _ensure_slots_for_date(db, shop, date_str)
+        after = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
+        if after > before:
+            generated.append(date_str)
+    return {"ok": True, "generated_dates": generated, "generated_count": len(generated)}
 
 
 @router.post("/admin/slots")

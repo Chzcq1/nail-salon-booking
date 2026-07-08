@@ -259,6 +259,23 @@ class NailStaff(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class NailSlotTemplate(Base):
+    """เทมเพลตสล็อตประจำสัปดาห์ — ใช้สร้าง nail_time_slots อัตโนมัติทุกวัน"""
+    __tablename__ = "nail_slot_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    day_of_week = Column(Integer, nullable=False, unique=True, index=True)  # 0=จันทร์ ... 6=อาทิตย์
+    is_open = Column(Boolean, default=False, nullable=False)
+    start_time = Column(String(5), nullable=False, default="09:00")  # HH:MM รอบแรกเริ่มกี่โมง
+    rounds_count = Column(Integer, nullable=False, default=0)        # เปิดกี่รอบต่อวัน
+    round_minutes = Column(Integer, nullable=False, default=60)      # แต่ละรอบกี่นาที
+    gap_minutes = Column(Integer, nullable=False, default=0)         # เว้นระหว่างรอบกี่นาที
+    max_bookings = Column(Integer, nullable=False, default=1)        # รับกี่คิวต่อรอบ
+    staff_id = Column(Integer, ForeignKey("nail_staff.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class NailTimeSlot(Base):
     """ช่วงเวลาที่แอดมินเปิดให้จอง"""
     __tablename__ = "nail_time_slots"
@@ -282,6 +299,8 @@ class NailBooking(Base):
     slot_id = Column(Integer, ForeignKey("nail_time_slots.id"), nullable=True, index=True)
     service_id = Column(Integer, ForeignKey("nail_services.id"), nullable=True)
     staff_id = Column(Integer, ForeignKey("nail_staff.id"), nullable=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)  # ผูกกับบัญชีลูกค้า (ถ้าล็อกอิน)
+    payment_method = Column(String(20), nullable=False, default="slip")  # slip | wallet
     customer_name = Column(String(255), nullable=False)
     customer_phone = Column(String(20), nullable=False)
     customer_line = Column(String(100), nullable=True)
