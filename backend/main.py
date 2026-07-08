@@ -19,7 +19,7 @@ settings = get_settings()
 def _run_cleanup(engine):
     """
     Startup cleanup — ล้างข้อมูลขยะทุกครั้งที่ backend เริ่ม:
-    1. OTP sessions หมดอายุ (email, wallet, legacy)
+    1. OTP sessions หมดอายุ (email, admin/legacy)
     2. admin_logs เก่าเกิน 90 วัน
     3. payment_proof (รูปสลิป base64) ของออเดอร์/topup ที่อนุมัติ/ปฏิเสธ
        ไปแล้วเกิน 30 วัน — Admin ตรวจสอบเสร็จแล้วไม่จำเป็นต้องเก็บรูปอีก
@@ -27,7 +27,6 @@ def _run_cleanup(engine):
     cleanup_sqls = [
         # ── OTP Sessions ─────────────────────────────────────────────────────
         "DELETE FROM email_otp_sessions WHERE expires_at < NOW()",
-        "DELETE FROM wallet_otp_sessions WHERE expires_at < NOW()",
         # ลบ legacy OTP ที่ใช้แล้ว หรือหมดอายุนานเกิน 1 วัน
         "DELETE FROM otp_sessions WHERE is_used = TRUE AND expires_at < NOW() - INTERVAL '1 day'",
         "DELETE FROM otp_sessions WHERE expires_at < NOW() - INTERVAL '7 days'",
@@ -125,10 +124,6 @@ def _run_migrations(engine):
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS pin_hash VARCHAR(255)",
         # catalog_group for dual catalog (A/B) system
         "ALTER TABLE products ADD COLUMN IF NOT EXISTS catalog_group VARCHAR(1) NOT NULL DEFAULT 'A'",
-        # wallet OTP sessions (legacy Telegram OTP — kept for backward compat)
-        "CREATE TABLE IF NOT EXISTS wallet_otp_sessions (id SERIAL PRIMARY KEY, session_token VARCHAR(64) UNIQUE NOT NULL, telegram_username VARCHAR(255) NOT NULL, otp_code VARCHAR(6), telegram_chat_id BIGINT, is_used BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ NOT NULL)",
-        "CREATE INDEX IF NOT EXISTS ix_wallet_otp_sessions_session_token ON wallet_otp_sessions (session_token)",
-        "CREATE INDEX IF NOT EXISTS ix_wallet_otp_sessions_telegram_username ON wallet_otp_sessions (telegram_username)",
         # telegram_user_id for optional Telegram binding
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_customers_telegram_user_id ON customers (telegram_user_id) WHERE telegram_user_id IS NOT NULL",
@@ -319,13 +314,6 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Could not set main bot webhook on startup: {e}")
     else:
         logger.warning("BOT_TOKEN or WEBHOOK_URL not set — skipping webhook setup")
-
-    if settings.otp_bot_token and settings.webhook_url:
-        try:
-            from backend import bot as bot_module
-            await bot_module.setup_otp_webhook(settings.webhook_url)
-        except Exception as e:
-            logger.warning(f"Could not set OTP bot webhook on startup: {e}")
 
     yield
     logger.info("Shutting down")

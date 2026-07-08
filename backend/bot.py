@@ -8,7 +8,6 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 _bot = None
-_otp_bot = None
 
 
 def get_bot():
@@ -19,17 +18,6 @@ def get_bot():
         from telegram import Bot
         _bot = Bot(token=settings.bot_token)
     return _bot
-
-
-def get_otp_bot():
-    """Return the OTP-only bot. Falls back to the main bot if OTP_BOT_TOKEN is not set."""
-    global _otp_bot
-    if settings.otp_bot_token:
-        if _otp_bot is None:
-            from telegram import Bot
-            _otp_bot = Bot(token=settings.otp_bot_token)
-        return _otp_bot
-    return get_bot()
 
 
 def _parse_admin_group() -> tuple[int, Optional[int]]:
@@ -453,32 +441,6 @@ async def send_topup_admin_notify(
         logger.error(f"Failed to send topup admin notify: {e}")
 
 
-async def send_wallet_otp(chat_id: int, otp_code: str, username: str) -> bool:
-    """Send OTP via DM for wallet registration. Uses OTP bot if configured, else main bot."""
-    if not settings.otp_bot_token and not settings.bot_token:
-        logger.warning("Neither OTP_BOT_TOKEN nor BOT_TOKEN set — cannot send wallet OTP")
-        return False
-    bot = get_otp_bot()
-    from telegram.error import TelegramError
-    try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=(
-                f"🔐 <b>รหัส OTP กระเป๋าเครดิต</b>\n\n"
-                f"สวัสดีคุณ @{username}!\n\n"
-                f"รหัสยืนยันตัวตนของคุณคือ:\n\n"
-                f"<code>{otp_code}</code>\n\n"
-                f"⏰ ใช้ได้ภายใน 10 นาที\n"
-                f"⚠️ อย่าบอกรหัสนี้กับใครเด็ดขาด"
-            ),
-            parse_mode="HTML",
-        )
-        return True
-    except TelegramError as e:
-        logger.error(f"Failed to send wallet OTP to chat {chat_id}: {e}")
-        return False
-
-
 async def send_nail_slip_notify(
     booking_ref: str,
     customer_name: str,
@@ -596,20 +558,3 @@ async def setup_webhook(webhook_url: str) -> bool:
         return False
 
 
-async def setup_otp_webhook(webhook_url: str) -> bool:
-    """Register webhook for the OTP-only bot at /webhook-otp."""
-    if not settings.otp_bot_token:
-        logger.info("OTP_BOT_TOKEN not set — skipping OTP bot webhook setup")
-        return False
-
-    from telegram.error import TelegramError
-    otp_url = webhook_url.rstrip("/").replace("/webhook", "") + "/webhook-otp"
-    bot = get_otp_bot()
-
-    try:
-        await bot.set_webhook(url=otp_url)
-        logger.info(f"OTP bot webhook set to {otp_url}")
-        return True
-    except TelegramError as e:
-        logger.error(f"Failed to set OTP bot webhook: {e}")
-        return False
