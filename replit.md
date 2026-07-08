@@ -45,9 +45,11 @@ Replit มีหน้าที่:
 
 ## Run & Operate (Replit dev environment)
 
-Two separate Replit workflows serve this app for dev/preview here: `Backend API` (defined in `.replit`, uvicorn on :8000 — this is what the `Project`/Run button starts) and `artifacts/store: web` (a Replit artifact workflow, Vite on its own assigned port, started/managed separately). If the frontend preview isn't loading, check whether `artifacts/store: web` is running and start it via the workflow tools if not. Restart either after dependency or code changes that require a reload.
+The `Project`/Run button starts both workflows defined in `.replit` in parallel:
+- `Backend API` — `python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000`
+- `Start application` — `PORT=5000 BACKEND_URL=http://localhost:8000 pnpm --filter @workspace/store run dev` (Vite dev server for `artifacts/store`, shown in the webview on port 5000)
 
-`artifacts/api-server` and `artifacts/mockup-sandbox` show as failed/stopped — that's expected and non-blocking; see below.
+Restart either workflow after dependency or code changes that require a reload. Note: this dev topology (two local processes) is separate from the production topology (Render + Neon) described above.
 
 ```bash
 # Manual equivalent, if ever needed outside the workflows
