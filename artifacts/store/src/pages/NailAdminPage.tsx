@@ -279,10 +279,12 @@ export default function NailAdminPage() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: () => void }) {
-  const { data, isLoading, refetch } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["nail-admin-dashboard"],
     queryFn: () => aFetch("/api/nail/admin/dashboard", token),
     refetchInterval: 60000,
+    staleTime: 30000,
+    retry: 1,
   });
 
   const today = new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" });
@@ -299,9 +301,14 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
         </button>
       </div>
 
-      {isLoading ? (
+      {isError && !data && (
+        <div style={{ textAlign: "center", padding: 40, background: A.errorBg, borderRadius: 14, border: `1px solid ${A.error}44`, color: A.error, fontSize: 14 }}>
+          ไม่สามารถโหลดข้อมูลได้ กรุณากด <button onClick={() => refetch()} style={{ background: "none", border: "none", cursor: "pointer", color: A.primary, textDecoration: "underline", fontFamily: "inherit" }}>รีเฟรช</button>
+        </div>
+      )}
+      {isLoading && !data ? (
         <div style={{ textAlign: "center", padding: 48 }}><Loader2 size={28} color={A.primary} className="animate-spin" /></div>
-      ) : (
+      ) : data ? (
         <>
           {/* Stat Cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
@@ -363,7 +370,7 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
             </div>
           )}
         </>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -384,6 +391,8 @@ function BookingsTab({ token }: { token: string }) {
     queryKey: ["nail-admin-bookings", filterDate, filterStatus],
     queryFn: () => fetch(url, { headers: authH(token) }).then(r => r.json()),
     refetchInterval: 30000,
+    staleTime: 15000,
+    retry: 1,
   });
 
   const updateMutation = useMutation({
@@ -592,6 +601,8 @@ function ServicesTab({ token }: { token: string }) {
   const { data: services = [] } = useQuery<any[]>({
     queryKey: ["nail-admin-services"],
     queryFn: () => fetch("/api/nail/admin/services", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
   });
 
   const openAdd = () => { setEditId(null); setName(""); setDesc(""); setPrice("0"); setDur("60"); setShow(true); };
@@ -691,18 +702,25 @@ function ScheduleTab({ token }: { token: string }) {
   const [closedDates, setClosedDates] = useState<string[]>([]);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
-  // Load settings for closed_dates
-  useQuery({
+  // Load settings for closed_dates — use useEffect to handle cached data correctly
+  const { data: settingsData } = useQuery<any>({
     queryKey: ["nail-admin-settings"],
-    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()).then(d => {
-      try { setClosedDates(JSON.parse(d.closed_dates || "[]")); } catch { setClosedDates([]); }
-      return d;
-    }),
+    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
   });
+
+  useEffect(() => {
+    if (settingsData?.closed_dates !== undefined) {
+      try { setClosedDates(JSON.parse(settingsData.closed_dates || "[]")); } catch { setClosedDates([]); }
+    }
+  }, [settingsData]);
 
   const { data: slots = [], isLoading } = useQuery<any[]>({
     queryKey: ["nail-admin-slots", selDate],
     queryFn: () => fetch(`/api/nail/admin/slots?date=${selDate}`, { headers: authH(token) }).then(r => r.json()),
+    staleTime: 20000,
+    retry: 1,
   });
 
   const saveClosedDates = useMutation({
@@ -904,9 +922,18 @@ function GalleryTab({ token }: { token: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }),
   });
 
+  const [fileError, setFileError] = useState("");
+
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFileError("");
+    // Guard: limit to 1.5 MB to prevent large base64 payloads in DB
+    if (file.size > 1.5 * 1024 * 1024) {
+      setFileError("รูปภาพต้องไม่เกิน 1.5 MB กรุณาลดขนาดรูปก่อนอัปโหลด");
+      e.target.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = ev => setPreview(ev.target?.result as string);
     reader.readAsDataURL(file);
@@ -915,13 +942,18 @@ function GalleryTab({ token }: { token: string }) {
   const handleUpload = async () => {
     if (!preview) return;
     setUploading(true);
-    const res = await fetch("/api/upload/slip", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: preview }) }).then(r => r.json());
-    addMutation.mutate(res.url);
+    // Store base64 data URI directly in DB (no filesystem — survives Render restarts)
+    addMutation.mutate(preview);
   };
 
   return (
     <div style={{ padding: 16 }}>
       <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+      {fileError && (
+        <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13 }}>
+          {fileError}
+        </div>
+      )}
       {preview ? (
         <div style={{ marginBottom: 16 }}>
           <img src={preview} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 12, border: `2px solid ${A.primary}` }} />
@@ -967,10 +999,23 @@ function SettingsTab({ token }: { token: string }) {
   const [form, setForm] = useState<any>(null);
   const [saved, setSaved] = useState(false);
 
-  useQuery({
+  // IMPORTANT: use useEffect to handle cached data — the queryFn may not re-run
+  // when data is already in cache from ScheduleTab (same queryKey)
+  const { data: settingsData, isLoading: settingsLoading, isError: settingsError } = useQuery<any>({
     queryKey: ["nail-admin-settings"],
-    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()).then(d => { setForm({ ...d, closed_dates: undefined }); return d; }),
+    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60000,
+    retry: 1,
   });
+
+  // Sync form from server data. When data refetches (e.g. after save), update form.
+  // This is safe because staleTime:60s means background refetches only trigger after
+  // invalidation (i.e. after a successful save — resetting to confirmed server values is correct).
+  useEffect(() => {
+    if (settingsData) {
+      setForm({ ...settingsData, closed_dates: undefined });
+    }
+  }, [settingsData]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -978,6 +1023,8 @@ function SettingsTab({ token }: { token: string }) {
     onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
   });
 
+  if (settingsLoading && !settingsData) return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>;
+  if (settingsError && !form) return <div style={{ textAlign: "center", padding: 40, color: A.error, fontSize: 14 }}>โหลดการตั้งค่าไม่สำเร็จ กรุณา <button onClick={() => qc.invalidateQueries({ queryKey: ["nail-admin-settings"] })} style={{ background: "none", border: "none", cursor: "pointer", color: A.primary, textDecoration: "underline", fontFamily: "inherit" }}>ลองใหม่</button></div>;
   if (!form) return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>;
 
   const F = (key: string, label: string, type = "text", ph = "") => (

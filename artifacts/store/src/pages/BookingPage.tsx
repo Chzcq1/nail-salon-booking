@@ -69,7 +69,7 @@ const api = {
 };
 
 // ── Step types ───────────────────────────────────────────────────────
-type Step = "landing" | "service" | "date" | "slot" | "info" | "payment" | "success";
+type Step = "landing" | "date" | "slot" | "info" | "payment" | "success";
 
 interface BookingState {
   service:  any | null;
@@ -112,16 +112,7 @@ export default function BookingPage() {
             key="landing"
             settings={shopSettings}
             gallery={gallery}
-            onBook={() => go("service")}
-          />
-        )}
-        {step === "service" && (
-          <ServiceScreen
-            key="service"
-            services={services}
-            selected={booking.service}
-            onBack={() => go("landing")}
-            onSelect={s => { setBooking(b => ({ ...b, service: s })); go("date"); }}
+            onBook={() => go("date")}
           />
         )}
         {step === "date" && (
@@ -129,7 +120,7 @@ export default function BookingPage() {
             key="date"
             maxDays={shopSettings?.max_advance_days || 14}
             selected={booking.date}
-            onBack={() => go("service")}
+            onBack={() => go("landing")}
             onSelect={d => { setBooking(b => ({ ...b, date: d, slot: null })); go("slot"); }}
           />
         )}
@@ -145,13 +136,15 @@ export default function BookingPage() {
         {step === "info" && (
           <InfoScreen
             key="info"
+            services={services}
+            service={booking.service}
             name={booking.name}
             phone={booking.phone}
             line={booking.line}
             note={booking.note}
             onBack={() => go("slot")}
-            onNext={(name, phone, line, note) => {
-              setBooking(b => ({ ...b, name, phone, line, note }));
+            onNext={(service, name, phone, line, note) => {
+              setBooking(b => ({ ...b, service, name, phone, line, note }));
               go("payment");
             }}
           />
@@ -212,12 +205,12 @@ function BackBtn({ onClick }: { onClick: () => void }) {
 }
 
 // ── Tutorial Popup ───────────────────────────────────────────────────
-const TUTORIAL_KEY = "nail_tutorial_seen_v1";
+const TUTORIAL_KEY = "nail_tutorial_seen_v2";
 
 const tutorialSteps = [
-  { icon: "💅", title: "เลือกบริการ", desc: "เลือกประเภทการทำเล็บที่ต้องการ เช่น เพนท์เจล, อะคริลิค" },
-  { icon: "📅", title: "เลือกวันและเวลา", desc: "เลือกวันที่สะดวกและช่วงเวลาที่ว่าง" },
-  { icon: "📝", title: "กรอกข้อมูล", desc: "ใส่ชื่อ เบอร์โทร และ LINE สำหรับติดต่อยืนยัน" },
+  { icon: "📅", title: "เลือกวันที่", desc: "เลือกวันที่สะดวก ระบบแสดงเฉพาะวันที่เปิดรับจอง" },
+  { icon: "🕐", title: "เลือกช่วงเวลา", desc: "เลือกช่วงเวลาที่ว่างสำหรับวันที่คุณเลือก" },
+  { icon: "📝", title: "กรอกข้อมูล + เลือกบริการ", desc: "ใส่ชื่อ เบอร์โทร และเลือกบริการที่ต้องการ (ถ้ามี)" },
   { icon: "💳", title: "จ่ายมัดจำ", desc: "โอนค่ามัดจำและส่งสลิป ร้านจะยืนยันให้ภายใน 24 ชม." },
 ];
 
@@ -471,11 +464,13 @@ function DateScreen({ maxDays, selected, onBack, onSelect }: any) {
 
 // ── Slot Screen ──────────────────────────────────────────────────────
 function SlotScreen({ date, selected, onBack, onSelect }: any) {
-  const { data: slots = [], isLoading } = useQuery({
+  const { data: slots = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["nail-slots", date],
     queryFn: () => api.slots(date),
     enabled: !!date,
-    refetchInterval: 15000, // refresh every 15s for real-time
+    refetchInterval: 30000,
+    staleTime: 15000,
+    retry: 1,
   });
 
   return (
@@ -487,6 +482,11 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 
         {isLoading ? (
           <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={28} color={P.pink} className="animate-spin" /></div>
+        ) : isError ? (
+          <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 16, border: `1px solid ${P.pinkBorder}` }}>
+            <p style={{ color: P.sub, fontSize: 15 }}>โหลดข้อมูลไม่สำเร็จ</p>
+            <button onClick={() => refetch()} style={{ marginTop: 12, background: P.pinkPale, color: P.pink, border: "none", borderRadius: 100, padding: "8px 20px", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>ลองใหม่</button>
+          </div>
         ) : slots.length === 0 ? (
           <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 16, border: `1px solid ${P.pinkBorder}` }}>
             <p style={{ color: P.sub, fontSize: 15 }}>ไม่มีช่วงเวลาว่างในวันนี้</p>
@@ -526,7 +526,8 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 }
 
 // ── Info Screen ──────────────────────────────────────────────────────
-function InfoScreen({ name, phone, line, note, onBack, onNext }: any) {
+function InfoScreen({ services, service, name, phone, line, note, onBack, onNext }: any) {
+  const [sel, setSel] = useState<any>(service || null);
   const [n, setN] = useState(name);
   const [p, setP] = useState(phone);
   const [ln, setLn] = useState(line || "");
@@ -539,7 +540,39 @@ function InfoScreen({ name, phone, line, note, onBack, onNext }: any) {
       <BackBtn onClick={onBack} />
       <div style={{ padding: "0 20px" }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>ข้อมูลการจอง</h2>
-        <p style={{ color: P.sub, marginBottom: 24, fontSize: 14 }}>กรอกข้อมูลเพื่อยืนยันการจอง</p>
+        <p style={{ color: P.sub, marginBottom: 20, fontSize: 14 }}>กรอกข้อมูลเพื่อยืนยันการจอง</p>
+
+        {/* Service selector — moved here from separate step */}
+        {services?.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, color: P.sub, fontSize: 13, fontWeight: 500, marginBottom: 10 }}>
+              <span style={{ color: P.pink }}>💅</span>เลือกบริการ (ถ้ามี)
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {services.map((s: any) => (
+                <button key={s.id} onClick={() => setSel(sel?.id === s.id ? null : s)}
+                  style={{
+                    background: sel?.id === s.id ? P.pinkPale : "#fff",
+                    border: `2px solid ${sel?.id === s.id ? P.pink : P.pinkBorder}`,
+                    borderRadius: 12, padding: "12px 14px", cursor: "pointer",
+                    textAlign: "left", display: "flex", alignItems: "center", gap: 12,
+                    boxShadow: sel?.id === s.id ? `0 0 0 2px ${P.pink}22` : "none",
+                  }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${s.color || P.pink}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>💅</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: P.text, fontSize: 14 }}>{s.name}</div>
+                    {s.description && <div style={{ color: P.sub, fontSize: 12 }}>{s.description}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                      <span style={{ background: P.pinkPale, color: P.pink, borderRadius: 100, padding: "1px 8px", fontSize: 11, fontWeight: 600 }}>฿{s.price?.toLocaleString()}</span>
+                      <span style={{ background: P.gray, color: P.sub, borderRadius: 100, padding: "1px 8px", fontSize: 11 }}><Clock size={10} style={{ display: "inline" }} /> {s.duration_minutes} นาที</span>
+                    </div>
+                  </div>
+                  {sel?.id === s.id && <CheckCircle size={18} color={P.pink} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Field label="ชื่อ-นามสกุล *" icon={<User size={16} />}>
@@ -558,7 +591,7 @@ function InfoScreen({ name, phone, line, note, onBack, onNext }: any) {
         </div>
 
         <button
-          onClick={() => valid && onNext(n.trim(), p.trim(), ln.trim(), nt.trim())}
+          onClick={() => valid && onNext(sel, n.trim(), p.trim(), ln.trim(), nt.trim())}
           disabled={!valid}
           style={{
             width: "100%", marginTop: 28,

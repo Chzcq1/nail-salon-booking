@@ -159,6 +159,8 @@ def _run_migrations(engine):
         # gafiw_orders: local purchase history (keeps textdb/รหัสสินค้า permanently)
         "CREATE TABLE IF NOT EXISTS gafiw_orders (id SERIAL PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), type_id VARCHAR(100), product_name VARCHAR(255) NOT NULL, textdb TEXT, image_api VARCHAR(1000), price NUMERIC(10,2), created_at TIMESTAMPTZ DEFAULT NOW())",
         "CREATE INDEX IF NOT EXISTS ix_gafiw_orders_customer_id ON gafiw_orders (customer_id)",
+        # nail_gallery: change image_url to TEXT so base64 images can be stored directly
+        "ALTER TABLE nail_gallery ALTER COLUMN image_url TYPE TEXT",
 
         # ── Performance indexes ────────────────────────────────────────────────
         # orders: admin กรอง status บ่อย + เรียงตาม created_at

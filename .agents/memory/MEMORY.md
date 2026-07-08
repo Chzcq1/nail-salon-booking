@@ -1,3 +1,5 @@
 - [Email wallet auth](email-wallet-auth.md) — replaced Telegram OTP with email OTP + PIN for customer wallet; key decisions and env vars documented
 - [Nail Salon Booking System](nail-salon-system.md) — booking system built on existing stack; slot locking (SELECT FOR UPDATE), deposit random cents, rental expiry, admin auth guard
 - [Project deployment and Replit role](project-deployment.md) — deployed on Render, secrets already there, DB is Neon.tech; Replit writes code only, never ask for keys unless brand-new service
+- [React Query shared queryKey pitfall](react-query-shared-querykey-pitfall.md) — never put setState in queryFn .then(); use useEffect on returned data to handle cached-data case
+- [Render ephemeral filesystem](render-ephemeral-filesystem.md) — files written to disk are lost on redeploy; store gallery images as base64 in DB (TEXT column), not filesystem URLs
