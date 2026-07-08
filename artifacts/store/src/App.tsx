@@ -14,7 +14,13 @@ import NailSuperAdminPage from "@/pages/NailSuperAdminPage";
 const queryClient = new QueryClient();
 
 // ── ร้านหมดอายุ — หน้าแจ้งลูกค้า ────────────────────────────────────────────
-function ExpiredShopScreen({ shopName }: { shopName?: string }) {
+function ExpiredShopScreen({ shopName, onRefetch }: { shopName?: string; onRefetch?: () => void }) {
+  const [checking, setChecking] = React.useState(false);
+  const handleCheck = async () => {
+    setChecking(true);
+    await onRefetch?.();
+    setTimeout(() => setChecking(false), 2000);
+  };
   return (
     <div
       style={{
@@ -46,15 +52,36 @@ function ExpiredShopScreen({ shopName }: { shopName?: string }) {
           color: "#6b7280",
           maxWidth: 320,
           lineHeight: 1.7,
-          marginBottom: 8,
+          marginBottom: 24,
         }}
       >
         ขออภัยในความไม่สะดวก
         <br />
         กรุณาติดต่อร้านโดยตรงเพื่อนัดหมาย
       </p>
-      <p style={{ fontSize: 13, color: "#d1d5db", marginTop: 24 }}>
-        ระบบปิดปรับปรุงชั่วคราว
+      {onRefetch && (
+        <button
+          onClick={handleCheck}
+          disabled={checking}
+          style={{
+            background: "#be185d",
+            color: "#fff",
+            border: "none",
+            borderRadius: 100,
+            padding: "12px 28px",
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: checking ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+            opacity: checking ? 0.7 : 1,
+            marginBottom: 16,
+          }}
+        >
+          {checking ? "กำลังตรวจสอบ…" : "🔄 เช็คการเปิดร้านใหม่"}
+        </button>
+      )}
+      <p style={{ fontSize: 13, color: "#d1d5db" }}>
+        ระบบตรวจสอบอัตโนมัติทุก 30 วินาที
       </p>
     </div>
   );
@@ -67,7 +94,7 @@ function ShopGate({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const isAdminPath = ADMIN_PATHS.some((p) => location.startsWith(p));
 
-  const { data, isLoading, isError } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["shop-gate-settings"],
     queryFn: () =>
       fetch("/api/nail/settings").then((r) => {
@@ -75,7 +102,8 @@ function ShopGate({ children }: { children: React.ReactNode }) {
         return r.json();
       }),
     staleTime: 60_000,
-    // retry once quickly so a brief cold-start doesn't block unnecessarily
+    // Auto-poll every 30s when shop is expired so page unblocks automatically after renewal
+    refetchInterval: (query) => (query.state.data?.expired ? 30_000 : false),
     retry: 1,
     retryDelay: 1500,
     enabled: !isAdminPath,
@@ -109,7 +137,7 @@ function ShopGate({ children }: { children: React.ReactNode }) {
   }
 
   if (data?.expired) {
-    return <ExpiredShopScreen shopName={data.shop_name} />;
+    return <ExpiredShopScreen shopName={data.shop_name} onRefetch={refetch} />;
   }
 
   return <>{children}</>;

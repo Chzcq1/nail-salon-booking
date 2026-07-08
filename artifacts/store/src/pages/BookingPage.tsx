@@ -580,9 +580,9 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {slots.map((sl: any) => {
+            {slots.filter((sl: any) => !sl.is_past).map((sl: any) => {
               const avail = sl.available;
-              const isPast = !!sl.is_past;
+              const isPast = false; // past slots are now hidden entirely
               const isSelected = selected?.id === sl.id;
               const remaining = sl.max_bookings > 1 ? Math.max(0, sl.max_bookings - sl.booked_count) : null;
               return (

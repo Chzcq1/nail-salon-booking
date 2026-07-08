@@ -1936,10 +1936,18 @@ function ScheduleTab({ token }: { token: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }),
   });
 
+  const [deleteSlotId, setDeleteSlotId] = useState<number | null>(null);
+  const [slotDeleteError, setSlotDeleteError] = useState("");
+
   const deleteMutation = useMutation({
-    mutationFn: (id: number) =>
-      fetch(`/api/nail/admin/slots/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }),
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/nail/admin/slots/${id}`, { method: "DELETE", headers: authH(token) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }); setDeleteSlotId(null); setSlotDeleteError(""); },
+    onError: (e: any) => setSlotDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
   const batchMutation = useMutation({
@@ -2070,13 +2078,33 @@ function ScheduleTab({ token }: { token: string }) {
                   style={{ flex: 1, background: sl.is_available ? A.errorBg : A.successBg, color: sl.is_available ? A.error : A.success, border: "none", borderRadius: 8, padding: "5px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>
                   {sl.is_available ? "ปิด" : "เปิด"}
                 </button>
-                <button onClick={() => { if (sl.booked_count === 0) deleteMutation.mutate(sl.id); }} disabled={sl.booked_count > 0}
+                <button onClick={() => { if (sl.booked_count === 0) setDeleteSlotId(sl.id); }} disabled={sl.booked_count > 0}
                   style={{ background: A.gray, border: "none", borderRadius: 8, padding: "5px 8px", cursor: sl.booked_count > 0 ? "not-allowed" : "pointer", opacity: sl.booked_count > 0 ? 0.4 : 1 }}>
                   <Trash2 size={13} color={A.error} />
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Delete Slot Confirm Dialog */}
+      {deleteSlotId !== null && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+          <div style={{ background: A.card, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360, textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 8 }}>ยืนยันลบ Slot?</h3>
+            <p style={{ fontSize: 14, color: A.sub, marginBottom: 20 }}>ไม่สามารถกู้คืนได้หลังลบแล้ว</p>
+            {slotDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {slotDeleteError}</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setDeleteSlotId(null); setSlotDeleteError(""); }}
+                style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
+              <button onClick={() => deleteMutation.mutate(deleteSlotId!)} disabled={deleteMutation.isPending}
+                style={{ flex: 1, background: A.error, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {deleteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "ลบ Slot"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2130,10 +2158,18 @@ function GalleryTab({ token }: { token: string }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setPreview(null); setCaption(""); setUploading(false); },
   });
 
+  const [deleteGalleryId, setDeleteGalleryId] = useState<number | null>(null);
+  const [galleryDeleteError, setGalleryDeleteError] = useState("");
+
   const deleteMutation = useMutation({
-    mutationFn: (id: number) =>
-      fetch(`/api/nail/admin/gallery/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }),
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/nail/admin/gallery/${id}`, { method: "DELETE", headers: authH(token) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setDeleteGalleryId(null); setGalleryDeleteError(""); },
+    onError: (e: any) => setGalleryDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
   const [fileError, setFileError] = useState("");
@@ -2191,7 +2227,7 @@ function GalleryTab({ token }: { token: string }) {
         {items.map((g: any) => (
           <div key={g.id} style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: A.gray, aspectRatio: "1" }}>
             <img src={g.image_url} alt={g.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            <button onClick={() => deleteMutation.mutate(g.id)}
+            <button onClick={() => setDeleteGalleryId(g.id)}
               style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,0.65)", border: "none", borderRadius: "50%", width: 26, height: 26, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Trash2 size={13} color="#fff" />
             </button>
@@ -2201,6 +2237,26 @@ function GalleryTab({ token }: { token: string }) {
       {items.length === 0 && !preview && (
         <div style={{ textAlign: "center", padding: 32, color: A.muted, fontSize: 14 }}>
           <Image size={32} style={{ margin: "0 auto 8px" }} /><p>ยังไม่มีผลงาน</p>
+        </div>
+      )}
+
+      {/* Delete Gallery Confirm Dialog */}
+      {deleteGalleryId !== null && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+          <div style={{ background: A.card, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360, textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 8 }}>ลบรูปผลงานนี้?</h3>
+            <p style={{ fontSize: 14, color: A.sub, marginBottom: 20 }}>รูปจะหายไปจากแกลเลอรีทันที</p>
+            {galleryDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {galleryDeleteError}</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setDeleteGalleryId(null); setGalleryDeleteError(""); }}
+                style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
+              <button onClick={() => deleteMutation.mutate(deleteGalleryId!)} disabled={deleteMutation.isPending}
+                style={{ flex: 1, background: A.error, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {deleteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "ลบรูป"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -2231,10 +2287,17 @@ function SettingsTab({ token }: { token: string }) {
     }
   }, [settingsData]);
 
+  const [saveError, setSaveError] = useState("");
+
   const saveMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/settings", { method: "PUT", headers: authH(token), body: JSON.stringify(form) }).then(r => r.json()),
-    onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/settings", { method: "PUT", headers: authH(token), body: JSON.stringify(form) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: () => { setSaved(true); setSaveError(""); setTimeout(() => setSaved(false), 2500); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
+    onError: (e: any) => setSaveError(e.message || "บันทึกไม่สำเร็จ กรุณาลองใหม่"),
   });
 
   if (settingsLoading && !settingsData) return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>;
@@ -2281,6 +2344,11 @@ function SettingsTab({ token }: { token: string }) {
       {F("max_advance_days", "จองล่วงหน้าได้สูงสุด (วัน)", "number", "14")}
       {F("slot_duration_minutes", "ระยะเวลาต่อ slot เริ่มต้น (นาที)", "number", "90")}
 
+      {saveError && (
+        <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>⚠️</span> {saveError}
+        </div>
+      )}
       <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
         style={{ width: "100%", marginTop: 8, background: saved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "15px", fontSize: 16, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}>
         {saveMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : saved ? <><CheckCircle size={18} /> บันทึกแล้ว!</> : <><Save size={18} /> บันทึกการตั้งค่า</>}

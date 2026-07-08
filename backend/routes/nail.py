@@ -518,6 +518,10 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     """
     Step 2: อัปโหลดสลิป — ตรวจสอบและเปลี่ยนสถานะ
     """
+    shop = _get_shop(db)
+    if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
+        raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
+
     booking = db.query(NailBooking).filter_by(hold_token=req.hold_token).first()
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง")
@@ -586,6 +590,10 @@ async def submit_payment_wallet(
     """
     ชำระมัดจำด้วยเครดิตในกระเป๋าเงิน (ต้องล็อกอินและมีเครดิตพอ) — ยืนยันคิวทันที ไม่ต้องรอแอดมินตรวจสลิป
     """
+    shop = _get_shop(db)
+    if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
+        raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
+
     booking = (
         db.query(NailBooking)
         .filter_by(hold_token=req.hold_token)
@@ -1493,7 +1501,7 @@ def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
     key = cfg.nail_super_admin_key
     if not key:
         raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
-    if x_super_admin_key != key:
+    if not secrets.compare_digest(x_super_admin_key or "", key):
         raise HTTPException(status_code=403, detail="Key ไม่ถูกต้อง")
 
 
@@ -1572,8 +1580,19 @@ async def admin_submit_renewal(
             extract_voucher_code as _extract_vc,
             redeem_voucher as _redeem,
         )
-        from backend.models import StoreSettings
+        from backend.models import StoreSettings, TopupRequest
         voucher_code = _extract_vc(body.voucher_code)   # raise 400 ถ้า format ผิด
+
+        # ── Double-spend guard: ตรวจว่าซองนี้ถูกใช้ไปแล้วหรือยัง ────────────
+        used_in_renewal = db.query(NailRenewalRequest).filter(
+            NailRenewalRequest.slip_image == f"voucher:{voucher_code}"
+        ).first()
+        used_in_topup = db.query(TopupRequest).filter(
+            TopupRequest.voucher_code == voucher_code
+        ).first()
+        if used_in_renewal or used_in_topup:
+            raise HTTPException(status_code=409, detail="ซองอั่งเปานี้ถูกใช้ไปแล้ว กรุณาใช้ซองใหม่")
+
         image_or_voucher = f"voucher:{voucher_code}"
     else:
         image_or_voucher = body.slip_image
