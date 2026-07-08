@@ -964,17 +964,28 @@ function AccountsTab({ token }: { token: string }) {
             return (
               <div key={t.id} style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, color: A.text, fontSize: 14 }}>{t.customer_email}</div>
-                    <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* ชื่อ + เบอร์ — ข้อมูลหลักที่ใช้จับคู่สลิป */}
+                    {(t.customer_name || t.customer_phone) ? (
+                      <div style={{ fontWeight: 700, color: A.text, fontSize: 15, marginBottom: 2 }}>
+                        {t.customer_name || "ไม่ระบุชื่อ"}
+                        {t.customer_phone && <span style={{ fontWeight: 500, color: A.sub, fontSize: 13, marginLeft: 8 }}>{t.customer_phone}</span>}
+                      </div>
+                    ) : (
+                      <div style={{ fontWeight: 600, color: A.warning, fontSize: 13, marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                        <AlertCircle size={13} /> ลูกค้ายังไม่ได้ตั้งชื่อ
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: A.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.customer_email}</div>
+                    <div style={{ fontSize: 12, color: A.sub }}>
                       {topupTypeLabel[t.topup_type] || t.topup_type}
                       {t.amount ? ` · ฿${Number(t.amount).toLocaleString()}` : ""}
-                    </div>
-                    <div style={{ fontSize: 11, color: A.muted, marginTop: 2 }}>
-                      {t.created_at ? new Date(t.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : ""}
+                      <span style={{ color: A.muted, marginLeft: 6 }}>
+                        {t.created_at ? new Date(t.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : ""}
+                      </span>
                     </div>
                   </div>
-                  <span style={{ background: `${sl.color}18`, color: sl.color, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>{sl.label}</span>
+                  <span style={{ background: `${sl.color}18`, color: sl.color, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, flexShrink: 0, marginLeft: 8 }}>{sl.label}</span>
                 </div>
 
                 {/* สลิปหรือ voucher */}

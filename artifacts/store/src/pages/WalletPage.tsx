@@ -5,7 +5,7 @@ import {
   Wallet, Plus, ArrowDownLeft, ArrowUpRight, Gift, Upload, ChevronRight,
   Loader, CheckCircle, XCircle, Info, X, ShoppingBag,
   Lock, Eye, EyeOff, LogOut, ShieldCheck, Package, ExternalLink,
-  Mail, Copy, ChevronUp,
+  Mail, Copy, ChevronUp, Phone, User, Edit2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,8 @@ function TxnBadge({ type }: { type: string }) {
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface WalletData {
   email: string;
+  display_name: string | null;
+  phone_number: string | null;
   balance: number;
   transactions: Array<{
     id: number;
@@ -778,6 +780,13 @@ export default function WalletPage() {
   const [topupError, setTopupError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Profile setup state
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState("");
+
   const { data: storeSettings } = useQuery<StoreSettings>({
     queryKey: ["store-settings-topup"],
     queryFn: () => fetch("/api/store-settings").then(r => r.json()),
@@ -803,7 +812,32 @@ export default function WalletPage() {
 
   useEffect(() => {
     if (walletQuery.data?.email) setEmail(walletQuery.data.email);
-  }, [walletQuery.data]);
+    // Auto-open profile setup when name is missing
+    if (walletQuery.data && !walletQuery.data.display_name) {
+      setShowProfileModal(true);
+    }
+  }, [walletQuery.data?.email, walletQuery.data?.display_name]); // eslint-disable-line
+
+  async function saveProfile() {
+    if (!profileName.trim()) { setProfileError("กรุณาใส่ชื่อ"); return; }
+    if (!profilePhone.trim()) { setProfileError("กรุณาใส่เบอร์โทร"); return; }
+    setProfileLoading(true); setProfileError("");
+    try {
+      const res = await fetch("/api/wallet/profile", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: profileName.trim(), phone_number: profilePhone.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "บันทึกไม่สำเร็จ");
+      qc.invalidateQueries({ queryKey: ["wallet-me"] });
+      setShowProfileModal(false);
+    } catch (e: any) {
+      setProfileError(e.message || "เกิดข้อผิดพลาด");
+    } finally {
+      setProfileLoading(false);
+    }
+  }
 
   const authHeaders = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -908,11 +942,35 @@ export default function WalletPage() {
           className="bg-gradient-to-br from-primary/20 via-primary/10 to-transparent border border-primary/30 rounded-2xl p-5">
           <div className="flex items-start justify-between mb-4">
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-muted-foreground mb-0.5">บัญชี</p>
-              <p className="text-sm font-semibold text-foreground truncate">{email || "..."}</p>
+              {walletQuery.data?.display_name ? (
+                <>
+                  <p className="text-base font-bold text-foreground leading-tight">{walletQuery.data.display_name}</p>
+                  {walletQuery.data?.phone_number && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <Phone size={11} /> {walletQuery.data.phone_number}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{email}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground mb-0.5">บัญชี</p>
+                  <p className="text-sm font-semibold text-foreground truncate">{email || "..."}</p>
+                </>
+              )}
             </div>
-            <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center shrink-0">
-              <Wallet size={18} className="text-primary" />
+            <div className="flex flex-col items-end gap-2">
+              <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center">
+                <Wallet size={18} className="text-primary" />
+              </div>
+              <button onClick={() => {
+                setProfileName(walletQuery.data?.display_name || "");
+                setProfilePhone(walletQuery.data?.phone_number || "");
+                setProfileError("");
+                setShowProfileModal(true);
+              }} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors">
+                <Edit2 size={10} /> แก้ไข
+              </button>
             </div>
           </div>
           <p className="text-xs text-muted-foreground mb-1">ยอดเครดิตคงเหลือ</p>
@@ -1135,6 +1193,73 @@ export default function WalletPage() {
             </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Profile Setup Modal ── */}
+      <Dialog open={showProfileModal} onOpenChange={(open) => {
+        // Allow closing only if profile is already set
+        if (!open && walletQuery.data?.display_name) setShowProfileModal(false);
+      }}>
+        <DialogContent className="bg-card border-border max-w-sm p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-3">
+            <DialogTitle className="text-base flex items-center gap-2">
+              <User size={16} className="text-primary" />
+              {walletQuery.data?.display_name ? "แก้ไขโปรไฟล์" : "ตั้งค่าโปรไฟล์ก่อนใช้งาน"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="px-6 pb-6 space-y-4">
+            {!walletQuery.data?.display_name && (
+              <p className="text-sm text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3">
+                แอดมินต้องทราบชื่อและเบอร์เพื่อยืนยันการเติมเงินของคุณ กรุณากรอกให้ครบก่อนใช้งาน
+              </p>
+            )}
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <User size={12} /> ชื่อ-นามสกุล <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                placeholder="สมชาย ใจดี"
+                className="w-full border border-border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/40 transition"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <Phone size={12} /> เบอร์โทรศัพท์ <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="tel"
+                value={profilePhone}
+                onChange={e => setProfilePhone(e.target.value)}
+                placeholder="0812345678"
+                className="w-full border border-border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground outline-none focus:ring-2 focus:ring-primary/40 transition"
+              />
+            </div>
+
+            {profileError && (
+              <p className="text-xs text-red-400 flex items-center gap-1.5">
+                <XCircle size={13} /> {profileError}
+              </p>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              {walletQuery.data?.display_name && (
+                <button onClick={() => setShowProfileModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:text-foreground transition">
+                  ยกเลิก
+                </button>
+              )}
+              <Button className="flex-1 gap-1.5" onClick={saveProfile} disabled={profileLoading}>
+                {profileLoading ? <Loader size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                บันทึก
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

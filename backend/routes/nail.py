@@ -1408,6 +1408,8 @@ def nail_admin_list_topups(
         result.append({
             "id": t.id,
             "customer_email": cust.email if cust else "?",
+            "customer_name": (cust.display_name or "") if cust else "",
+            "customer_phone": (cust.phone_number or "") if cust else "",
             "topup_type": t.topup_type,
             "amount": float(t.amount) if t.amount else None,
             "status": t.status,

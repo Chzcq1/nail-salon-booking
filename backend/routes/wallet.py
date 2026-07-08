@@ -9,6 +9,7 @@ from decimal import Decimal
 import bcrypt
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel
 import jwt as _jwt
 from jwt.exceptions import InvalidTokenError as JWTError
 from sqlalchemy.orm import Session
@@ -301,6 +302,8 @@ def wallet_me(
     )
     return {
         "email": customer.email,
+        "display_name": customer.display_name or None,
+        "phone_number": customer.phone_number or None,
         "balance": float(customer.balance or 0),
         "transactions": [
             {
@@ -313,6 +316,34 @@ def wallet_me(
             for t in txns
         ],
     }
+
+
+class ProfileBody(BaseModel):
+    display_name: str
+    phone_number: str
+
+
+@router.patch("/wallet/profile")
+def wallet_update_profile(
+    body: ProfileBody,
+    customer: Customer = Depends(get_wallet_customer),
+    db: Session = Depends(get_db),
+):
+    """ลูกค้าอัปเดตชื่อและเบอร์โทรของตัวเอง"""
+    name = body.display_name.strip()
+    phone = body.phone_number.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="กรุณาใส่ชื่อ")
+    if not phone:
+        raise HTTPException(status_code=400, detail="กรุณาใส่เบอร์โทร")
+    # เบอร์โทรมือถือไทย: 06x / 08x / 09x (10 หลัก) หรือ +66 6/8/9 (12 หลัก)
+    cleaned = re.sub(r"[\s\-\(\)]", "", phone)
+    if not re.match(r"^(\+66[689]\d{8}|0[689]\d{8})$", cleaned):
+        raise HTTPException(status_code=400, detail="เบอร์โทรไม่ถูกต้อง ต้องขึ้นต้นด้วย 06x / 08x / 09x (เช่น 0812345678)")
+    customer.display_name = name
+    customer.phone_number = cleaned
+    db.commit()
+    return {"ok": True, "display_name": name, "phone_number": cleaned}
 
 
 # ── Topup: slip ───────────────────────────────────────────────────────────────

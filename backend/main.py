@@ -297,6 +297,9 @@ def _run_migrations(engine):
         # deposit_cents / deposit_total อาจหายถ้า table ถูกสร้างก่อน columns นี้จะถูกเพิ่ม
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_cents INTEGER",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_total NUMERIC(10,2)",
+        # ชื่อและเบอร์โทรลูกค้า — สำหรับระบุตัวตนในคำขอเติมเครดิต
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20)",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
