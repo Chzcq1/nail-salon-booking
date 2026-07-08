@@ -9,7 +9,7 @@ import {
   Instagram, Facebook, Clock, ChevronLeft, ChevronRight,
   Phone, User, StickyNote, Upload, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
-  MessageCircle, Video, HelpCircle,
+  MessageCircle, Video, HelpCircle, Wallet,
 } from "lucide-react";
 
 // ── Color tokens ────────────────────────────────────────────────────
@@ -335,6 +335,16 @@ function LandingScreen({ settings, gallery, onBook }: any) {
   const [galleryIdx, setGalleryIdx] = useState(0);
   const galleryRef = useRef<HTMLDivElement>(null);
   const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_KEY));
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    const token = getWalletToken();
+    if (!token) return;
+    fetch("/api/wallet/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.balance != null) setWalletBalance(parseFloat(d.balance)); })
+      .catch(() => {});
+  }, []);
 
   const socials = [
     { url: settings?.ig_url, icon: <Instagram size={20} />, label: "Instagram", color: "#E1306C" },
@@ -372,6 +382,18 @@ function LandingScreen({ settings, gallery, onBook }: any) {
           style={{ marginTop: 14, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
           <HelpCircle size={14} /> วิธีจอง / คำแนะนำ
         </button>
+
+        {/* Wallet button — แสดงเสมอ (logged in: แสดงยอด, ไม่ได้ login: เชิญชวนเติมเงิน) */}
+        <div style={{ marginTop: 16 }}>
+          <a href="/wallet"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
+            <Wallet size={16} />
+            {walletBalance !== null
+              ? <>กระเป๋าเงิน · <span style={{ fontWeight: 800 }}>฿{walletBalance.toFixed(2)}</span></>
+              : "กระเป๋าเงิน / เติมเงินมัดจำ"
+            }
+          </a>
+        </div>
       </div>
 
       {/* Tutorial Popup */}

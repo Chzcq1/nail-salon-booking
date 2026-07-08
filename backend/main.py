@@ -294,6 +294,9 @@ def _run_migrations(engine):
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) NOT NULL DEFAULT 'slip'",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_customer_id ON nail_bookings (customer_id)",
+        # deposit_cents / deposit_total อาจหายถ้า table ถูกสร้างก่อน columns นี้จะถูกเพิ่ม
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_cents INTEGER",
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS deposit_total NUMERIC(10,2)",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

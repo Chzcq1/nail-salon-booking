@@ -12,6 +12,7 @@ import {
   Phone, User, AlertCircle, Upload, ChevronRight, TrendingUp,
   Banknote, Users, ArrowLeft, Edit2, Save, X, Ban, RotateCcw,
   MessageCircle, Package, Crown, ChevronLeft, Palette, ChevronUp, ChevronDown,
+  Wallet, CreditCard,
 } from "lucide-react";
 
 // ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
@@ -38,7 +39,7 @@ const A = {
   infoBg:    "#E3F2FD",
 } as const;
 
-type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal";
+type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal" | "accounts";
 
 // ใช้วันที่ตาม "เวลาท้องถิ่น" ของเบราว์เซอร์ ห้ามใช้ toISOString() เพราะจะแปลงเป็น UTC
 // แล้วทำให้วันที่เลื่อนถอยหลัง 1 วันสำหรับโซนเวลาไทย (UTC+7) เช่น เลือกวันที่ 9 กลายเป็นวันที่ 8
@@ -267,6 +268,7 @@ export default function NailAdminPage() {
     { id: "staff",     label: "ช่าง",       icon: <Users size={17} /> },
     { id: "gallery",   label: "แกลเลอรี",  icon: <Image size={17} /> },
     { id: "settings",  label: "ตั้งค่า",    icon: <Settings size={17} /> },
+    { id: "accounts",  label: "บัญชี",      icon: <Wallet size={17} /> },
     { id: "renewal",   label: "ต่ออายุ",   icon: <Crown size={17} /> },
   ];
 
@@ -325,6 +327,7 @@ export default function NailAdminPage() {
             {tab === "staff"     && <StaffTab token={token} />}
             {tab === "gallery"   && <GalleryTab token={token} />}
             {tab === "settings"  && <SettingsTab token={token} />}
+            {tab === "accounts"  && <AccountsTab token={token} />}
             {tab === "renewal"   && <RenewalTab token={token} />}
           </motion.div>
         </AnimatePresence>
@@ -896,6 +899,126 @@ const RENEWAL_STATUS_LABEL: Record<string, { label: string; color: string }> = {
   rejected: { label: "ถูกปฏิเสธ", color: "#C0392B" },
 };
 
+// ─── Accounts / Wallet Management ────────────────────────────────────────────
+function AccountsTab({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<"pending" | "all">("pending");
+  const [approveAmounts, setApproveAmounts] = useState<Record<number, string>>({});
+
+  const { data: topups = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["nail-admin-topups", statusFilter],
+    queryFn: () => fetch(`/api/nail/admin/topup-requests?status=${statusFilter}`, { headers: authH(token) }).then(r => r.json()),
+    staleTime: 15000,
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: ({ id, amount }: { id: number; amount: number }) =>
+      fetch(`/api/nail/admin/topup-requests/${id}/approve`, { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify({ amount }) }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/nail/admin/topup-requests/${id}/reject`, { method: "POST", headers: authH(token) }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
+  });
+
+  const topupTypeLabel: Record<string, string> = { slip: "🏦 สลิปโอนเงิน", truemoney: "🧧 TrueMoney" };
+  const statusLabel: Record<string, { label: string; color: string }> = {
+    pending:  { label: "รอตรวจสอบ", color: A.warning },
+    approved: { label: "อนุมัติแล้ว", color: A.success },
+    rejected: { label: "ปฏิเสธ",    color: A.error },
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: A.text, margin: 0 }}>จัดการบัญชีลูกค้า</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["pending", "all"] as const).map(s => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              style={{ padding: "5px 12px", border: `1.5px solid ${statusFilter === s ? A.primary : A.border}`, borderRadius: 100, background: statusFilter === s ? A.pale : "#fff", color: statusFilter === s ? A.primary : A.sub, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              {s === "pending" ? "รอตรวจสอบ" : "ทั้งหมด"}
+            </button>
+          ))}
+          <button onClick={() => refetch()} style={{ padding: "5px 8px", border: `1.5px solid ${A.border}`, borderRadius: 100, background: "#fff", cursor: "pointer", color: A.sub, display: "flex", alignItems: "center" }}>
+            <RefreshCw size={13} />
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} className="animate-spin" color={A.primary} /></div>
+      ) : topups.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40, color: A.muted }}>
+          <CreditCard size={32} style={{ margin: "0 auto 10px", opacity: 0.4 }} />
+          <p>{statusFilter === "pending" ? "ไม่มีคำขอรอตรวจสอบ" : "ไม่มีรายการ"}</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {topups.map((t: any) => {
+            const isPending = t.status === "pending";
+            const sl = statusLabel[t.status] || { label: t.status, color: A.sub };
+            const defaultAmt = t.amount ? String(t.amount) : "";
+            const inputAmt = approveAmounts[t.id] ?? defaultAmt;
+            return (
+              <div key={t.id} style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: A.text, fontSize: 14 }}>{t.customer_email}</div>
+                    <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>
+                      {topupTypeLabel[t.topup_type] || t.topup_type}
+                      {t.amount ? ` · ฿${Number(t.amount).toLocaleString()}` : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: A.muted, marginTop: 2 }}>
+                      {t.created_at ? new Date(t.created_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : ""}
+                    </div>
+                  </div>
+                  <span style={{ background: `${sl.color}18`, color: sl.color, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>{sl.label}</span>
+                </div>
+
+                {/* สลิปหรือ voucher */}
+                {t.payment_proof && !t.payment_proof.startsWith("voucher:") && (
+                  <img src={t.payment_proof} alt="slip" style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 10, border: `1px solid ${A.border}`, marginBottom: 10 }} />
+                )}
+                {(t.voucher_code || t.payment_proof?.startsWith("voucher:")) && (
+                  <div style={{ background: A.infoBg, border: `1px solid ${A.info}33`, borderRadius: 10, padding: "8px 12px", fontSize: 12, color: A.info, marginBottom: 10 }}>
+                    🧧 Voucher: {t.voucher_code || t.payment_proof?.replace("voucher:", "")}
+                  </div>
+                )}
+
+                {isPending && (
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="number" min="1" step="0.01"
+                      value={inputAmt}
+                      onChange={e => setApproveAmounts(prev => ({ ...prev, [t.id]: e.target.value }))}
+                      placeholder="จำนวนเครดิต ฿"
+                      style={{ flex: 1, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none", color: A.text }}
+                    />
+                    <button
+                      onClick={() => approveMutation.mutate({ id: t.id, amount: parseFloat(inputAmt || "0") })}
+                      disabled={!inputAmt || parseFloat(inputAmt) <= 0 || approveMutation.isPending}
+                      style={{ background: A.success, color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 5, opacity: !inputAmt || parseFloat(inputAmt) <= 0 ? 0.5 : 1 }}>
+                      <CheckCircle size={14} /> อนุมัติ
+                    </button>
+                    <button
+                      onClick={() => rejectMutation.mutate(t.id)}
+                      disabled={rejectMutation.isPending}
+                      style={{ background: A.errorBg, color: A.error, border: `1.5px solid ${A.error}44`, borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                      <XCircle size={14} /> ปฏิเสธ
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RenewalTab({ token }: { token: string }) {
   const qc = useQueryClient();
   const [months, setMonths] = useState(1);
@@ -910,10 +1033,17 @@ function RenewalTab({ token }: { token: string }) {
     retry: 1,
   });
 
+  const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
+  const [voucher, setVoucher] = useState("");
+
   const submitMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/renewal-request", { method: "POST", headers: authH(token), body: JSON.stringify({ duration_months: months, slip_image: preview }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] }); setPreview(null); },
+    mutationFn: () => {
+      const body: any = { duration_months: months };
+      if (payMethod === "slip") body.slip_image = preview;
+      else body.voucher_code = voucher.trim();
+      return fetch("/api/nail/admin/renewal-request", { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] }); setPreview(null); setVoucher(""); },
   });
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1005,28 +1135,57 @@ function RenewalTab({ token }: { token: string }) {
           ))}
         </div>
 
+        {/* Payment method selector */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {([["slip", "🏦 โอนสลิป"], ["truemoney", "🧧 TrueMoney"]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setPayMethod(m)}
+              style={{ flex: 1, border: `1.5px solid ${payMethod === m ? A.primary : A.border}`, background: payMethod === m ? A.pale : A.bg, borderRadius: 10, padding: "9px 6px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: payMethod === m ? A.primary : A.sub }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
         {fileError && (
           <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13 }}>
             {fileError}
           </div>
         )}
-        {preview ? (
-          <div style={{ marginBottom: 14 }}>
-            <img src={preview} alt="" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 12, border: `2px solid ${A.primary}` }} />
-            <button onClick={() => setPreview(null)} style={{ marginTop: 8, background: A.gray, border: "none", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>เปลี่ยนรูปสลิป</button>
-          </div>
+
+        {payMethod === "slip" ? (
+          preview ? (
+            <div style={{ marginBottom: 14 }}>
+              <img src={preview} alt="" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 12, border: `2px solid ${A.primary}` }} />
+              <button onClick={() => setPreview(null)} style={{ marginTop: 8, background: A.gray, border: "none", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>เปลี่ยนรูปสลิป</button>
+            </div>
+          ) : (
+            <button onClick={() => fileRef.current?.click()}
+              style={{ width: "100%", border: `2px dashed ${A.border}`, borderRadius: 14, padding: "18px", background: A.pale, cursor: "pointer", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: A.primary, fontWeight: 600, fontFamily: "inherit", fontSize: 14 }}>
+              <Upload size={18} /> อัปโหลดสลิปโอนเงิน
+            </button>
+          )
         ) : (
-          <button onClick={() => fileRef.current?.click()}
-            style={{ width: "100%", border: `2px dashed ${A.border}`, borderRadius: 14, padding: "18px", background: A.pale, cursor: "pointer", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: A.primary, fontWeight: 600, fontFamily: "inherit", fontSize: 14 }}>
-            <Upload size={18} /> อัปโหลดสลิปโอนเงิน
-          </button>
+          <div style={{ marginBottom: 14 }}>
+            <input
+              type="text"
+              value={voucher}
+              onChange={e => setVoucher(e.target.value)}
+              placeholder="https://gift.truemoney.com/campaign/?v=... หรือรหัสซอง"
+              style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", outline: "none", color: A.text, boxSizing: "border-box" }}
+            />
+            <p style={{ fontSize: 11, color: A.muted, marginTop: 6 }}>วางลิงก์ซอง TrueMoney Gift จาก TrueMoney Wallet App</p>
+          </div>
         )}
 
-        <button onClick={() => submitMutation.mutate()} disabled={!preview || submitMutation.isPending}
-          style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !preview ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          {submitMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Save size={15} /> ส่งคำขอต่ออายุ</>}
-        </button>
+        {(() => {
+          const canSubmit = payMethod === "slip" ? !!preview : !!voucher.trim();
+          return (
+            <button onClick={() => submitMutation.mutate()} disabled={!canSubmit || submitMutation.isPending}
+              style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !canSubmit ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              {submitMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Save size={15} /> ส่งคำขอต่ออายุ</>}
+            </button>
+          );
+        })()}
         {submitMutation.isSuccess && (
           <p style={{ textAlign: "center", color: A.success, fontSize: 13, marginTop: 10 }}>ส่งคำขอสำเร็จ รอการตรวจสอบ</p>
         )}

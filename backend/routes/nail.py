@@ -1357,7 +1357,8 @@ def admin_rental_status(db: Session = Depends(get_db), authorization: str = Head
 
 class RenewalRequestBody(BaseModel):
     duration_months: int
-    slip_image: str   # base64 data URI
+    slip_image: Optional[str] = None    # base64 data URI (สำหรับโอนผ่านสลิป)
+    voucher_code: Optional[str] = None  # TrueMoney gift voucher URL หรือรหัสซอง
 
 
 @router.post("/admin/renewal-request")
@@ -1366,20 +1367,108 @@ def admin_submit_renewal(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงิน"""
+    """ส่งคำขอต่ออายุพร้อมสลิปโอนเงินหรือซอง TrueMoney"""
     _check_admin(authorization)
+    if not body.slip_image and not body.voucher_code:
+        raise HTTPException(status_code=400, detail="กรุณาแนบสลิปหรือรหัสซอง TrueMoney")
     amount = RENEWAL_PLANS.get(body.duration_months)
     if not amount:
         raise HTTPException(status_code=400, detail="ระยะเวลาไม่ถูกต้อง (เลือก 1, 3, 6 หรือ 12 เดือน)")
+    # เก็บ voucher ใน slip_image field โดยใช้ prefix "voucher:" เพื่อให้ super-admin แยกแยะได้
+    image_or_voucher = body.slip_image or f"voucher:{body.voucher_code}"
     req = NailRenewalRequest(
         duration_months=body.duration_months,
         amount=amount,
-        slip_image=body.slip_image,
+        slip_image=image_or_voucher,
     )
     db.add(req)
     db.commit()
     db.refresh(req)
     return {"ok": True, "id": req.id}
+
+
+# ── Nail Admin: Wallet / Top-up management ───────────────────────────────────
+
+@router.get("/admin/topup-requests")
+def nail_admin_list_topups(
+    status: str = "pending",
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """รายการขอเติมเครดิตของลูกค้า (nail admin auth)"""
+    _check_admin(authorization)
+    from backend.models import TopupRequest
+    q = db.query(TopupRequest)
+    if status != "all":
+        q = q.filter(TopupRequest.status == status)
+    topups = q.order_by(TopupRequest.id.desc()).limit(100).all()
+    result = []
+    for t in topups:
+        cust = db.query(Customer).filter(Customer.id == t.customer_id).first()
+        result.append({
+            "id": t.id,
+            "customer_email": cust.email if cust else "?",
+            "topup_type": t.topup_type,
+            "amount": float(t.amount) if t.amount else None,
+            "status": t.status,
+            "payment_proof": t.payment_proof or None,
+            "voucher_code": t.voucher_code or None,
+            "slip_verify_status": t.slip_verify_status,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        })
+    return result
+
+
+@router.post("/admin/topup-requests/{topup_id}/approve")
+def nail_admin_approve_topup(
+    topup_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """อนุมัติคำขอเติมเครดิต (nail admin auth)"""
+    _check_admin(authorization)
+    from backend.models import TopupRequest
+    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
+    if not topup:
+        raise HTTPException(status_code=404, detail="ไม่พบรายการ")
+    if topup.status != "pending":
+        raise HTTPException(status_code=400, detail="รายการนี้ดำเนินการแล้ว")
+    amount = Decimal(str(body.get("amount", topup.amount or 0)))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="กรุณาระบุจำนวนเครดิต")
+    customer = db.query(Customer).filter(Customer.id == topup.customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
+    topup.amount = amount
+    topup.status = "approved"
+    customer.balance = (customer.balance or Decimal("0")) + amount
+    db.add(CreditTransaction(
+        customer_id=customer.id,
+        txn_type="topup",
+        amount=amount,
+        description=f"อนุมัติเติมเครดิต #{topup_id} ({topup.topup_type})",
+        ref_id=topup_id,
+    ))
+    db.commit()
+    return {"ok": True, "balance": float(customer.balance)}
+
+
+@router.post("/admin/topup-requests/{topup_id}/reject")
+def nail_admin_reject_topup(
+    topup_id: int,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """ปฏิเสธคำขอเติมเครดิต (nail admin auth)"""
+    _check_admin(authorization)
+    from backend.models import TopupRequest
+    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
+    if not topup:
+        raise HTTPException(status_code=404, detail="ไม่พบรายการ")
+    topup.status = "rejected"
+    db.commit()
+    return {"ok": True}
 
 
 # ── Super-Admin endpoints (NAIL_SUPER_ADMIN_KEY required) ────────────────────
