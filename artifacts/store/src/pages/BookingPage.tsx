@@ -11,16 +11,21 @@ import {
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
   MessageCircle, Video, HelpCircle, Wallet,
 } from "lucide-react";
+import { getTheme, injectThemeCss, DEFAULT_THEME } from "@/theme";
 
-// ── Color tokens ────────────────────────────────────────────────────
+// ตั้งค่าสีเริ่มต้น (Candy Pink) ก่อน settings โหลด — ถูกเขียนทับได้เมื่อ brand_color โหลดจาก API
+injectThemeCss(DEFAULT_THEME);
+
+// ── Color tokens — ใช้ CSS custom properties เพื่อรองรับธีมสีตามร้าน ──
+// CSS vars ถูก inject โดย injectThemeCss() → ถูกเขียนทับตาม brand_color ของแต่ละร้าน
 const P = {
-  pink:      "#FF6B9D",
-  pinkLight: "#FF85B3",
-  pinkPale:  "#FFF0F7",
-  pinkBorder:"#FFD6EC",
-  pinkDeep:  "#E0457B",
+  pink:      "var(--b-primary, #FF6B9D)",
+  pinkLight: "var(--b-light, #FF85B3)",
+  pinkPale:  "var(--b-pale, #FFF0F7)",
+  pinkBorder:"var(--b-border, #FFD6EC)",
+  pinkDeep:  "var(--b-deep, #E0457B)",
   white:     "#FFFFFF",
-  offwhite:  "#FFF8FC",
+  offwhite:  "var(--b-bg, #FFF8FC)",
   text:      "#1A1A2E",
   sub:       "#505068",   // เพิ่มความเข้มจาก #6B6B8A — ผ่าน WCAG AA
   muted:     "#707080",   // เพิ่มความเข้มจาก #A0A0B8 — ผ่าน WCAG AA
@@ -133,6 +138,12 @@ export default function BookingPage() {
   const { data: shopSettings, isError: settingsError } = useQuery({
     queryKey: ["nail-settings"], queryFn: api.settings, staleTime: 15000, retry: 1,
   });
+
+  // Inject brand theme whenever brand_color changes
+  useEffect(() => {
+    injectThemeCss(getTheme(shopSettings?.brand_color));
+  }, [shopSettings?.brand_color]);
+
   const { data: gallery = [] } = useQuery({
     queryKey: ["nail-gallery"], queryFn: api.gallery, staleTime: 120000, retry: 1,
   });
@@ -307,7 +318,7 @@ function TutorialPopup({ onClose }: { onClose: () => void }) {
           <motion.div key={step} initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2 }}
             style={{ textAlign: "center", padding: "8px 0 24px" }}>
             <div style={{ fontSize: 56, marginBottom: 16 }}>{tutorialSteps[step].icon}</div>
-            <div style={{ background: `${P.pink}15`, borderRadius: 100, padding: "4px 16px", display: "inline-block", marginBottom: 12 }}>
+            <div style={{ background: `var(--b-primary-15)`, borderRadius: 100, padding: "4px 16px", display: "inline-block", marginBottom: 12 }}>
               <span style={{ color: P.pink, fontSize: 12, fontWeight: 700 }}>ขั้นตอนที่ {step + 1}</span>
             </div>
             <h3 style={{ fontSize: 20, fontWeight: 700, color: P.text, marginBottom: 8 }}>{tutorialSteps[step].title}</h3>
@@ -473,7 +484,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
       <div style={{ padding: "28px 20px 0" }}>
         <button
           onClick={onBook}
-          style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "16px", fontSize: 17, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 20px ${P.pink}55`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}
+          style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "16px", fontSize: 17, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 20px var(--b-primary-55)`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}
         >
           <Calendar size={20} /> จองคิวทำเล็บ
         </button>
@@ -525,7 +536,7 @@ function DateScreen({ maxDays, closedDates = [], selected, onBack, onSelect }: a
                   textAlign: "center",
                   color: isClosed ? P.muted : isSelected ? "#fff" : P.text,
                   opacity: isClosed ? 0.55 : 1,
-                  boxShadow: isSelected ? `0 4px 16px ${P.pink}44` : "none",
+                  boxShadow: isSelected ? `0 4px 16px var(--b-primary-44)` : "none",
                 }}
               >
                 <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 2 }}>
@@ -596,7 +607,7 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
                     borderRadius: 14, padding: "16px 12px", cursor: avail ? "pointer" : "not-allowed",
                     textAlign: "center", color: !avail ? P.muted : isSelected ? "#fff" : P.text,
                     opacity: !avail ? 0.55 : 1,
-                    boxShadow: isSelected ? `0 4px 16px ${P.pink}44` : "none",
+                    boxShadow: isSelected ? `0 4px 16px var(--b-primary-44)` : "none",
                   }}
                 >
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{sl.start_time}</div>
@@ -684,9 +695,9 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
                     border: `2px solid ${sel?.id === s.id ? P.pink : P.pinkBorder}`,
                     borderRadius: 12, padding: "12px 14px", cursor: "pointer",
                     textAlign: "left", display: "flex", alignItems: "center", gap: 12,
-                    boxShadow: sel?.id === s.id ? `0 0 0 2px ${P.pink}22` : "none",
+                    boxShadow: sel?.id === s.id ? `0 0 0 2px var(--b-primary-22)` : "none",
                   }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${s.color || P.pink}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>💅</div>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color ? `${s.color}22` : "var(--b-primary-22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>💅</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, color: P.text, fontSize: 14 }}>{s.name}</div>
                     {s.description && <div style={{ color: P.sub, fontSize: 12 }}>{s.description}</div>}
@@ -734,7 +745,7 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
             background: valid ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : P.gray,
             color: valid ? "#fff" : P.muted, border: "none", borderRadius: 16, padding: "16px",
             fontSize: 17, fontWeight: 700, cursor: valid ? "pointer" : "not-allowed",
-            boxShadow: valid ? `0 4px 20px ${P.pink}55` : "none",
+            boxShadow: valid ? `0 4px 20px var(--b-primary-55)` : "none",
           }}
         >
           ถัดไป — ชำระมัดจำ <ArrowRight size={18} style={{ display: "inline" }} />
@@ -912,7 +923,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
                 background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
                 color: "#fff", borderRadius: 14, padding: "12px 24px",
                 fontWeight: 700, fontSize: 15, textDecoration: "none",
-                boxShadow: `0 4px 16px ${P.pink}55`,
+                boxShadow: `0 4px 16px var(--b-primary-55)`,
               }}
             >
               <Wallet size={18} /> สมัคร / เติมเครดิต
@@ -954,7 +965,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
                     background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
                     color: "#fff", borderRadius: 14, padding: "13px",
                     fontWeight: 700, fontSize: 15, textDecoration: "none",
-                    boxShadow: `0 4px 16px ${P.pink}55`,
+                    boxShadow: `0 4px 16px var(--b-primary-55)`,
                   }}
                 >
                   <ArrowRight size={18} /> เติมเครดิตที่กระเป๋าเงิน
@@ -993,7 +1004,7 @@ function SuccessScreen({ holdData, onHome }: any) {
         transition={{ type: "spring", duration: 0.5 }}
         style={{ padding: "60px 28px", textAlign: "center" }}
       >
-        <div style={{ width: 90, height: 90, borderRadius: "50%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", boxShadow: `0 8px 32px ${P.pink}66` }}>
+        <div style={{ width: 90, height: 90, borderRadius: "50%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", boxShadow: `0 8px 32px var(--b-primary-66)` }}>
           <CheckCircle size={44} color="#fff" />
         </div>
         <h2 style={{ fontSize: 26, fontWeight: 800, color: P.text, marginBottom: 8 }}>จองคิวสำเร็จ! 🎉</h2>
@@ -1015,7 +1026,7 @@ function SuccessScreen({ holdData, onHome }: any) {
 
         <button
           onClick={onHome}
-          style={{ background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "14px 32px", fontSize: 16, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 16px ${P.pink}55` }}
+          style={{ background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "14px 32px", fontSize: 16, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 16px var(--b-primary-55)` }}
         >
           กลับหน้าหลัก
         </button>

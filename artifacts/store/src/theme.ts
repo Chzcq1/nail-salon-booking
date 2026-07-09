@@ -2,6 +2,11 @@
  * Brand color theming — each shop can pick a color preset.
  * Primary hex is stored in nail_shop_settings.brand_color.
  * The full theme (derived shades) is looked up here and injected as CSS custom properties.
+ *
+ * CSS vars injected:
+ *   --b-primary, --b-deep, --b-light, --b-pale, --b-bg, --b-border
+ *   --b-primary-15, --b-primary-22, --b-primary-44, --b-primary-55, --b-primary-66
+ *   --b-deep-15  (for linear-gradient references)
  */
 
 export interface BrandTheme {
@@ -33,6 +38,16 @@ export function getTheme(brandColor: string | null | undefined): BrandTheme {
   return BRAND_THEMES.find(t => t.primary.toLowerCase() === lc) ?? DEFAULT_THEME;
 }
 
+/** แปลง hex (#RRGGBB) เป็น "r, g, b" string สำหรับใส่ใน rgba() */
+function hexToRgbComponents(hex: string): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return "181, 23, 75"; // fallback ชมพู
+  return `${r}, ${g}, ${b}`;
+}
+
 export function injectThemeCss(theme: BrandTheme): void {
   const id = "nail-brand-theme";
   let el = document.getElementById(id) as HTMLStyleElement | null;
@@ -41,12 +56,19 @@ export function injectThemeCss(theme: BrandTheme): void {
     el.id = id;
     document.head.appendChild(el);
   }
+  const rgb = hexToRgbComponents(theme.primary);
   el.textContent = `:root {
-    --b-primary: ${theme.primary};
-    --b-deep:    ${theme.deep};
-    --b-light:   ${theme.light};
-    --b-pale:    ${theme.pale};
-    --b-bg:      ${theme.bg};
-    --b-border:  ${theme.border};
+    --b-primary:    ${theme.primary};
+    --b-deep:       ${theme.deep};
+    --b-light:      ${theme.light};
+    --b-pale:       ${theme.pale};
+    --b-bg:         ${theme.bg};
+    --b-border:     ${theme.border};
+    /* alpha variants ของ primary — ใช้แทน "\${P.pink}55" ที่ไม่ใช้กับ CSS vars ได้ */
+    --b-primary-15: rgba(${rgb}, 0.08);
+    --b-primary-22: rgba(${rgb}, 0.13);
+    --b-primary-44: rgba(${rgb}, 0.27);
+    --b-primary-55: rgba(${rgb}, 0.33);
+    --b-primary-66: rgba(${rgb}, 0.40);
   }`;
 }

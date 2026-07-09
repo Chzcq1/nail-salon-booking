@@ -14,6 +14,7 @@ import {
   MessageCircle, Package, Crown, ChevronLeft, Palette, ChevronUp, ChevronDown,
   Wallet, CreditCard,
 } from "lucide-react";
+import { BRAND_THEMES, getTheme, injectThemeCss } from "@/theme";
 
 // ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
 const A = {
@@ -40,6 +41,21 @@ const A = {
 } as const;
 
 type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal" | "accounts";
+
+// คำนวณเวลาสล็อตที่จะถูกสร้างจากเทมเพลต (ใช้แสดง preview ก่อนบันทึก)
+function computeSlotTimes(startTime: string, count: number, roundMin: number, gapMin: number): string[] {
+  if (!startTime || count <= 0 || roundMin <= 0) return [];
+  const parts = startTime.split(":");
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return [];
+  const fmt = (total: number) =>
+    `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  return Array.from({ length: Math.min(count, 12) }, (_, i) => {
+    const s = h * 60 + m + i * (roundMin + gapMin);
+    return `${fmt(s)}–${fmt(s + roundMin)}`;
+  });
+}
 
 // ใช้วันที่ตาม "เวลาท้องถิ่น" ของเบราว์เซอร์ ห้ามใช้ toISOString() เพราะจะแปลงเป็น UTC
 // แล้วทำให้วันที่เลื่อนถอยหลัง 1 วันสำหรับโซนเวลาไทย (UTC+7) เช่น เลือกวันที่ 9 กลายเป็นวันที่ 8
@@ -1950,28 +1966,42 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
                   </label>
                 </div>
                 {r.is_open && (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่ม</label>
-                      <input type="time" value={r.start_time} onChange={e => updateRow(r.day_of_week, { start_time: e.target.value })}
-                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                      <div>
+                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่มกี่โมง</label>
+                        <input type="time" value={r.start_time} onChange={e => updateRow(r.day_of_week, { start_time: e.target.value })}
+                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
+                        <input type="number" min={0} value={r.rounds_count} onChange={e => updateRow(r.day_of_week, { rounds_count: Number(e.target.value) })}
+                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาวคิว (นาที)</label>
+                        <input type="number" min={1} value={r.round_minutes} onChange={e => updateRow(r.day_of_week, { round_minutes: Number(e.target.value) })}
+                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/คิว</label>
+                        <input type="number" min={1} value={r.max_bookings} onChange={e => updateRow(r.day_of_week, { max_bookings: Number(e.target.value) })}
+                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
+                      </div>
                     </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>กี่รอบ</label>
-                      <input type="number" min={0} value={r.rounds_count} onChange={e => updateRow(r.day_of_week, { rounds_count: Number(e.target.value) })}
-                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>นาที/รอบ</label>
-                      <input type="number" min={1} value={r.round_minutes} onChange={e => updateRow(r.day_of_week, { round_minutes: Number(e.target.value) })}
-                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/รอบ</label>
-                      <input type="number" min={1} value={r.max_bookings} onChange={e => updateRow(r.day_of_week, { max_bookings: Number(e.target.value) })}
-                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                    </div>
-                  </div>
+                    {/* Preview — แสดงเวลาที่ระบบจะสร้างจริง */}
+                    {(() => {
+                      const times = computeSlotTimes(r.start_time, r.rounds_count, r.round_minutes, r.gap_minutes ?? 0);
+                      if (times.length === 0) return null;
+                      return (
+                        <div style={{ background: A.bg, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, color: A.sub }}>
+                          <span style={{ fontWeight: 600, color: A.primary, marginRight: 6 }}>ตัวอย่างสล็อต:</span>
+                          {times.join("  •  ")}
+                          {r.rounds_count > 12 && <span style={{ color: A.muted }}> … +{r.rounds_count - 12} เพิ่มเติม</span>}
+                        </div>
+                      );
+                    })()}
+                  </>
                 )}
               </div>
             ))}
@@ -1999,7 +2029,7 @@ function ScheduleTab({ token }: { token: string }) {
   const [selDate, setSelDate] = useState(toISO(new Date()));
   const [showAdd, setShowAdd] = useState(false);
   const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("10:30");
+  const [endTime, setEndTime] = useState("10:00");
   const [closedDates, setClosedDates] = useState<string[]>([]);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
@@ -2214,9 +2244,17 @@ function ScheduleTab({ token }: { token: string }) {
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 32 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>
       ) : slots.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 32, background: A.card, borderRadius: 12, border: `1px solid ${A.border}` }}>
+        <div style={{ textAlign: "center", padding: 24, background: A.card, borderRadius: 12, border: `1.5px dashed ${A.border}` }}>
           <Clock size={28} color={A.muted} style={{ margin: "0 auto 8px" }} />
-          <p style={{ color: A.muted, fontSize: 14 }}>ยังไม่มี slot สำหรับวันนี้</p>
+          <p style={{ color: A.muted, fontSize: 14, marginBottom: 14 }}>ยังไม่มีสล็อตสำหรับวันนี้</p>
+          {!isClosed && (
+            <button
+              onClick={() => applyTemplateMutation.mutate(selDate)}
+              disabled={applyTemplateMutation.isPending}
+              style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {applyTemplateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "🔄"} สร้างสล็อตจากเทมเพลต
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -2228,9 +2266,13 @@ function ScheduleTab({ token }: { token: string }) {
                 {sl.booked_count}/{sl.max_bookings} จอง
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                <button onClick={() => toggleMutation.mutate({ id: sl.id, is_available: !sl.is_available })}
-                  style={{ flex: 1, background: sl.is_available ? A.errorBg : A.successBg, color: sl.is_available ? A.error : A.success, border: "none", borderRadius: 8, padding: "5px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>
-                  {sl.is_available ? "ปิด" : "เปิด"}
+                <button
+                  onClick={() => toggleMutation.mutate({ id: sl.id, is_available: !sl.is_available })}
+                  disabled={toggleMutation.isPending && (toggleMutation.variables as any)?.id === sl.id}
+                  style={{ flex: 1, background: sl.is_available ? A.errorBg : A.successBg, color: sl.is_available ? A.error : A.success, border: "none", borderRadius: 8, padding: "5px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", opacity: toggleMutation.isPending && (toggleMutation.variables as any)?.id === sl.id ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                  {toggleMutation.isPending && (toggleMutation.variables as any)?.id === sl.id
+                    ? <Loader2 size={11} className="animate-spin" />
+                    : sl.is_available ? "ปิด" : "เปิด"}
                 </button>
                 <button onClick={() => { if (sl.booked_count === 0) setDeleteSlotId(sl.id); }} disabled={sl.booked_count > 0}
                   style={{ background: A.gray, border: "none", borderRadius: 8, padding: "5px 8px", cursor: sl.booked_count > 0 ? "not-allowed" : "pointer", opacity: sl.booked_count > 0 ? 0.4 : 1 }}>
@@ -2432,12 +2474,11 @@ function SettingsTab({ token }: { token: string }) {
     retry: 1,
   });
 
-  // Sync form from server data. When data refetches (e.g. after save), update form.
-  // This is safe because staleTime:60s means background refetches only trigger after
-  // invalidation (i.e. after a successful save — resetting to confirmed server values is correct).
+  // Sync form from server data + inject brand theme into CSS custom properties
   useEffect(() => {
     if (settingsData) {
       setForm({ ...settingsData, closed_dates: undefined });
+      injectThemeCss(getTheme(settingsData.brand_color));
     }
   }, [settingsData]);
 
@@ -2534,9 +2575,30 @@ function SettingsTab({ token }: { token: string }) {
         </div>
       )}
 
+      <Section title="ธีมสีร้าน (หน้าลูกค้า)" />
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ fontSize: 13, color: A.sub, fontWeight: 500, display: "block", marginBottom: 8 }}>
+          เลือกสีประจำร้าน — ปุ่ม, ส่วนหัว และสีหลักในหน้าจองจะเปลี่ยนตาม
+        </label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
+          {BRAND_THEMES.map(t => {
+            const selected = (form?.brand_color || "#B5174B").toLowerCase() === t.primary.toLowerCase();
+            return (
+              <button key={t.primary}
+                onClick={() => { setForm((p: any) => ({ ...p, brand_color: t.primary })); injectThemeCss(t); }}
+                title={t.name}
+                style={{ width: 38, height: 38, borderRadius: "50%", background: t.primary, border: selected ? `3px solid #1A1A2E` : "3px solid transparent", cursor: "pointer", outline: selected ? `2px solid ${t.primary}` : "none", outlineOffset: 2, flexShrink: 0, boxShadow: selected ? "0 2px 8px rgba(0,0,0,0.25)" : "0 1px 3px rgba(0,0,0,0.15)" }} />
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 12, color: A.primary, background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px" }}>
+          🎨 สีที่เลือก: <b>{BRAND_THEMES.find(t => t.primary.toLowerCase() === (form?.brand_color || "#B5174B").toLowerCase())?.name || "ชมพู (ค่าเริ่มต้น)"}</b>
+        </div>
+      </div>
+
       <Section title="ระบบจอง" />
       {F("max_advance_days", "จองล่วงหน้าได้สูงสุด (วัน)", "number", "14")}
-      {F("slot_duration_minutes", "ระยะเวลาต่อ slot เริ่มต้น (นาที)", "number", "90")}
+      {F("slot_duration_minutes", "ระยะเวลา slot เริ่มต้น (นาที) — ใช้เมื่อเพิ่ม slot เองรายวัน", "number", "60")}
 
       {saveError && (
         <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
