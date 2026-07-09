@@ -14,7 +14,7 @@ from pydantic import BaseModel
 import jwt as _jwt
 from jwt.exceptions import InvalidTokenError as JWTError
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, delete
 
 from backend.config import get_settings
 from backend.database import get_db
@@ -149,6 +149,11 @@ async def wallet_send_otp(body: dict, db: Session = Depends(get_db)):
             detail=f"กรุณารอ {max(wait_secs, 1)} วินาทีก่อนขอ OTP ใหม่",
         )
 
+    # ลบ OTP เดิมของอีเมลนี้ทิ้งทั้งหมดก่อนออกใบใหม่ — ขอใหม่แล้วตัวเก่าที่ยังไม่ได้ใช้ก็เลิกใช้เลย
+    # (ไม่ปล่อยให้ค้างเป็นข้อมูลขยะในตาราง email_otp_sessions)
+    db.query(EmailOTPSession).filter(EmailOTPSession.email == email).delete(synchronize_session=False)
+    db.commit()
+
     otp_code = str(secrets.randbelow(900000) + 100000)
     session_token = secrets.token_hex(32)
     expires_at = now + timedelta(minutes=OTP_EXPIRE_MINUTES)
@@ -196,20 +201,31 @@ def wallet_verify_otp(body: dict, db: Session = Depends(get_db)):
     if session.otp_code != otp_input:
         raise HTTPException(status_code=400, detail="OTP ไม่ถูกต้อง")
 
-    session.is_used = True
+    email_for_token = session.email
+    # consume แบบ atomic — DELETE ที่มีเงื่อนไขครบ (id + is_used=False + ยังไม่หมดอายุ) ในคำสั่งเดียว
+    # กัน race condition ที่ 2 request verify พร้อมกันด้วย OTP เดียวกันอาจผ่านทั้งคู่ (ก่อนหน้านี้เช็คแล้วค่อยลบทีหลัง มีช่องโหว่)
+    result = db.execute(
+        delete(EmailOTPSession).where(
+            EmailOTPSession.id == session.id,
+            EmailOTPSession.is_used == False,
+            EmailOTPSession.expires_at > datetime.utcnow(),
+        ).execution_options(synchronize_session=False)
+    )
     db.commit()
+    if result.rowcount != 1:
+        raise HTTPException(status_code=400, detail="OTP นี้ถูกใช้ไปแล้ว")
 
     verified_token = _jwt.encode(
         {
             "purpose": "otp_verified",
-            "email": session.email,
+            "email": email_for_token,
             "exp": datetime.utcnow() + timedelta(minutes=15),
         },
         _JWT_SECRET,
         algorithm=_JWT_ALG,
     )
 
-    return {"ok": True, "verified_token": verified_token, "email": session.email}
+    return {"ok": True, "verified_token": verified_token, "email": email_for_token}
 
 
 # ── Reset PIN ─────────────────────────────────────────────────────────────────

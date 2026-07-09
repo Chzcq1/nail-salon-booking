@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
 from pydantic import BaseModel
-from sqlalchemy import text, func, case
+from sqlalchemy import text, func, case, delete
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -271,10 +271,14 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
             detail="ยังไม่ได้ตั้งค่า Telegram Bot สำหรับร้านนี้ กรุณาติดต่อผู้ดูแลระบบ",
         )
 
-    _cleanup_old_otps(db)  # ล้าง OTP เก่าก่อนสร้างใหม่
+    _cleanup_old_otps(db)  # ล้าง OTP เก่าที่หมดอายุ/ใช้แล้วทั่วระบบก่อนสร้างใหม่
 
     # Use a per-shop OTP session ID to allow concurrent OTP sessions for different shops
     otp_session_id = NAIL_ADMIN_SESSION_ID - shop_row.id  # -1 for shop1, -2 for shop2, etc.
+
+    # ลบ OTP เดิมของร้านนี้ทิ้งทั้งหมดก่อนออกใบใหม่ — ถ้าเคยขอไว้แล้วไม่ได้ใช้ พอกดขอใหม่ก็เลิกใช้ตัวเก่าเลย
+    db.query(OTPSession).filter(OTPSession.telegram_id == otp_session_id).delete(synchronize_session=False)
+    db.commit()
 
     otp = generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
@@ -325,8 +329,18 @@ def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=401, detail="OTP ไม่ถูกต้องหรือหมดอายุแล้ว")
 
-    session.is_used = True
+    # consume แบบ atomic — DELETE ที่มีเงื่อนไขครบในคำสั่งเดียว กัน race condition ที่ verify
+    # พร้อมกัน 2 request ด้วย OTP เดียวกันอาจผ่านทั้งคู่
+    result = db.execute(
+        delete(OTPSession).where(
+            OTPSession.id == session.id,
+            OTPSession.is_used == False,
+            OTPSession.expires_at > datetime.now(timezone.utc),
+        ).execution_options(synchronize_session=False)
+    )
     db.commit()
+    if result.rowcount != 1:
+        raise HTTPException(status_code=401, detail="OTP ไม่ถูกต้องหรือหมดอายุแล้ว")
 
     token = create_admin_token(NAIL_ADMIN_SESSION_ID, shop_id=shop_row.id)
     return {"access_token": token}

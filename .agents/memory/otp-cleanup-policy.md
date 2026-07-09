@@ -1,21 +1,34 @@
 ---
 name: OTP cleanup policy
-description: How and when expired OTP sessions are purged from otp_sessions table
+description: How and when OTP sessions are purged from otp_sessions / email_otp_sessions, and how consume is made atomic
 ---
 
-## Rule
-OTP sessions are cleaned up **lazily on each OTP creation** (not via a cron job). The cleanup runs before inserting a new OTP session.
+## Rule (updated)
+OTP rows are now deleted **immediately** at two points, in all three OTP flows
+(`backend/routes/wallet.py` email OTP, `backend/routes/admin.py` telegram admin OTP,
+`backend/routes/nail.py` per-shop telegram admin OTP):
 
-**Why:** The `otp_sessions` table accumulates rows over time (each login attempt adds a row). Without cleanup it grows indefinitely and slows queries.
+1. **On new OTP request** — all prior rows for that identity (email or telegram_id) are
+   deleted before inserting the new one, so requesting a fresh code immediately invalidates
+   any old unused code instead of leaving it around.
+2. **On successful verify** — the row is deleted right away (not just marked `is_used=True`).
 
-**Cleanup predicate:**
-```python
-(OTPSession.expires_at < now - 1h) OR (OTPSession.is_used == True)
-```
-Used OTPs are deleted immediately. Expired-but-unused OTPs are kept for 1 hour then deleted.
+**Why:** rows were previously kept around (marked used, or left unused after a re-request),
+growing the table indefinitely and creating stale valid-looking rows.
 
-**Where it runs:**
-- `backend/routes/nail.py` → `_cleanup_old_otps(db)` helper, called in `nail_request_otp` before `db.add(session)`
-- `backend/routes/admin.py` → inline equivalent before `db.add(session)` in `request_otp`
+**Consume must be atomic — critical gotcha:** verifying an OTP is a single conditional
+`DELETE ... WHERE id=<row> AND is_used=False AND expires_at > now`, checked via `rowcount == 1`,
+not a check-then-mark-used pattern — the old pattern allowed two concurrent verify requests with
+the same OTP to both pass validation before either committed (double-verification race).
+Must pass `.execution_options(synchronize_session=False)` on these ORM Core `delete()` statements —
+without it, SQLAlchemy's ORM-level "evaluate" sync strategy tries to evaluate the WHERE clause in
+Python against already-loaded objects and crashes with `TypeError: can't compare offset-naive and
+offset-aware datetimes` when comparing tz-aware `expires_at` to `datetime.utcnow()`.
 
-**Note:** If the system is idle for a long time (no logins), cleanup does not run. Table growth is bounded by login frequency, which is low for a nail salon.
+**Where it runs:** `wallet_send_otp`/`wallet_verify_otp` (wallet.py), `request_otp`/`verify_otp`
+(admin.py), `nail_request_otp`/`nail_verify_otp` (nail.py). The old lazy `_cleanup_old_otps`
+expired-cleanup helper in nail.py still runs too, as a backstop for rows from before this change.
+
+**Not yet made consistent:** the superadmin delete-shop OTP flow in nail.py still uses the older
+check-then-mark-used pattern (lower traffic, less urgent) — apply the same atomic-consume fix there
+if it ever becomes a concern.

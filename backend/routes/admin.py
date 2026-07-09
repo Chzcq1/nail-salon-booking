@@ -4,7 +4,7 @@ import uuid
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, delete
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -88,6 +88,10 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
     except Exception:
         db.rollback()
 
+    # ลบ OTP เดิมของ admin นี้ทิ้งทั้งหมดก่อนออกใบใหม่ — ขอใหม่แล้วตัวเก่าที่ยังไม่ได้ใช้ก็เลิกใช้เลย
+    db.query(OTPSession).filter(OTPSession.telegram_id == ADMIN_SESSION_ID).delete(synchronize_session=False)
+    db.commit()
+
     otp = generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     session = OTPSession(
@@ -122,8 +126,18 @@ def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=401, detail="Invalid or expired OTP")
 
-    session.is_used = True
+    # consume แบบ atomic — DELETE ที่มีเงื่อนไขครบในคำสั่งเดียว กัน race condition ที่ verify
+    # พร้อมกัน 2 request ด้วย OTP เดียวกันอาจผ่านทั้งคู่
+    result = db.execute(
+        delete(OTPSession).where(
+            OTPSession.id == session.id,
+            OTPSession.is_used == False,
+            OTPSession.expires_at > datetime.now(timezone.utc),
+        ).execution_options(synchronize_session=False)
+    )
     db.commit()
+    if result.rowcount != 1:
+        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
 
     token = create_admin_token(ADMIN_SESSION_ID)
     return AdminToken(access_token=token)
