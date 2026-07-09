@@ -2304,18 +2304,38 @@ def superadmin_create_shop(
     if db.query(Shop).filter_by(slug=slug).first():
         raise HTTPException(status_code=409, detail="slug นี้มีร้านอื่นใช้อยู่แล้ว")
 
-    shop_row = Shop(slug=slug, name=body.name, is_active=True)
-    db.add(shop_row)
-    db.flush()  # ได้ shop_row.id
+    try:
+        shop_row = Shop(slug=slug, name=body.name, is_active=True)
+        db.add(shop_row)
+        db.flush()  # ได้ shop_row.id
 
-    settings_row = NailShopSettings(shop_id=shop_row.id, shop_name=body.name)
-    if body.expiry_days is not None:
-        settings_row.expired_at = _now() + timedelta(days=max(0, body.expiry_days))
-    db.add(settings_row)
-    db.commit()
-    db.refresh(shop_row)
+        # สร้างแถว settings ด้วย explicit values สำหรับทุก NOT NULL column
+        # เพื่อไม่ให้เกิด "column does not exist" ถ้า migration ยังไม่ได้รันใน prod
+        settings_row = NailShopSettings(
+            shop_id=shop_row.id,
+            shop_name=body.name,
+            deposit_amount=200,
+            is_active=True,
+            max_advance_days=14,
+            slot_duration_minutes=60,
+            accept_bank_transfer=True,
+            accept_truemoney_angpao=True,
+        )
+        if body.expiry_days is not None:
+            settings_row.expired_at = _now() + timedelta(days=max(0, body.expiry_days))
+        db.add(settings_row)
+        db.commit()
+        db.refresh(shop_row)
+    except Exception as e:
+        db.rollback()
+        logging.error(f"[superadmin] create_shop failed for slug={slug!r}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="สร้างร้านไม่สำเร็จ กรุณาดู server log เพื่อดูรายละเอียด")
 
-    _ensure_templates_exist(db, shop_row.id)
+    try:
+        _ensure_templates_exist(db, shop_row.id)
+    except Exception as e:
+        logging.warning(f"[superadmin] _ensure_templates_exist failed for shop {shop_row.id}: {e}")
+        # ไม่ถึงขั้น fail — ร้านสร้างสำเร็จแล้ว admin แก้เทมเพลตเองได้ทีหลัง
 
     return {"ok": True, "id": shop_row.id, "slug": shop_row.slug}
 

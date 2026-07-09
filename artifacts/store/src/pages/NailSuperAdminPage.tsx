@@ -596,68 +596,161 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
 
 // ── Traffic Stats Section ─────────────────────────────────────────────────────
 function TrafficSection({ sKey }: { sKey: string }) {
-  const { data, isLoading } = useQuery<any>({
-    queryKey: ["sa-traffic"],
-    queryFn: () => saFetch(`${API}/superadmin/traffic?days=30`, sKey),
+  const [days, setDays] = useState(30);
+  const [filterShopId, setFilterShopId] = useState<number | null>(null);
+
+  const { data, isLoading, refetch } = useQuery<any>({
+    queryKey: ["sa-traffic", days],
+    queryFn: () => saFetch(`${API}/superadmin/traffic?days=${days}`, sKey),
     staleTime: 120_000,
     retry: 1,
   });
 
-  const shops: any[] = data?.shops ?? [];
+  const allShops: any[] = data?.shops ?? [];
+  const shops = filterShopId === null ? allShops : allShops.filter(s => s.shop_id === filterShopId);
+
+  const grandTotal = allShops.reduce((sum: number, s: any) => sum + (s.total_requests || 0), 0);
+
+  // รวม daily data ของทุกร้านสำหรับ aggregate chart
+  const aggregateDaily: Record<string, number> = {};
+  allShops.forEach((sh: any) => {
+    (sh.daily ?? []).forEach((d: any) => {
+      aggregateDaily[d.date] = (aggregateDaily[d.date] ?? 0) + d.count;
+    });
+  });
+  const aggregateDailyArr = Object.entries(aggregateDaily)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }))
+    .slice(-14);
+  const aggMax = Math.max(1, ...aggregateDailyArr.map(d => d.count));
 
   return (
     <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
         <Activity size={18} color={S.accent} />
-        <span style={{ fontWeight: 700, fontSize: 15 }}>ทราฟฟิก API รายร้าน (30 วัน)</span>
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>แดชบอร์ดทราฟฟิก</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+        <button onClick={() => refetch()} title="รีเฟรช"
+          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: S.muted }}>
+          <RefreshCw size={13} />
+        </button>
       </div>
+
+      {/* Period selector */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[7, 14, 30, 60, 90].map(d => (
+          <button key={d} onClick={() => setDays(d)}
+            style={{ background: days === d ? S.accent : S.card, color: days === d ? "#fff" : S.sub, border: `1px solid ${days === d ? S.accent : S.border}`, borderRadius: 100, padding: "4px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>
+            {d} วัน
+          </button>
+        ))}
+      </div>
+
+      {/* Shop filter tabs */}
+      {allShops.length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <button onClick={() => setFilterShopId(null)}
+            style={{ background: filterShopId === null ? `${S.accent}22` : S.card, color: filterShopId === null ? S.accent : S.sub, border: `1px solid ${filterShopId === null ? S.accent : S.border}`, borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: filterShopId === null ? 700 : 400 }}>
+            ทุกร้าน
+          </button>
+          {allShops.map((sh: any) => (
+            <button key={sh.shop_id} onClick={() => setFilterShopId(sh.shop_id)}
+              style={{ background: filterShopId === sh.shop_id ? `${S.accent}22` : S.card, color: filterShopId === sh.shop_id ? S.accent : S.sub, border: `1px solid ${filterShopId === sh.shop_id ? S.accent : S.border}`, borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: filterShopId === sh.shop_id ? 700 : 400 }}>
+              {sh.shop_name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 24 }}><Loader2 size={20} color={S.muted} className="animate-spin" /></div>
-      ) : shops.length === 0 ? (
+      ) : allShops.length === 0 ? (
         <p style={{ color: S.muted, fontSize: 13, textAlign: "center" }}>ยังไม่มีข้อมูลทราฟฟิก</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {shops.map((sh: any) => {
-            const maxCount = Math.max(...(sh.daily ?? []).map((d: any) => d.count), 1);
-            return (
-              <div key={sh.shop_id} style={{ background: S.card, borderRadius: 12, padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: S.text }}>{sh.shop_name}</div>
-                    {sh.slug && <div style={{ color: S.muted, fontSize: 12 }}>/r/{sh.slug}</div>}
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 700, fontSize: 16, color: S.accent }}>{sh.total_requests.toLocaleString()}</div>
-                    <div style={{ color: S.muted, fontSize: 11 }}>{sh.active_days} วันที่มีคำขอ · peak {sh.peak_day}</div>
-                  </div>
+        <>
+          {/* Aggregate summary (แสดงเฉพาะตอนดูทุกร้าน) */}
+          {filterShopId === null && allShops.length > 1 && (
+            <div style={{ background: S.card, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: S.text }}>รวมทุกร้าน</div>
+                  <div style={{ color: S.muted, fontSize: 12 }}>{allShops.length} ร้าน</div>
                 </div>
-                {/* Mini bar chart — 14 วันย้อนหลัง */}
-                {sh.daily && sh.daily.length > 0 && (
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 28 }}>
-                    {sh.daily.slice(-14).map((d: any) => (
-                      <div key={d.date} title={`${d.date}: ${d.count}`}
-                        style={{
-                          flex: 1,
-                          background: `${S.accent}${Math.max(30, Math.round((d.count / maxCount) * 255)).toString(16).padStart(2, "0")}`,
-                          borderRadius: 2,
-                          height: `${Math.max(4, Math.round((d.count / maxCount) * 28))}px`,
-                          minWidth: 4,
-                        }}
-                      />
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 700, fontSize: 20, color: S.accent }}>{grandTotal.toLocaleString()}</div>
+                  <div style={{ color: S.muted, fontSize: 11 }}>requests รวม {days} วัน</div>
+                </div>
+              </div>
+              {/* Aggregate bar chart — daily data มาจาก backend 14 วันล่าสุดเสมอ (ไม่ขึ้นกับ period selector) */}
+              {aggregateDailyArr.length > 0 && (
+                <>
+                  <div style={{ color: S.muted, fontSize: 11, marginBottom: 4 }}>14 วันล่าสุด (รวมทุกร้าน)</div>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 40, marginBottom: 4 }}>
+                    {aggregateDailyArr.map(d => (
+                      <div key={d.date} title={`${d.date}: ${d.count.toLocaleString()}`}
+                        style={{ flex: 1, background: S.accent, borderRadius: "2px 2px 0 0", minWidth: 3, height: `${Math.max(3, (d.count / aggMax) * 40)}px`, opacity: 0.8 }} />
                     ))}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: S.muted, fontSize: 10 }}>{aggregateDailyArr[0]?.date?.slice(5)}</span>
+                    <span style={{ color: S.muted, fontSize: 10 }}>{aggregateDailyArr[aggregateDailyArr.length - 1]?.date?.slice(5)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Per-shop rows */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {shops.map((sh: any) => {
+              const daily14 = (sh.daily ?? []).slice(-14);
+              const maxCount = Math.max(1, ...daily14.map((d: any) => d.count));
+              return (
+                <div key={sh.shop_id} style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: S.text }}>{sh.shop_name}</div>
+                      {sh.slug && <div style={{ color: S.muted, fontSize: 12 }}>/r/{sh.slug}</div>}
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 700, fontSize: 16, color: S.accent }}>{sh.total_requests.toLocaleString()}</div>
+                      <div style={{ color: S.muted, fontSize: 11 }}>{sh.active_days} วันที่มีคำขอ · peak {sh.peak_day}</div>
+                    </div>
+                  </div>
+                  {daily14.length > 0 && (
+                    <>
+                      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 32, marginBottom: 4 }}>
+                        {daily14.map((d: any) => (
+                          <div key={d.date} title={`${d.date}: ${d.count.toLocaleString()}`}
+                            style={{
+                              flex: 1,
+                              background: `${S.accent}${Math.max(40, Math.round((d.count / maxCount) * 255)).toString(16).padStart(2, "0")}`,
+                              borderRadius: "2px 2px 0 0",
+                              height: `${Math.max(3, Math.round((d.count / maxCount) * 32))}px`,
+                              minWidth: 3,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: S.muted, fontSize: 10 }}>{daily14[0]?.date?.slice(5)}</span>
+                        <span style={{ color: S.muted, fontSize: 10 }}>{daily14[daily14.length - 1]?.date?.slice(5)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
 // ── Shop API Keys Section ─────────────────────────────────────────────────────
-function ShopKeysSection({ sKey, shopId }: { sKey: string; shopId: number }) {
+function ShopKeysSection({ sKey, shopId, shops, onSelectShop }: { sKey: string; shopId: number; shops: any[]; onSelectShop: (id: number) => void }) {
   const qc = useQueryClient();
   const [adminGroupId, setAdminGroupId] = useState("");
   const [botToken, setBotToken] = useState("");
@@ -733,13 +826,36 @@ function ShopKeysSection({ sKey, shopId }: { sKey: string; shopId: number }) {
     </div>
   );
 
+  const currentShop = shops.find((s: any) => s.id === shopId);
+
   return (
     <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: shops.length > 1 ? 12 : 16 }}>
         <Key size={18} color={S.accent} />
-        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>API Keys & การเข้าถึง — ร้าน #{shopId}</span>
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>
+          API Keys & การเข้าถึง
+          {currentShop && <span style={{ color: S.accent, fontWeight: 600 }}> — {currentShop.name}</span>}
+        </span>
         {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
       </div>
+
+      {/* Quick shop switcher — แสดงเฉพาะเมื่อมีมากกว่า 1 ร้าน */}
+      {shops.length > 1 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+          {shops.map((sh: any) => (
+            <button key={sh.id} onClick={() => onSelectShop(sh.id)}
+              style={{
+                background: sh.id === shopId ? `${S.accent}22` : S.card,
+                color: sh.id === shopId ? S.accent : S.sub,
+                border: `1px solid ${sh.id === shopId ? S.accent : S.border}`,
+                borderRadius: 8, padding: "5px 12px", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 12, fontWeight: sh.id === shopId ? 700 : 400,
+              }}>
+              {sh.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Telegram Bot */}
       <h4 style={{ color: S.sub, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderBottom: `1px solid ${S.border}`, paddingBottom: 6 }}>Telegram Bot (OTP)</h4>
@@ -835,6 +951,14 @@ export default function NailSuperAdminPage() {
   const [selectedShopId, setSelectedShopId] = useState<number>(1);
 
   const qc = useQueryClient();
+
+  // รายชื่อร้านทั้งหมด — ใช้ส่งไปยัง ShopKeysSection เพื่อ quick-switch
+  const { data: allShops = [] } = useQuery<any[]>({
+    queryKey: ["sa-shops"],
+    queryFn: () => saFetch(`${API}/superadmin/shops`, sKey!),
+    enabled: !!sKey,
+    staleTime: 15000,
+  });
 
   const { data: shopStatus, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useQuery({
     queryKey: ["sa-status", selectedShopId],
@@ -987,7 +1111,7 @@ export default function NailSuperAdminPage() {
         </div>
 
         {/* Per-shop API keys */}
-        <ShopKeysSection sKey={sKey} shopId={selectedShopId} />
+        <ShopKeysSection sKey={sKey} shopId={selectedShopId} shops={allShops} onSelectShop={setSelectedShopId} />
 
         {/* Usage / Monitoring */}
         <UsageSection sKey={sKey} />
@@ -1076,10 +1200,10 @@ export default function NailSuperAdminPage() {
             ))}
           </div>
         </div>
-      </div>
 
-      {/* Traffic Stats */}
-      <TrafficSection sKey={sKey!} />
+        {/* Traffic Dashboard */}
+        <TrafficSection sKey={sKey!} />
+      </div>
 
       {/* Modals */}
       <AnimatePresence>
