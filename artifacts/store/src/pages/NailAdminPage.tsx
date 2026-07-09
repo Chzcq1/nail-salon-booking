@@ -1154,10 +1154,47 @@ const RENEWAL_STATUS_LABEL: Record<string, { label: string; color: string }> = {
 // ─── Accounts / Wallet Management ────────────────────────────────────────────
 type AccountsView = "topups" | "credit" | "transactions";
 
+/** การ์ดแสดงช่องทางรับเงินของร้าน — ให้แอดมินเห็นว่าลูกค้าจะโอนมาที่ไหน */
+function ShopPaymentInfoCard({ token }: { token: string }) {
+  const { data: settings } = useQuery<any>({
+    queryKey: ["nail-admin-settings"],
+    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const hasBank = !!(settings?.bank_name || settings?.bank_account_number);
+  const hasTM   = !!(settings?.truemoney_phone);
+  if (!settings || (!hasBank && !hasTM)) return null;
+
+  return (
+    <div style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: A.primary, marginBottom: 8 }}>
+        💳 ช่องทางรับเงินของร้าน (ลูกค้าเห็นข้อมูลนี้ตอนเติมเครดิต)
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: A.text }}>
+        {hasBank && (
+          <div>🏦 {settings.bank_name || "ธนาคาร"} — <b>{settings.bank_account_number || "ยังไม่กรอกเลขบัญชี"}</b>{settings.bank_account_name ? ` (${settings.bank_account_name})` : ""}</div>
+        )}
+        {hasTM && (
+          <div>🧧 TrueMoney: <b>{settings.truemoney_phone}</b></div>
+        )}
+        {!hasBank && !hasTM && (
+          <div style={{ color: A.muted }}>ยังไม่ได้ตั้งค่าช่องทางรับเงิน — ไปที่แท็บ "ตั้งค่า"</div>
+        )}
+      </div>
+      {!(settings?.accept_bank_transfer ?? true) && !(settings?.accept_truemoney_angpao ?? true) && (
+        <div style={{ marginTop: 8, fontSize: 11, color: A.error, fontWeight: 600 }}>⚠️ ปิดรับเงินทุกช่องทางอยู่ — ลูกค้าเติมเครดิตไม่ได้</div>
+      )}
+    </div>
+  );
+}
+
 function AccountsTab({ token }: { token: string }) {
   const [view, setView] = useState<AccountsView>("topups");
   return (
     <div style={{ padding: 16 }}>
+      {/* ช่องทางรับเงินของร้าน — ข้อมูลอ้างอิงสำหรับแอดมิน */}
+      <ShopPaymentInfoCard token={token} />
       {/* Sub-navigation */}
       <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 2 }}>
         {([
@@ -1274,11 +1311,24 @@ function TopupRequestsView({ token }: { token: string }) {
                   const code = t.voucher_code || t.payment_proof?.replace("voucher:", "");
                   const link = `https://gift.truemoney.com/campaign/?v=${code}`;
                   return (
-                    <div style={{ background: A.infoBg, border: `1px solid ${A.info}33`, borderRadius: 10, padding: "8px 12px", fontSize: 12, color: A.info, marginBottom: 10 }}>
-                      🧧 ซองอั่งเปา:{" "}
-                      <a href={link} target="_blank" rel="noreferrer" style={{ color: A.info, fontWeight: 700, wordBreak: "break-all" }}>
-                        {link}
-                      </a>
+                    <div style={{ background: A.infoBg, border: `1px solid ${A.info}33`, borderRadius: 10, padding: "10px 12px", fontSize: 12, color: A.info, marginBottom: 10 }}>
+                      <div style={{ marginBottom: t.fail_reason ? 6 : 0 }}>
+                        🧧 ลิงก์ซองอั่งเปา:{" "}
+                        <a href={link} target="_blank" rel="noreferrer" style={{ color: A.info, fontWeight: 700, wordBreak: "break-all" }}>
+                          {link}
+                        </a>
+                      </div>
+                      {t.fail_reason && (
+                        <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 6, padding: "5px 8px", color: "#C0392B", fontSize: 11, marginTop: 4 }}>
+                          ⚠️ สาเหตุที่แลกอัตโนมัติไม่สำเร็จ: <b>{t.fail_reason}</b>
+                          <div style={{ color: "#9B2335", marginTop: 3 }}>กดลิงก์ด้านบนเพื่อเปิดซองตรวจสอบ แล้วกด "อนุมัติ" หากเงินเข้าแล้ว</div>
+                        </div>
+                      )}
+                      {!t.fail_reason && t.status === "pending" && (
+                        <div style={{ color: `${A.info}BB`, fontSize: 11, marginTop: 4 }}>
+                          กดลิงก์ด้านบนเพื่อเปิดซองตรวจสอบ แล้วกด "อนุมัติ" หากเงินเข้าแล้ว
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -2426,6 +2476,14 @@ function SettingsTab({ token }: { token: string }) {
           <div style={{ position: "absolute", top: 3, left: (form?.accept_truemoney_angpao ?? true) ? 23 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
         </button>
       </div>
+
+      {/* ⚠️ Warning: TrueMoney enabled but phone not set */}
+      {(form?.accept_truemoney_angpao ?? true) && !(form?.truemoney_phone || "").trim() && (
+        <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: "#B45309", display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <span style={{ flexShrink: 0 }}>⚠️</span>
+          <span>เปิดรับซองอั่งเปาไว้แต่ยังไม่ได้กรอก <b>เบอร์ TrueMoney</b> ด้านบน — ระบบจะแลกซองให้ลูกค้าไม่สำเร็จจนกว่าจะกรอกเบอร์</span>
+        </div>
+      )}
 
       <Section title="ระบบจอง" />
       {F("max_advance_days", "จองล่วงหน้าได้สูงสุด (วัน)", "number", "14")}

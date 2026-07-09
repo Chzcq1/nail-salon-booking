@@ -1688,6 +1688,20 @@ async def admin_submit_renewal(
 
 # ── Nail Admin: Wallet / Top-up management ───────────────────────────────────
 
+def _parse_tm_fail_reason(truemoney_result: str | None) -> str | None:
+    """แยกสาเหตุที่แลกซองไม่สำเร็จจาก JSON ที่เก็บไว้ใน truemoney_result"""
+    if not truemoney_result:
+        return None
+    try:
+        import json as _json
+        raw = _json.loads(truemoney_result)
+        from backend.truemoney import TRUEMONEY_ERROR_MESSAGES
+        err_code = str(raw.get("code", ""))
+        return TRUEMONEY_ERROR_MESSAGES.get(err_code) or raw.get("message") or None
+    except Exception:
+        return None
+
+
 @router.get("/admin/topup-requests")
 def nail_admin_list_topups(
     status: str = "pending",
@@ -1716,6 +1730,8 @@ def nail_admin_list_topups(
             "voucher_code": t.voucher_code or None,
             "slip_verify_status": t.slip_verify_status,
             "created_at": t.created_at.isoformat() if t.created_at else None,
+            # สาเหตุที่แลกซองไม่สำเร็จ (มีเฉพาะ TrueMoney ที่ผ่านการ auto-verify แล้วล้มเหลว)
+            "fail_reason": _parse_tm_fail_reason(t.truemoney_result) if t.topup_type == "truemoney" else None,
         })
     return result
 

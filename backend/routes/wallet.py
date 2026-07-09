@@ -488,65 +488,15 @@ async def topup_truemoney(
     db.commit()
     db.refresh(topup)
 
-    if settings.bot_token:
-        try:
-            # ใช้เบอร์ TrueMoney จาก NailShopSettings ก่อน (admin ตั้งในหน้า nail-admin)
-            # ถ้าไม่ได้ตั้งไว้ → fallback ไปที่ StoreSettings (ระบบดิจิทัลเดิม)
-            from backend.models import NailShopSettings as _NailShop
-            _nail_shop = db.query(_NailShop).filter_by(id=1).first()
-            _nail_phone = (_nail_shop.truemoney_phone or "").strip() if _nail_shop else ""
-            phone = _nail_phone or (_get_setting(db, "truemoney_phone") or "").strip()
-            result = await redeem_voucher(voucher_code, phone) if phone else await redeem_voucher(voucher_code)
-            topup.truemoney_result = json.dumps(result["raw"])
-            if result["success"]:
-                credit = Decimal(str(result["amount"]))
-                topup.amount = credit
-                topup.status = "approved"
-                customer.balance = (customer.balance or Decimal("0")) + credit
-                db.add(CreditTransaction(
-                    customer_id=customer.id,
-                    txn_type="topup",
-                    amount=credit,
-                    description=f"แลกซอง TrueMoney อัตโนมัติ #{topup.id}",
-                    ref_id=topup.id,
-                ))
-                db.commit()
-                return {
-                    "ok": True,
-                    "auto_approved": True,
-                    "amount": float(credit),
-                    "balance": float(customer.balance),
-                    "topup_id": topup.id,
-                }
-            else:
-                err_msg = result["error_message"]
-                topup.status = "pending"
-                db.commit()
-                try:
-                    from backend import bot as bot_module
-                    await bot_module.send_topup_failed(
-                        topup_id=topup.id,
-                        customer_email=customer.email or str(customer.id),
-                        topup_type="truemoney",
-                        reason=err_msg,
-                        voucher_code=voucher_code,
-                    )
-                except Exception as notify_err:
-                    logger.warning(f"Topup notify error: {notify_err}")
-                return {
-                    "ok": True,
-                    "auto_approved": False,
-                    "topup_id": topup.id,
-                    "status": "pending",
-                    "message": f"แลกซองอัตโนมัติไม่ได้ ({err_msg}) — ส่งให้แอดมินตรวจสอบแล้ว",
-                }
+    # ── ดึงเบอร์ TrueMoney สำหรับรับเงิน ─────────────────────────────────────
+    # ใช้เบอร์จาก NailShopSettings ก่อน (admin ตั้งในหน้า nail-admin)
+    # ถ้าไม่ได้ตั้งไว้ → fallback ไปที่ StoreSettings (ระบบดิจิทัลเดิม)
+    _nail_phone = (_nail_shop.truemoney_phone or "").strip() if _nail_shop else ""
+    phone = _nail_phone or (_get_setting(db, "truemoney_phone") or "").strip()
 
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"TrueMoney API error for topup #{topup.id}: {e}")
-            topup.status = "pending"
-            db.commit()
+    # ── ถ้าไม่มีเบอร์รับเงิน — ห้ามแลกซอง (เงินจะเข้าเบอร์ placeholder แทน) ─────
+    if not phone:
+        if settings.bot_token:
             try:
                 from backend import bot as bot_module
                 await bot_module.send_topup_request(
@@ -558,26 +508,88 @@ async def topup_truemoney(
                 )
             except Exception as notify_err:
                 logger.warning(f"Topup notify error: {notify_err}")
+        return {
+            "ok": True,
+            "auto_approved": False,
+            "topup_id": topup.id,
+            "status": "pending",
+            "message": "ส่งคำขอแล้ว — รอแอดมินตรวจสอบ (แอดมินยังไม่ได้ตั้งเบอร์ TrueMoney ในหน้าตั้งค่า)",
+        }
+
+    # ── พยายามแลกซองอัตโนมัติเสมอ (ไม่ขึ้นกับ bot_token) ─────────────────
+    try:
+        result = await redeem_voucher(voucher_code, phone)
+        topup.truemoney_result = json.dumps(result["raw"])
+        if result["success"]:
+            credit = Decimal(str(result["amount"]))
+            topup.amount = credit
+            topup.status = "approved"
+            customer.balance = (customer.balance or Decimal("0")) + credit
+            db.add(CreditTransaction(
+                customer_id=customer.id,
+                txn_type="topup",
+                amount=credit,
+                description=f"แลกซอง TrueMoney อัตโนมัติ #{topup.id}",
+                ref_id=topup.id,
+            ))
+            db.commit()
+            return {
+                "ok": True,
+                "auto_approved": True,
+                "amount": float(credit),
+                "balance": float(customer.balance),
+                "topup_id": topup.id,
+            }
+        else:
+            err_msg = result["error_message"]
+            topup.status = "pending"
+            db.commit()
+            # แจ้ง bot เฉพาะเมื่อตั้งค่า bot_token ไว้
+            if settings.bot_token:
+                try:
+                    from backend import bot as bot_module
+                    await bot_module.send_topup_failed(
+                        topup_id=topup.id,
+                        customer_email=customer.email or str(customer.id),
+                        topup_type="truemoney",
+                        reason=err_msg,
+                        voucher_code=voucher_code,
+                    )
+                except Exception as notify_err:
+                    logger.warning(f"Topup notify error: {notify_err}")
             return {
                 "ok": True,
                 "auto_approved": False,
                 "topup_id": topup.id,
                 "status": "pending",
-                "message": "ติดต่อ TrueMoney ไม่ได้ชั่วคราว — ส่งให้แอดมินตรวจสอบแล้ว",
+                "message": f"แลกซองอัตโนมัติไม่ได้ ({err_msg}) — ส่งให้แอดมินตรวจสอบแล้ว",
             }
-    else:
-        try:
-            from backend import bot as bot_module
-            await bot_module.send_topup_request(
-                topup_id=topup.id,
-                customer_username=customer.email or str(customer.id),
-                amount_hint=None,
-                topup_type="truemoney",
-                voucher_code=voucher_code,
-            )
-        except Exception as e:
-            logger.warning(f"Topup notify error: {e}")
-        return {"ok": True, "auto_approved": False, "topup_id": topup.id, "status": "pending"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"TrueMoney API error for topup #{topup.id}: {e}")
+        topup.status = "pending"
+        db.commit()
+        if settings.bot_token:
+            try:
+                from backend import bot as bot_module
+                await bot_module.send_topup_request(
+                    topup_id=topup.id,
+                    customer_username=customer.email or str(customer.id),
+                    amount_hint=None,
+                    topup_type="truemoney",
+                    voucher_code=voucher_code,
+                )
+            except Exception as notify_err:
+                logger.warning(f"Topup notify error: {notify_err}")
+        return {
+            "ok": True,
+            "auto_approved": False,
+            "topup_id": topup.id,
+            "status": "pending",
+            "message": "ติดต่อ TrueMoney ไม่ได้ชั่วคราว — ส่งให้แอดมินตรวจสอบแล้ว",
+        }
 
 
 # ── Purchase with credits ─────────────────────────────────────────────────────
