@@ -11,6 +11,7 @@ import re
 import secrets
 import string
 import time
+import jwt as _pyjwt
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -1383,13 +1384,29 @@ def admin_sync_future_slots_to_template(
     total_deleted = 0
     total_created = 0
     changed_dates = []
+    errors: list = []
     for i in range(days):
         date_str = (start_date + timedelta(days=i)).isoformat()
-        result = _apply_template_for_date_core(db, shop, date_str)
-        total_deleted += result["deleted"]
-        total_created += result["created"]
-        if result["deleted"] or result["created"]:
-            changed_dates.append(date_str)
+        try:
+            result = _apply_template_for_date_core(db, shop, date_str)
+            total_deleted += result["deleted"]
+            total_created += result["created"]
+            if result["deleted"] or result["created"]:
+                changed_dates.append(date_str)
+        except Exception as _day_err:
+            logger.error(f"sync_future: error on {date_str}: {_day_err}", exc_info=True)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            errors.append({"date": date_str, "error": str(_day_err)})
+
+    if errors and not changed_dates:
+        # ล้มเหลวทุกวัน — ส่ง 500 พร้อม detail เพื่อช่วย debug
+        raise HTTPException(
+            status_code=500,
+            detail=f"ซิงค์ไม่สำเร็จทุกวัน: {errors[0]['error']}",
+        )
 
     return {
         "ok": True,
@@ -1397,6 +1414,7 @@ def admin_sync_future_slots_to_template(
         "changed_dates": changed_dates,
         "total_deleted": total_deleted,
         "total_created": total_created,
+        "errors": errors,
     }
 
 
@@ -1462,8 +1480,8 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
     tmpl = db.query(NailSlotTemplate).filter_by(shop_id=shop_id, day_of_week=d.weekday(), is_open=True).first()
     if tmpl and tmpl.rounds_count > 0:
         try:
-            cursor = datetime.strptime(tmpl.start_time, "%H:%M")
-        except ValueError:
+            cursor = datetime.strptime(tmpl.start_time or "", "%H:%M")
+        except (ValueError, TypeError):
             cursor = None
 
         if cursor is not None:
@@ -1882,30 +1900,28 @@ def _check_login_rate_limit():
     return now_ts
 
 # ── Super-Admin session tokens (issued only after PIN + Telegram OTP) ───────
-# token -> expiry timestamp (epoch seconds). In-memory only: on process restart
-# all sessions are invalidated and the owner must log in again with PIN+OTP.
-_SUPERADMIN_SESSIONS: dict = {}
+# ใช้ JWT ที่เซ็นด้วย NAIL_SUPER_ADMIN_KEY (stateless) แทนการเก็บ token ใน memory dict
+# ผลลัพธ์: session ยังใช้ได้แม้ server restart (Render.com สามารถ restart ตลอดเวลา)
 _SUPERADMIN_SESSION_TTL = 12 * 3600  # 12 ชั่วโมง
 _SUPERADMIN_LOGIN_OTP_SENTINEL = "superadmin:login"
 
 
-def _cleanup_superadmin_sessions():
-    now_ts = time.time()
-    expired = [t for t, exp in _SUPERADMIN_SESSIONS.items() if exp <= now_ts]
-    for t in expired:
-        _SUPERADMIN_SESSIONS.pop(t, None)
-
-
 def _issue_superadmin_session() -> str:
-    _cleanup_superadmin_sessions()
-    token = secrets.token_urlsafe(32)
-    _SUPERADMIN_SESSIONS[token] = time.time() + _SUPERADMIN_SESSION_TTL
-    return token
+    """ออก JWT session token สำหรับ superadmin — เซ็นด้วย NAIL_SUPER_ADMIN_KEY, หมดอายุใน 12 ชม."""
+    cfg = get_settings()
+    secret = cfg.nail_super_admin_key or secrets.token_urlsafe(32)
+    payload = {
+        "sub": "superadmin",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + _SUPERADMIN_SESSION_TTL,
+    }
+    return _pyjwt.encode(payload, secret, algorithm="HS256")
 
 
 def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
-    """ตรวจสอบ session token ที่ออกให้หลังผ่าน PIN + Telegram OTP เท่านั้น
+    """ตรวจสอบ JWT session token ที่ออกให้หลังผ่าน PIN + Telegram OTP เท่านั้น
     (ไม่ยอมรับ NAIL_SUPER_ADMIN_KEY ดิบๆ อีกต่อไป — ต้อง login ผ่าน /superadmin/login/* ก่อน)
+    stateless JWT: ใช้ได้แม้ server restart เพราะไม่เก็บ state ใน memory
     """
     cfg = get_settings()
     if not cfg.nail_super_admin_key:
@@ -1918,12 +1934,22 @@ def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
         logging.warning(f"[superadmin] rate-limited: {len(_SUPERADMIN_FAILS)} failed attempts in last {_SUPERADMIN_FAIL_WINDOW}s")
         raise HTTPException(status_code=429, detail="พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอสักครู่")
 
-    _cleanup_superadmin_sessions()
     token = x_super_admin_key or ""
-    exp = _SUPERADMIN_SESSIONS.get(token)
-    if not token or exp is None:
+    if not token:
         _SUPERADMIN_FAILS.append(now_ts)
-        logging.warning("[superadmin] invalid or expired session token")
+        raise HTTPException(status_code=403, detail="เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่")
+
+    try:
+        payload = _pyjwt.decode(token, cfg.nail_super_admin_key, algorithms=["HS256"])
+        if payload.get("sub") != "superadmin":
+            raise ValueError("wrong subject")
+    except _pyjwt.ExpiredSignatureError:
+        _SUPERADMIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] expired JWT session token")
+        raise HTTPException(status_code=403, detail="เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่")
+    except Exception:
+        _SUPERADMIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] invalid JWT session token")
         raise HTTPException(status_code=403, detail="เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่")
 
 
