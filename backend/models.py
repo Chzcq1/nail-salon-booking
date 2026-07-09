@@ -240,6 +240,7 @@ class NailShopSettings(Base):
     # server_default="true" เพื่อให้ create_all() สร้าง column พร้อม DB-level DEFAULT
     accept_bank_transfer = Column(Boolean, server_default="true", default=True, nullable=False)
     accept_truemoney_angpao = Column(Boolean, server_default="true", default=True, nullable=False)
+    brand_color = Column(String(20), nullable=True)   # hex สีหลักของร้าน เช่น "#B5174B"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

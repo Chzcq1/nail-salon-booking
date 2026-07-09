@@ -185,6 +185,8 @@ def _run_migrations(engine):
         # display_name / phone_number for customer wallet profile
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)",
+        # brand_color — สีหลักประจำร้าน (hex เช่น #B5174B) เพื่อ white-label UI
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS brand_color VARCHAR(20)",
 
         # ── Performance indexes ────────────────────────────────────────────────
         # orders: admin กรอง status บ่อย + เรียงตาม created_at

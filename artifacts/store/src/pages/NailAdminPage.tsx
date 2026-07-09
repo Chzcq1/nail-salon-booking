@@ -2038,7 +2038,20 @@ function ScheduleTab({ token }: { token: string }) {
   const toggleMutation = useMutation({
     mutationFn: ({ id, is_available }: { id: number; is_available: boolean }) =>
       fetch(`/api/nail/admin/slots/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ is_available }) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }),
+    // Optimistic update — อัปเดต UI ทันทีโดยไม่รอ server
+    onMutate: async ({ id, is_available }) => {
+      await qc.cancelQueries({ queryKey: ["nail-admin-slots", selDate] });
+      const prev = qc.getQueryData<any[]>(["nail-admin-slots", selDate]);
+      qc.setQueryData(["nail-admin-slots", selDate], (old: any[] = []) =>
+        old.map(sl => sl.id === id ? { ...sl, is_available } : sl)
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      // rollback ถ้า server ตอบว่า error
+      if (ctx?.prev) qc.setQueryData(["nail-admin-slots", selDate], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots", selDate] }),
   });
 
   const [deleteSlotId, setDeleteSlotId] = useState<number | null>(null);
@@ -2055,17 +2068,44 @@ function ScheduleTab({ token }: { token: string }) {
     onError: (e: any) => setSlotDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
+  // สร้างสล็อต 7 วันจากเทมเพลตจริง (ไม่ใช่ hardcode แล้ว)
   const batchMutation = useMutation({
-    mutationFn: (body: object) =>
-      fetch("/api/nail/admin/slots/batch", { method: "POST", headers: authH(token), body: JSON.stringify(body) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }),
+    mutationFn: async (fromDate: string) => {
+      const r = await fetch("/api/nail/admin/slot-templates/generate", {
+        method: "POST", headers: authH(token),
+        body: JSON.stringify({ days: 7, from_date: fromDate }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: (d: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots"] });
+      if (d.generated_count === 0) alert("ทุกวันในช่วงนี้มีสล็อตอยู่แล้ว ไม่มีการสร้างใหม่");
+    },
+    onError: (e: any) => alert(`เกิดข้อผิดพลาด: ${e.message}`),
   });
 
-  const defaultTimes = [
-    { start: "09:00", end: "10:30" }, { start: "10:30", end: "12:00" },
-    { start: "13:00", end: "14:30" }, { start: "14:30", end: "16:00" },
-    { start: "16:00", end: "17:30" }, { start: "17:30", end: "19:00" },
-  ];
+  // รีเซ็ตสล็อตวันที่เลือกให้ตรงกับเทมเพลต (ลบสล็อตว่าง แล้วสร้างใหม่จากเทมเพลต)
+  const applyTemplateMutation = useMutation({
+    mutationFn: async (date: string) => {
+      const r = await fetch("/api/nail/admin/slots/apply-template-day", {
+        method: "POST", headers: authH(token),
+        body: JSON.stringify({ date }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: (d: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots"] });
+      const msg = d.has_booked_slots_preserved
+        ? `รีเซ็ตแล้ว (สร้าง ${d.created} สล็อต — สล็อตที่มีการจองถูกเก็บไว้)`
+        : `รีเซ็ตแล้ว (สร้าง ${d.created} สล็อต)`;
+      alert(msg);
+    },
+    onError: (e: any) => alert(`เกิดข้อผิดพลาด: ${e.message}`),
+  });
 
   const toggleClosedDate = (date: string) => {
     setClosedDates(prev => prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]);
@@ -2154,13 +2194,22 @@ function ScheduleTab({ token }: { token: string }) {
         </div>
       )}
 
-      <button onClick={() => {
-        const dates = Array.from({ length: 7 }, (_, i) => { const d = new Date(selDate + "T00:00:00"); d.setDate(d.getDate() + i); return toISO(d); });
-        batchMutation.mutate({ dates, times: defaultTimes });
-      }} disabled={batchMutation.isPending}
-        style={{ width: "100%", background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 14, fontFamily: "inherit" }}>
-        {batchMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "สร้าง slot 7 วัน (จากวันที่เลือก, 09:00–19:00 × 6 รอบ)"}
-      </button>
+      {/* ปุ่มสร้าง 7 วัน — ใช้เทมเพลตจริงของร้าน */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        <button onClick={() => batchMutation.mutate(selDate)} disabled={batchMutation.isPending}
+          style={{ flex: 1, background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+          {batchMutation.isPending ? <Loader2 size={13} className="animate-spin" style={{ display: "inline" }} /> : "📅 สร้างสล็อต 7 วัน (จากเทมเพลต)"}
+        </button>
+        <button onClick={() => {
+          if (confirm(`รีเซ็ตสล็อตวันที่ ${selDate} ให้ตรงกับเทมเพลต?\n(สล็อตที่ยังว่างจะถูกลบและสร้างใหม่ — สล็อตที่มีการจองจะเก็บไว้)`)) {
+            applyTemplateMutation.mutate(selDate);
+          }
+        }} disabled={applyTemplateMutation.isPending}
+          style={{ background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
+          title="ล้างสล็อตว่างวันนี้และสร้างใหม่จากเทมเพลต">
+          {applyTemplateMutation.isPending ? <Loader2 size={13} className="animate-spin" style={{ display: "inline" }} /> : "🔄 รีเซ็ตวันนี้"}
+        </button>
+      </div>
 
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 32 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>

@@ -293,6 +293,7 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "closed_dates": shop.closed_dates or "[]",
         "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
+        "brand_color": shop.brand_color or "#B5174B",
     }
 
 
@@ -1134,6 +1135,7 @@ def admin_update_slot_templates(
 
 class GenerateSlotsBody(BaseModel):
     days: int = 30
+    from_date: Optional[str] = None   # "YYYY-MM-DD" — ถ้าไม่ระบุ ใช้วันนี้
 
 
 @router.post("/admin/slot-templates/generate")
@@ -1143,20 +1145,125 @@ def admin_generate_slots_from_template(
     authorization: str = Header(None),
 ):
     """สร้างสล็อตล่วงหน้าจากเทมเพลตทันที (แทนที่จะรอให้ลูกค้าเปิดหน้าจองก่อน) —
-    ข้ามวันที่มีสล็อตอยู่แล้ว (ทั้งจากเทมเพลตเดิมหรือที่แอดมินสร้างเอง)"""
+    ข้ามวันที่มีสล็อตอยู่แล้ว (ทั้งจากเทมเพลตเดิมหรือที่แอดมินสร้างเอง)
+    รองรับ from_date เพื่อ generate จากวันที่กำหนด แทนวันนี้"""
     _check_admin(authorization)
     shop = _get_shop(db)
-    today = _now().date()
+    # กำหนดจุดเริ่มต้น
+    if body.from_date:
+        try:
+            start_date = datetime.strptime(body.from_date, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = _now().date()
+    else:
+        start_date = _now().date()
     days = max(1, min(body.days, 90))
     generated = []
     for i in range(days):
-        date_str = (today + timedelta(days=i)).isoformat()
+        date_str = (start_date + timedelta(days=i)).isoformat()
         before = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
         _ensure_slots_for_date(db, shop, date_str)
         after = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
         if after > before:
             generated.append(date_str)
     return {"ok": True, "generated_dates": generated, "generated_count": len(generated)}
+
+
+class ApplyTemplateDayBody(BaseModel):
+    date: str   # "YYYY-MM-DD"
+
+
+@router.post("/admin/slots/apply-template-day")
+def admin_apply_template_for_day(
+    body: ApplyTemplateDayBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """รีเซ็ตสล็อตวันนั้นให้ตรงกับเทมเพลต —
+    ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
+    ต่างจาก _ensure_slots_for_date ตรงที่ทำงานได้แม้จะมีสล็อตเดิมอยู่แล้ว"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    date_str = body.date
+
+    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน (ลอก pattern จาก _ensure_slots_for_date) ──
+    try:
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_reset:{date_str}"})
+    except Exception as _adv_lock_err:
+        err_str = str(_adv_lock_err).lower()
+        if "hashtext" in err_str or "function" in err_str or "does not exist" in err_str:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        else:
+            raise
+
+    # ── Step 1: ลบสล็อตที่ไม่มีการจองออก ──────────────────────────────────
+    existing = db.query(NailTimeSlot).filter_by(slot_date=date_str).all()
+    deleted = 0
+    has_booked = False
+    surviving_start_times: set[str] = set()
+    for sl in existing:
+        booked = db.query(NailBooking).filter(
+            NailBooking.slot_id == sl.id,
+            NailBooking.status.notin_(["cancelled"]),
+        ).count()
+        if booked == 0:
+            db.delete(sl)
+            deleted += 1
+        else:
+            has_booked = True
+            surviving_start_times.add(sl.start_time)
+    db.flush()  # flush เพื่อให้ delete มีผลก่อน insert
+
+    # ── Step 2: สร้างสล็อตจากเทมเพลต เฉพาะที่ยังไม่มีอยู่ ─────────────────
+    created = 0
+    if shop.closed_dates:
+        try:
+            if date_str in json.loads(shop.closed_dates):
+                db.commit()
+                return {"ok": True, "deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
+        except Exception:
+            pass
+
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        db.commit()
+        return {"ok": True, "deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
+
+    tmpl = db.query(NailSlotTemplate).filter_by(day_of_week=d.weekday(), is_open=True).first()
+    if tmpl and tmpl.rounds_count > 0:
+        try:
+            cursor = datetime.strptime(tmpl.start_time, "%H:%M")
+        except ValueError:
+            cursor = None
+
+        if cursor is not None:
+            for i in range(tmpl.rounds_count):
+                start = cursor + timedelta(minutes=i * (tmpl.round_minutes + tmpl.gap_minutes))
+                end = start + timedelta(minutes=tmpl.round_minutes)
+                start_str = start.strftime("%H:%M")
+                # เพิ่มเฉพาะสล็อตที่ไม่ซ้ำกับที่เหลืออยู่ (สล็อตที่มี booking)
+                if start_str not in surviving_start_times:
+                    db.add(NailTimeSlot(
+                        slot_date=date_str,
+                        start_time=start_str,
+                        end_time=end.strftime("%H:%M"),
+                        max_bookings=tmpl.max_bookings or 1,
+                        staff_id=tmpl.staff_id,
+                        is_available=True,
+                    ))
+                    created += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "created": created,
+        "has_booked_slots_preserved": has_booked,
+    }
 
 
 @router.post("/admin/slots")
@@ -1444,6 +1551,7 @@ class ShopSettingsBody(BaseModel):
     truemoney_phone: Optional[str] = None
     accept_bank_transfer: Optional[bool] = None
     accept_truemoney_angpao: Optional[bool] = None
+    brand_color: Optional[str] = None
 
 
 @router.get("/admin/settings")
@@ -1470,6 +1578,7 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "truemoney_phone": shop.truemoney_phone,
         "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
+        "brand_color": shop.brand_color or "#B5174B",
     }
 
 
