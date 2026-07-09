@@ -574,6 +574,68 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
   );
 }
 
+// ── Traffic Stats Section ─────────────────────────────────────────────────────
+function TrafficSection({ sKey }: { sKey: string }) {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["sa-traffic"],
+    queryFn: () => saFetch(`${API}/superadmin/traffic?days=30`, sKey),
+    staleTime: 120_000,
+    retry: 1,
+  });
+
+  const shops: any[] = data?.shops ?? [];
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <Activity size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15 }}>ทราฟฟิก API รายร้าน (30 วัน)</span>
+      </div>
+      {isLoading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 24 }}><Loader2 size={20} color={S.muted} className="animate-spin" /></div>
+      ) : shops.length === 0 ? (
+        <p style={{ color: S.muted, fontSize: 13, textAlign: "center" }}>ยังไม่มีข้อมูลทราฟฟิก</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {shops.map((sh: any) => {
+            const maxCount = Math.max(...(sh.daily ?? []).map((d: any) => d.count), 1);
+            return (
+              <div key={sh.shop_id} style={{ background: S.card, borderRadius: 12, padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: S.text }}>{sh.shop_name}</div>
+                    {sh.slug && <div style={{ color: S.muted, fontSize: 12 }}>/r/{sh.slug}</div>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700, fontSize: 16, color: S.accent }}>{sh.total_requests.toLocaleString()}</div>
+                    <div style={{ color: S.muted, fontSize: 11 }}>{sh.active_days} วันที่มีคำขอ · peak {sh.peak_day}</div>
+                  </div>
+                </div>
+                {/* Mini bar chart — 14 วันย้อนหลัง */}
+                {sh.daily && sh.daily.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 28 }}>
+                    {sh.daily.slice(-14).map((d: any) => (
+                      <div key={d.date} title={`${d.date}: ${d.count}`}
+                        style={{
+                          flex: 1,
+                          background: `${S.accent}${Math.max(30, Math.round((d.count / maxCount) * 255)).toString(16).padStart(2, "0")}`,
+                          borderRadius: 2,
+                          height: `${Math.max(4, Math.round((d.count / maxCount) * 28))}px`,
+                          minWidth: 4,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function NailSuperAdminPage() {
   const [sKey, setSKey] = useState<string | null>(() => localStorage.getItem(LOCAL_KEY));
@@ -829,6 +891,9 @@ export default function NailSuperAdminPage() {
           </div>
         </div>
       </div>
+
+      {/* Traffic Stats */}
+      <TrafficSection sKey={sKey!} />
 
       {/* Modals */}
       <AnimatePresence>

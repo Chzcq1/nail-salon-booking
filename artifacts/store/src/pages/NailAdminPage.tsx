@@ -15,6 +15,7 @@ import {
   Wallet, CreditCard,
 } from "lucide-react";
 import { BRAND_THEMES, getTheme, injectThemeCss } from "@/theme";
+import { useShopSlug } from "@/lib/shopSlugContext";
 
 // ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
 const A = {
@@ -173,6 +174,7 @@ function playBookingAlert() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function NailAdminPage() {
+  const slug = useShopSlug();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState(() => localStorage.getItem("nail_admin_token") || "");
   const [newBookingAlert, setNewBookingAlert] = useState(false);
@@ -237,7 +239,7 @@ export default function NailAdminPage() {
       const res = await fetch("/api/nail/admin/request-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode: passcodeInput }),
+        body: JSON.stringify({ passcode: passcodeInput, ...(slug ? { shop_slug: slug } : {}) }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -261,7 +263,7 @@ export default function NailAdminPage() {
       const res = await fetch("/api/nail/admin/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otp_code: otpInput }),
+        body: JSON.stringify({ otp_code: otpInput, ...(slug ? { shop_slug: slug } : {}) }),
       });
       const data = await res.json();
       if (res.ok && data.access_token) {

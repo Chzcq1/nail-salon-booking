@@ -2025,12 +2025,17 @@ def nail_admin_list_topups(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """รายการขอเติมเครดิตของลูกค้า (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
+    """รายการขอเติมเครดิต — กรองเฉพาะร้านที่ admin ล็อกอิน (shop_id=1 รวม NULL = legacy)"""
+    shop_id = _check_admin(authorization)
     from backend.models import TopupRequest
     q = db.query(TopupRequest)
     if status != "all":
         q = q.filter(TopupRequest.status == status)
+    # กรองตาม shop — shop_id=1 เห็น NULL ด้วย (records เก่าก่อน multi-tenant)
+    if shop_id == 1:
+        q = q.filter((TopupRequest.shop_id == 1) | (TopupRequest.shop_id.is_(None)))
+    else:
+        q = q.filter(TopupRequest.shop_id == shop_id)
     topups = q.order_by(TopupRequest.id.desc()).limit(100).all()
     result = []
     for t in topups:
@@ -2060,12 +2065,16 @@ def nail_admin_approve_topup(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """อนุมัติคำขอเติมเครดิต (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
+    """อนุมัติคำขอเติมเครดิต — ตรวจสิทธิ์ว่าเป็นร้านเดียวกับที่ลูกค้าเติม"""
+    shop_id = _check_admin(authorization)
     from backend.models import TopupRequest
     topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
     if not topup:
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
+    # ตรวจสิทธิ์ร้าน (NULL = legacy shop 1)
+    topup_shop = topup.shop_id if topup.shop_id is not None else 1
+    if topup_shop != shop_id:
+        raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์จัดการรายการของร้านอื่น")
     if topup.status != "pending":
         raise HTTPException(status_code=400, detail="รายการนี้ดำเนินการแล้ว")
     amount = Decimal(str(body.get("amount", topup.amount or 0)))
@@ -2079,6 +2088,7 @@ def nail_admin_approve_topup(
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
         customer_id=customer.id,
+        shop_id=shop_id,
         txn_type="topup",
         amount=amount,
         description=f"อนุมัติเติมเครดิต #{topup_id} ({topup.topup_type})",
@@ -2094,12 +2104,15 @@ def nail_admin_reject_topup(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """ปฏิเสธคำขอเติมเครดิต (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
+    """ปฏิเสธคำขอเติมเครดิต — ตรวจสิทธิ์ว่าเป็นร้านเดียวกัน"""
+    shop_id = _check_admin(authorization)
     from backend.models import TopupRequest
     topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
     if not topup:
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
+    topup_shop = topup.shop_id if topup.shop_id is not None else 1
+    if topup_shop != shop_id:
+        raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์จัดการรายการของร้านอื่น")
     topup.status = "rejected"
     db.commit()
     return {"ok": True}
@@ -2112,9 +2125,30 @@ def nail_admin_list_customers(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """รายชื่อลูกค้าทั้งหมด (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
-    customers = db.query(Customer).order_by(Customer.id.desc()).limit(300).all()
+    """รายชื่อลูกค้าที่เคยเติมเงินผ่านร้านนี้ — กรองตาม shop_id ของ admin"""
+    shop_id = _check_admin(authorization)
+    from backend.models import TopupRequest
+    # แสดงเฉพาะลูกค้าที่มี topup_request กับร้านนี้
+    if shop_id == 1:
+        cust_ids_q = (
+            db.query(TopupRequest.customer_id)
+            .filter((TopupRequest.shop_id == 1) | (TopupRequest.shop_id.is_(None)))
+            .distinct()
+        )
+    else:
+        cust_ids_q = (
+            db.query(TopupRequest.customer_id)
+            .filter(TopupRequest.shop_id == shop_id)
+            .distinct()
+        )
+    cust_ids = [r[0] for r in cust_ids_q.all()]
+    customers = (
+        db.query(Customer)
+        .filter(Customer.id.in_(cust_ids))
+        .order_by(Customer.id.desc())
+        .limit(300)
+        .all()
+    )
     return [
         {
             "id": c.id,
@@ -2135,8 +2169,18 @@ def nail_admin_add_credit(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """เพิ่ม/ลด เครดิตให้ลูกค้าใดก็ได้ (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
+    """เพิ่ม/ลด เครดิต — ตรวจสิทธิ์ว่าลูกค้าเคยเติมเงินผ่านร้านนี้"""
+    shop_id = _check_admin(authorization)
+    from backend.models import TopupRequest
+    # ตรวจสิทธิ์ — shop_id=1 เข้าถึงได้ทุกลูกค้า (backward compat), ร้านอื่นต้องมี topup จากร้านนั้น
+    if shop_id != 1:
+        allowed = (
+            db.query(TopupRequest)
+            .filter(TopupRequest.customer_id == customer_id, TopupRequest.shop_id == shop_id)
+            .first()
+        )
+        if not allowed:
+            raise HTTPException(status_code=403, detail="ลูกค้ารายนี้ไม่ได้อยู่ในร้านของคุณ")
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="ไม่พบลูกค้า")
@@ -2150,6 +2194,7 @@ def nail_admin_add_credit(
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
         customer_id=customer.id,
+        shop_id=shop_id,
         txn_type="adjustment",
         amount=amount,
         description=f"[แอดมิน] {reason}",
@@ -2165,10 +2210,16 @@ def nail_admin_list_transactions(
     authorization: str = Header(None),
     limit: int = 100,
 ):
-    """ประวัติธุรกรรมเครดิตทั้งหมด (nail admin auth — เฉพาะร้านหลัก)"""
-    _require_platform_admin(authorization)
+    """ประวัติธุรกรรมเครดิต — กรองเฉพาะร้านที่ admin ล็อกอิน"""
+    shop_id = _check_admin(authorization)
+    q = db.query(CreditTransaction)
+    # กรองตาม shop — shop_id=1 เห็น NULL ด้วย (legacy)
+    if shop_id == 1:
+        q = q.filter((CreditTransaction.shop_id == 1) | (CreditTransaction.shop_id.is_(None)))
+    else:
+        q = q.filter(CreditTransaction.shop_id == shop_id)
     txns = (
-        db.query(CreditTransaction)
+        q
         .order_by(CreditTransaction.id.desc())
         .limit(min(limit, 500))
         .all()
@@ -2567,6 +2618,70 @@ def superadmin_set_payment_info(
             db.add(StoreSettings(key=field, value=val.strip()))
     db.commit()
     return {"ok": True, **_sa_payment_info(db)}
+
+
+@router.get("/superadmin/traffic")
+def superadmin_traffic(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """
+    สถิติทราฟฟิก API แยกรายร้าน — ดูได้เฉพาะ super-admin
+    คืน total_requests, active_days, peak_day, และ daily breakdown 14 วันย้อนหลัง
+    """
+    _check_superadmin(x_super_admin_key)
+    from sqlalchemy import text as _text
+    since_all = (datetime.now() - timedelta(days=min(days, 90))).strftime("%Y-%m-%d")
+    since_daily = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+
+    shop_rows = db.execute(
+        _text("""
+            SELECT sh.id, sh.name, sh.slug,
+                   COALESCE(SUM(s.request_count), 0) AS total_requests,
+                   COUNT(DISTINCT s.stat_date) AS active_days,
+                   MAX(s.stat_date) AS last_active,
+                   MAX(s.request_count) AS peak_day
+            FROM shops sh
+            LEFT JOIN nail_api_stats s
+                   ON s.shop_id = sh.id AND s.stat_date >= :since
+            GROUP BY sh.id, sh.name, sh.slug
+            ORDER BY total_requests DESC
+        """),
+        {"since": since_all},
+    ).fetchall()
+
+    daily_rows = db.execute(
+        _text("""
+            SELECT shop_id, stat_date, request_count
+            FROM nail_api_stats
+            WHERE stat_date >= :since
+            ORDER BY shop_id, stat_date
+        """),
+        {"since": since_daily},
+    ).fetchall()
+
+    daily_by_shop: dict = {}
+    for r in daily_rows:
+        sid = r[0]
+        daily_by_shop.setdefault(sid, []).append({"date": r[1], "count": int(r[2])})
+
+    return {
+        "days": days,
+        "shops": [
+            {
+                "shop_id": r[0],
+                "shop_name": r[1] or f"Shop {r[0]}",
+                "slug": r[2],
+                "total_requests": int(r[3] or 0),
+                "active_days": int(r[4] or 0),
+                "last_active": r[5],
+                "peak_day": int(r[6] or 0),
+                "daily": daily_by_shop.get(r[0], []),
+            }
+            for r in shop_rows
+        ],
+    }
 
 
 @router.get("/admin/superadmin-payment-info")

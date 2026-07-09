@@ -124,6 +124,7 @@ class TopupRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)  # ร้านที่ลูกค้าเติมเงิน (NULL = shop 1 legacy)
     topup_type = Column(String(20), nullable=False, default="slip")
     amount = Column(Numeric(12, 2), nullable=True)
     payment_proof = Column(Text, nullable=True)
@@ -141,6 +142,7 @@ class CreditTransaction(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)  # ร้านที่ทำธุรกรรม (NULL = shop 1 legacy)
     txn_type = Column(String(20), nullable=False)
     amount = Column(Numeric(12, 2), nullable=False)
     description = Column(String(300), nullable=True)

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
+import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
 
 /** Strip HTML tags → plain text (for clipboard copy) */
 function stripHtml(html: string): string {
@@ -669,10 +670,13 @@ export default function WalletPage() {
     gcTime: 10 * 60_000,
   });
 
+  // slug ของร้านจาก URL path /r/:slug/...
+  const slug = useShopSlug();
+
   // ข้อมูลจาก nail shop settings — ใช้ toggling และ bank info สำหรับ nail wallet
   const { data: nailSettings } = useQuery<NailShopPublicSettings>({
-    queryKey: ["nail-settings-wallet"],
-    queryFn: () => fetch("/api/nail/settings").then(r => r.json()),
+    queryKey: ["nail-settings-wallet", slug],
+    queryFn: () => fetch(`/api/nail/settings${shopQs(slug)}`).then(r => r.json()),
     staleTime: 60_000,
     gcTime: 10 * 60_000,
   });
@@ -733,7 +737,7 @@ export default function WalletPage() {
     mutationFn: async () => {
       if (!slipFile) throw new Error("กรุณาแนบสลีป");
       const proofUrl = await uploadSlipImage(slipFile);
-      const res = await fetch("/api/wallet/topup/slip", {
+      const res = await fetch(`/api/wallet/topup/slip${shopQs(slug)}`, {
         method: "POST", headers: authHeaders,
         body: JSON.stringify({ payment_proof: proofUrl }),
       });
@@ -762,7 +766,7 @@ export default function WalletPage() {
         isValid = /^[A-Za-z0-9]{18,32}$/.test(link);
       }
       if (!isValid) throw new Error("ลิงก์ไม่ถูกต้อง ต้องเป็น https://gift.truemoney.com/campaign/?v=XXXX หรือรหัสซอง 18–32 ตัวอักษร");
-      const res = await fetch("/api/wallet/topup/truemoney", {
+      const res = await fetch(`/api/wallet/topup/truemoney${shopQs(slug)}`, {
         method: "POST", headers: authHeaders,
         body: JSON.stringify({ voucher: voucherLink.trim() }),
       });

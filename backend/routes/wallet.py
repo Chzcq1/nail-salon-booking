@@ -5,6 +5,7 @@ import re
 import secrets
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Optional
 
 import bcrypt
 import httpx
@@ -351,13 +352,21 @@ def wallet_update_profile(
 @router.post("/wallet/topup/slip")
 async def topup_slip(
     body: dict,
+    shop_slug: Optional[str] = Query(None),
     customer: Customer = Depends(get_wallet_customer),
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
-    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ก่อน, fallback ไป StoreSettings
-    from backend.models import NailShopSettings as _NailShop
-    _nail_shop = db.query(_NailShop).filter_by(id=1).first()
+    # Resolve shop from slug — ถ้า slug ถูกระบุมาต้องเจอร้านที่ active เท่านั้น (fail-closed)
+    from backend.models import NailShopSettings as _NailShop, Shop as _Shop
+    _shop_id: int = 1
+    if shop_slug and shop_slug != "default":
+        _shop_row = db.query(_Shop).filter_by(slug=shop_slug).first()
+        if not _shop_row or not _shop_row.is_active:
+            raise HTTPException(status_code=404, detail=f"ไม่พบร้านค้า: {shop_slug}")
+        _shop_id = _shop_row.id
+    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ของร้านนั้น
+    _nail_shop = db.query(_NailShop).filter_by(shop_id=_shop_id).first()
     if _nail_shop is not None:
         slip_enabled = _nail_shop.accept_bank_transfer if _nail_shop.accept_bank_transfer is not None else True
     else:
@@ -371,6 +380,7 @@ async def topup_slip(
 
     topup = TopupRequest(
         customer_id=customer.id,
+        shop_id=_shop_id,
         topup_type="slip",
         amount=None,
         payment_proof=payment_proof,
@@ -397,6 +407,7 @@ async def topup_slip(
                 customer.balance = (customer.balance or Decimal("0")) + credit
                 db.add(CreditTransaction(
                     customer_id=customer.id,
+                    shop_id=_shop_id,
                     txn_type="topup",
                     amount=credit,
                     description=f"เติมเงินสลีปอัตโนมัติ #{topup.id} (จาก {result.get('sender_name') or 'ผู้โอน'})",
@@ -457,13 +468,21 @@ async def topup_slip(
 @router.post("/wallet/topup/truemoney")
 async def topup_truemoney(
     body: dict,
+    shop_slug: Optional[str] = Query(None),
     customer: Customer = Depends(get_wallet_customer),
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
-    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ก่อน, fallback ไป StoreSettings
-    from backend.models import NailShopSettings as _NailShop
-    _nail_shop = db.query(_NailShop).filter_by(id=1).first()
+    # Resolve shop from slug — ถ้า slug ถูกระบุมาต้องเจอร้านที่ active เท่านั้น (fail-closed)
+    from backend.models import NailShopSettings as _NailShop, Shop as _Shop
+    _shop_id: int = 1
+    if shop_slug and shop_slug != "default":
+        _shop_row = db.query(_Shop).filter_by(slug=shop_slug).first()
+        if not _shop_row or not _shop_row.is_active:
+            raise HTTPException(status_code=404, detail=f"ไม่พบร้านค้า: {shop_slug}")
+        _shop_id = _shop_row.id
+    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ของร้านนั้น
+    _nail_shop = db.query(_NailShop).filter_by(shop_id=_shop_id).first()
     if _nail_shop is not None:
         tm_enabled = _nail_shop.accept_truemoney_angpao if _nail_shop.accept_truemoney_angpao is not None else True
     else:
@@ -480,6 +499,7 @@ async def topup_truemoney(
 
     topup = TopupRequest(
         customer_id=customer.id,
+        shop_id=_shop_id,
         topup_type="truemoney",
         status="pending",
         voucher_code=voucher_code,
@@ -527,6 +547,7 @@ async def topup_truemoney(
             customer.balance = (customer.balance or Decimal("0")) + credit
             db.add(CreditTransaction(
                 customer_id=customer.id,
+                shop_id=_shop_id,
                 txn_type="topup",
                 amount=credit,
                 description=f"แลกซอง TrueMoney อัตโนมัติ #{topup.id}",

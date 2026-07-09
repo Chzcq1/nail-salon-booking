@@ -12,6 +12,7 @@ import {
   MessageCircle, Video, HelpCircle, Wallet,
 } from "lucide-react";
 import { getTheme, injectThemeCss, DEFAULT_THEME } from "@/theme";
+import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
 
 // ตั้งค่าสีเริ่มต้น (Candy Pink) ก่อน settings โหลด — ถูกเขียนทับได้เมื่อ brand_color โหลดจาก API
 injectThemeCss(DEFAULT_THEME);
@@ -68,50 +69,54 @@ async function parseApiError(r: Response): Promise<string> {
   }
 }
 
-const api = {
-  settings:  () => fetch("/api/nail/settings").then(r => r.json()),
-  gallery:   () => fetch("/api/nail/gallery").then(r => r.json()),
-  services:  () => fetch("/api/nail/services").then(r => r.json()),
-  slots:     (date: string) => fetch(`/api/nail/slots?date=${date}`).then(r => r.json()),
-  hold:      async (body: object) => {
-    const token = getWalletToken();
-    const r = await fetch("/api/nail/booking/hold", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(await parseApiError(r));
-    return r.json();
-  },
-  pay:       async (body: object) => {
-    const r = await fetch("/api/nail/booking/pay", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(await parseApiError(r));
-    return r.json();
-  },
-  payWallet: async (hold_token: string) => {
-    const token = getWalletToken();
-    const r = await fetch("/api/nail/booking/pay-wallet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ hold_token }),
-    });
-    if (!r.ok) throw new Error(await parseApiError(r));
-    return r.json();
-  },
-  uploadSlip: (base64: string) =>
-    fetch("/api/upload/slip", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: base64 }),
-    }).then(r => r.json()),
-};
+/** Factory — สร้าง api object ที่ฝัง slug ไว้ทุก call */
+function makeApi(slug: string | null) {
+  const sq = (extra?: string) => shopQs(slug, extra);
+  return {
+    settings:  () => fetch(`/api/nail/settings${sq()}`).then(r => r.json()),
+    gallery:   () => fetch(`/api/nail/gallery${sq()}`).then(r => r.json()),
+    services:  () => fetch(`/api/nail/services${sq()}`).then(r => r.json()),
+    slots:     (date: string) => fetch(`/api/nail/slots${sq(`date=${date}`)}`).then(r => r.json()),
+    hold: async (body: object) => {
+      const token = getWalletToken();
+      const r = await fetch(`/api/nail/booking/hold${sq()}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await parseApiError(r));
+      return r.json();
+    },
+    pay: async (body: object) => {
+      const r = await fetch(`/api/nail/booking/pay${sq()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await parseApiError(r));
+      return r.json();
+    },
+    payWallet: async (hold_token: string) => {
+      const token = getWalletToken();
+      const r = await fetch(`/api/nail/booking/pay-wallet${sq()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ hold_token }),
+      });
+      if (!r.ok) throw new Error(await parseApiError(r));
+      return r.json();
+    },
+    uploadSlip: (base64: string) =>
+      fetch("/api/upload/slip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: base64 }),
+      }).then(r => r.json()),
+  };
+}
 
 // ── Step types ───────────────────────────────────────────────────────
 type Step = "landing" | "date" | "slot" | "info" | "payment" | "success";
@@ -129,6 +134,9 @@ interface BookingState {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function BookingPage() {
+  const slug = useShopSlug();
+  const api = makeApi(slug);
+
   const [step, setStep] = useState<Step>("landing");
   const [booking, setBooking] = useState<BookingState>({
     service: null, date: null, slot: null,
@@ -136,7 +144,7 @@ export default function BookingPage() {
   });
 
   const { data: shopSettings, isError: settingsError } = useQuery({
-    queryKey: ["nail-settings"], queryFn: api.settings, staleTime: 15000, retry: 1,
+    queryKey: ["nail-settings", slug], queryFn: api.settings, staleTime: 15000, retry: 1,
   });
 
   // Inject brand theme whenever brand_color changes
@@ -145,10 +153,10 @@ export default function BookingPage() {
   }, [shopSettings?.brand_color]);
 
   const { data: gallery = [] } = useQuery({
-    queryKey: ["nail-gallery"], queryFn: api.gallery, staleTime: 120000, retry: 1,
+    queryKey: ["nail-gallery", slug], queryFn: api.gallery, staleTime: 120000, retry: 1,
   });
   const { data: services = [] } = useQuery({
-    queryKey: ["nail-services"], queryFn: api.services, staleTime: 120000, retry: 1,
+    queryKey: ["nail-services", slug], queryFn: api.services, staleTime: 120000, retry: 1,
   });
 
   // Rental expiry guard
@@ -344,6 +352,9 @@ function TutorialPopup({ onClose }: { onClose: () => void }) {
 
 // ── Landing Screen ───────────────────────────────────────────────────
 function LandingScreen({ settings, gallery, onBook }: any) {
+  const slug = useShopSlug();
+  const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
+  const bookingsHref = slug ? `/r/${slug}/my-bookings` : "/my-bookings";
   const [galleryIdx, setGalleryIdx] = useState(0);
   const galleryRef = useRef<HTMLDivElement>(null);
   const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_KEY));
@@ -400,7 +411,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
 
         {/* Wallet button — แสดงเสมอ (logged in: แสดงยอด, ไม่ได้ login: เชิญชวนเติมเงิน) */}
         <div style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-          <a href="/wallet"
+          <a href={walletHref}
             style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
             <Wallet size={16} />
             {walletBalance !== null
@@ -408,7 +419,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
               : "กระเป๋าเงิน / เติมเงินมัดจำ"
             }
           </a>
-          <a href="/my-bookings"
+          <a href={bookingsHref}
             style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
             <Calendar size={16} /> การจองของฉัน
           </a>
@@ -561,8 +572,10 @@ function DateScreen({ maxDays, closedDates = [], selected, onBack, onSelect }: a
 
 // ── Slot Screen ──────────────────────────────────────────────────────
 function SlotScreen({ date, selected, onBack, onSelect }: any) {
+  const slug = useShopSlug();
+  const api = makeApi(slug);
   const { data: slots = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ["nail-slots", date],
+    queryKey: ["nail-slots", date, slug],
     queryFn: () => api.slots(date),
     enabled: !!date,
     refetchInterval: 30000,
@@ -671,7 +684,7 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
             <div>
               <p style={{ fontSize: 13, fontWeight: 700, color: P.text, margin: "0 0 3px" }}>💳 มีกระเป๋าเงินแล้ว?</p>
               <p style={{ fontSize: 12, color: P.sub, margin: "0 0 6px" }}>เข้าสู่ระบบก่อนเพื่อจ่ายมัดจำจากเครดิตทันที และระบบจะกรอกชื่อ-เบอร์ให้อัตโนมัติ</p>
-              <a href="/wallet" target="_blank" rel="noreferrer" style={{ fontSize: 12, color: P.pink, fontWeight: 700, textDecoration: "none" }}>สร้างบัญชี / เข้าสู่ระบบ →</a>
+              <a href={walletHref} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: P.pink, fontWeight: 700, textDecoration: "none" }}>สร้างบัญชี / เข้าสู่ระบบ →</a>
             </div>
           </div>
         )}
@@ -774,6 +787,9 @@ function Field({ label, icon, children }: any) {
 
 // ── Payment Screen ────────────────────────────────────────────────────────────
 function PaymentScreen({ booking, onBack, onSuccess }: any) {
+  const slug = useShopSlug();
+  const api = makeApi(slug);
+  const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
   const [holdData, setHoldData] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [timer, setTimer] = useState(600);
@@ -936,7 +952,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
               กรุณาสมัครบัญชีและเติมเครดิตให้ครบ <b>฿{holdData?.deposit_total?.toFixed(2)}</b> ก่อน แล้วกลับมาจองใหม่
             </p>
             <a
-              href="/wallet"
+              href={walletHref}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
@@ -976,7 +992,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
                   ⚠️ เครดิตไม่พอ — ต้องเติมเพิ่มอีก <b>฿{((holdData?.deposit_total ?? 0) - (walletBalance ?? 0)).toFixed(2)}</b>
                 </p>
                 <a
-                  href="/wallet"
+                  href={walletHref}
                   target="_blank"
                   rel="noreferrer"
                   style={{

@@ -1,5 +1,6 @@
 import React from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { ShopSlugContext } from "@/lib/shopSlugContext";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -88,17 +89,29 @@ function ExpiredShopScreen({ shopName, onRefetch }: { shopName?: string; onRefet
   );
 }
 
+// ── อ่าน slug ร้านจาก URL path /r/:slug/... ──────────────────────────────────
+function useCurrentSlug(): string | null {
+  const [location] = useLocation();
+  const m = location.match(/^\/r\/([^/]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 // ── ตรวจสอบวันหมดอายุ — ครอบทุกหน้าของลูกค้า ────────────────────────────────
 const ADMIN_PATHS = ["/admin", "/nail-admin", "/superadmin"];
 
 function ShopGate({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const isAdminPath = ADMIN_PATHS.some((p) => location.startsWith(p));
+  const slug = useCurrentSlug();
+  const isAdminPath =
+    ADMIN_PATHS.some((p) => location.startsWith(p)) ||
+    /\/r\/[^/]+(\/nail-admin|\/admin|\/superadmin)/.test(location);
+
+  const slugParam = slug ? `?shop_slug=${encodeURIComponent(slug)}` : "";
 
   const { data, isLoading, isError, refetch } = useQuery<any>({
-    queryKey: ["shop-gate-settings"],
+    queryKey: ["shop-gate-settings", slug],
     queryFn: () =>
-      fetch("/api/nail/settings").then((r) => {
+      fetch(`/api/nail/settings${slugParam}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
@@ -145,20 +158,32 @@ function ShopGate({ children }: { children: React.ReactNode }) {
 }
 
 function Router() {
+  const slug = useCurrentSlug();
   return (
-    <ShopGate>
-      <Switch>
-        <Route path="/" component={BookingPage} />
-        <Route path="/shop" component={StoreFront} />
-        <Route path="/announcements" component={AnnouncementPage} />
-        <Route path="/wallet" component={WalletPage} />
-        <Route path="/my-bookings" component={MyBookingsPage} />
-        <Route path="/admin" component={NailAdminPage} />
-        <Route path="/nail-admin" component={NailAdminPage} />
-        <Route path="/superadmin" component={NailSuperAdminPage} />
-        <Route component={NotFound} />
-      </Switch>
-    </ShopGate>
+    <ShopSlugContext.Provider value={slug}>
+      <ShopGate>
+        <Switch>
+          {/* Default routes — ร้านหลัก (slug=null → shop 1) */}
+          <Route path="/" component={BookingPage} />
+          <Route path="/shop" component={StoreFront} />
+          <Route path="/announcements" component={AnnouncementPage} />
+          <Route path="/wallet" component={WalletPage} />
+          <Route path="/my-bookings" component={MyBookingsPage} />
+          <Route path="/admin" component={NailAdminPage} />
+          <Route path="/nail-admin" component={NailAdminPage} />
+          <Route path="/superadmin" component={NailSuperAdminPage} />
+          {/* Per-shop slug routes — /r/:slug/... */}
+          <Route path="/r/:slug" component={BookingPage} />
+          <Route path="/r/:slug/shop" component={StoreFront} />
+          <Route path="/r/:slug/announcements" component={AnnouncementPage} />
+          <Route path="/r/:slug/wallet" component={WalletPage} />
+          <Route path="/r/:slug/my-bookings" component={MyBookingsPage} />
+          <Route path="/r/:slug/admin" component={NailAdminPage} />
+          <Route path="/r/:slug/nail-admin" component={NailAdminPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </ShopGate>
+    </ShopSlugContext.Provider>
   );
 }
 
