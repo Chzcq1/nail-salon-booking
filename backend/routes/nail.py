@@ -25,7 +25,7 @@ from backend.database import get_db
 from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot, NailSlotTemplate,
     NailBooking, NailGallery, NailRenewalRequest, NailApiStats, OTPSession,
-    Customer, CreditTransaction,
+    Customer, CreditTransaction, NailShopApiKeys,
 )
 from backend.auth import generate_otp, create_admin_token, verify_admin_token, hash_passcode, verify_passcode
 from backend.models import Shop
@@ -275,6 +275,14 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
         if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
             raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
 
+    # Load per-shop Telegram credentials FIRST (fail fast before generating OTP)
+    shop_keys = db.query(NailShopApiKeys).filter_by(shop_id=shop_row.id).first()
+    if not shop_keys or not shop_keys.telegram_bot_token or not shop_keys.admin_group_id:
+        raise HTTPException(
+            status_code=503,
+            detail="ยังไม่ได้ตั้งค่า Telegram Bot สำหรับร้านนี้ กรุณาติดต่อผู้ดูแลระบบ",
+        )
+
     _cleanup_old_otps(db)  # ล้าง OTP เก่าก่อนสร้างใหม่
 
     # Use a per-shop OTP session ID to allow concurrent OTP sessions for different shops
@@ -290,8 +298,15 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
     db.add(session)
     db.commit()
 
-    sent, err_msg = await bot_module.send_otp(NAIL_ADMIN_SESSION_ID, otp)
+    sent, err_msg = await bot_module.send_otp_with_config(
+        shop_keys.telegram_bot_token,
+        shop_keys.admin_group_id,
+        otp,
+    )
     if not sent:
+        # Remove the OTP we just committed so there's no dangling record
+        db.delete(session)
+        db.commit()
         raise HTTPException(status_code=500, detail=f"ส่ง OTP ไม่สำเร็จ: {err_msg}")
 
     return {"message": "ส่ง OTP ไปยัง Telegram แล้ว"}
@@ -362,6 +377,7 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
         "brand_color": shop.brand_color or "#B5174B",
+        "service_section_emoji": shop.service_section_emoji or "💅",
     }
 
 
@@ -1731,6 +1747,7 @@ class ShopSettingsBody(BaseModel):
     accept_bank_transfer: Optional[bool] = None
     accept_truemoney_angpao: Optional[bool] = None
     brand_color: Optional[str] = None
+    service_section_emoji: Optional[str] = None  # อีโมจิส่วนหัวบริการ
 
 
 @router.get("/admin/settings")
@@ -1758,6 +1775,7 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
         "brand_color": shop.brand_color or "#B5174B",
+        "service_section_emoji": shop.service_section_emoji or "💅",
     }
 
 
@@ -2692,3 +2710,131 @@ def admin_get_superadmin_payment_info(
     """ดึงข้อมูลบัญชีรับเงินของ super-admin (admin ดูก่อนโอนเงินต่ออายุ)"""
     _check_admin(authorization)
     return _sa_payment_info(db)
+
+
+# ── SuperAdmin: per-shop API keys management ─────────────────────────────────
+
+def _mask(val: Optional[str]) -> Optional[str]:
+    """Mask a secret: show first 4 + last 4 chars, middle replaced with ***"""
+    if not val:
+        return None
+    if len(val) <= 8:
+        return "****"
+    return val[:4] + "****" + val[-4:]
+
+
+class ShopApiKeysBody(BaseModel):
+    telegram_bot_token: Optional[str] = None
+    admin_group_id: Optional[str] = None
+    slip2go_api_key: Optional[str] = None
+    slip_verify_mode: Optional[str] = None   # 'auto' | 'off'
+
+
+class ShopPasscodeBody(BaseModel):
+    new_passcode: str
+
+
+@router.get("/superadmin/shops/{shop_id}/api-keys")
+def superadmin_get_shop_api_keys(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ดึง API keys ของร้าน (masked) — ไม่คืน token เต็ม"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    keys = db.query(NailShopApiKeys).filter_by(shop_id=shop_id).first()
+    return {
+        "shop_id": shop_id,
+        "has_telegram_bot_token": bool(keys and keys.telegram_bot_token),
+        "telegram_bot_token_masked": _mask(keys.telegram_bot_token if keys else None),
+        "admin_group_id": keys.admin_group_id if keys else None,
+        "has_slip2go_api_key": bool(keys and keys.slip2go_api_key),
+        "slip2go_api_key_masked": _mask(keys.slip2go_api_key if keys else None),
+        "slip_verify_mode": keys.slip_verify_mode if keys else "off",
+        "has_admin_passcode": bool(shop.admin_passcode_hash),
+    }
+
+
+@router.put("/superadmin/shops/{shop_id}/api-keys")
+def superadmin_update_shop_api_keys(
+    shop_id: int,
+    body: ShopApiKeysBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้ง/แก้ไข API keys ของร้าน (ส่ง empty string = ลบค่า)"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    keys = db.query(NailShopApiKeys).filter_by(shop_id=shop_id).first()
+    if not keys:
+        keys = NailShopApiKeys(shop_id=shop_id)
+        db.add(keys)
+
+    if body.telegram_bot_token is not None:
+        keys.telegram_bot_token = body.telegram_bot_token.strip() or None
+    if body.admin_group_id is not None:
+        gid = body.admin_group_id.strip()
+        if gid:
+            # Validate format: negative integer, optionally followed by _threadId
+            # e.g. -1001234567 or -1001234567_3
+            pattern = r"^-\d+(_\d+)?$"
+            if not re.match(pattern, gid):
+                raise HTTPException(
+                    status_code=400,
+                    detail="admin_group_id ต้องเป็นตัวเลขลบ เช่น -1001234567 หรือ -1001234567_3",
+                )
+        keys.admin_group_id = gid or None
+    if body.slip2go_api_key is not None:
+        keys.slip2go_api_key = body.slip2go_api_key.strip() or None
+    if body.slip_verify_mode is not None:
+        if body.slip_verify_mode not in ("auto", "off"):
+            raise HTTPException(status_code=400, detail="slip_verify_mode ต้องเป็น 'auto' หรือ 'off'")
+        keys.slip_verify_mode = body.slip_verify_mode
+
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/superadmin/shops/{shop_id}/passcode")
+def superadmin_set_shop_passcode(
+    shop_id: int,
+    body: ShopPasscodeBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้งรหัสผ่าน Admin (/r/{slug}/admin) สำหรับร้านนั้น"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    passcode = body.new_passcode.strip()
+    if len(passcode) < 4:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร")
+    shop.admin_passcode_hash = hash_passcode(passcode)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/superadmin/shops/{shop_id}/passcode")
+def superadmin_set_shop_passcode(
+    shop_id: int,
+    body: ShopPasscodeBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้งรหัสผ่าน Admin (/r/{slug}/admin) สำหรับร้านนั้น"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    passcode = body.new_passcode.strip()
+    if len(passcode) < 4:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร")
+    shop.admin_passcode_hash = hash_passcode(passcode)
+    db.commit()
+    return {"ok": True}

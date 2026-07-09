@@ -220,6 +220,7 @@ export default function BookingPage() {
             line={booking.line}
             note={booking.note}
             defaultDeposit={shopSettings?.deposit_amount}
+            serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onBack={() => go("slot")}
             onNext={(service, name, phone, line, note) => {
               setBooking(b => ({ ...b, service, name, phone, line, note }));
@@ -231,6 +232,7 @@ export default function BookingPage() {
           <PaymentScreen
             key="payment"
             booking={booking}
+            serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onBack={() => go("info")}
             onSuccess={holdData => { setBooking(b => ({ ...b, holdData })); go("success"); }}
           />
@@ -239,6 +241,7 @@ export default function BookingPage() {
           <SuccessScreen
             key="success"
             holdData={booking.holdData}
+            serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onHome={() => { setBooking({ service: null, date: null, slot: null, name: "", phone: "", line: "", note: "", holdData: null }); go("landing"); }}
           />
         )}
@@ -645,7 +648,10 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 }
 
 // ── Info Screen ──────────────────────────────────────────────────────
-function InfoScreen({ services, service, name, phone, line, note, defaultDeposit, onBack, onNext }: any) {
+function InfoScreen({ services, service, name, phone, line, note, defaultDeposit, serviceEmoji, onBack, onNext }: any) {
+  const svcIcon = serviceEmoji || "💅";
+  const slug = useShopSlug();
+  const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
   const [sel, setSel] = useState<any>(service || null);
   const depositAmount = sel?.deposit_amount ?? defaultDeposit ?? null;
   const [n, setN] = useState(name);
@@ -698,7 +704,7 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
         {services?.length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, color: P.sub, fontSize: 13, fontWeight: 500, marginBottom: 10 }}>
-              <span style={{ color: P.pink }}>💅</span>เลือกบริการ (ถ้ามี)
+              <span style={{ color: P.pink }}>{svcIcon}</span>เลือกบริการ (ถ้ามี)
             </label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {services.map((s: any) => (
@@ -710,7 +716,7 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
                     textAlign: "left", display: "flex", alignItems: "center", gap: 12,
                     boxShadow: sel?.id === s.id ? `0 0 0 2px var(--b-primary-22)` : "none",
                   }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color ? `${s.color}22` : "var(--b-primary-22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>💅</div>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color ? `${s.color}22` : "var(--b-primary-22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{svcIcon}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, color: P.text, fontSize: 14 }}>{s.name}</div>
                     {s.description && <div style={{ color: P.sub, fontSize: 12 }}>{s.description}</div>}
@@ -786,7 +792,8 @@ function Field({ label, icon, children }: any) {
 }
 
 // ── Payment Screen ────────────────────────────────────────────────────────────
-function PaymentScreen({ booking, onBack, onSuccess }: any) {
+function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
+  const svcIcon = serviceEmoji || "💅";
   const slug = useShopSlug();
   const api = makeApi(slug);
   const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
@@ -923,7 +930,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <SummaryRow icon="📅" label={fmtDate(booking.date!)} />
             <SummaryRow icon="🕐" label={`${holdData?.start_time} – ${holdData?.end_time}`} />
-            {holdData?.service_name && <SummaryRow icon="💅" label={holdData.service_name} />}
+            {holdData?.service_name && <SummaryRow icon={svcIcon} label={holdData.service_name} />}
             <SummaryRow icon="👤" label={holdData?.customer_name} />
             <SummaryRow icon="📱" label={booking.phone} />
           </div>
@@ -1072,7 +1079,8 @@ function SummaryRow({ icon, label }: { icon: string; label: string }) {
 }
 
 // ── Success Screen ───────────────────────────────────────────────────
-function SuccessScreen({ holdData, onHome }: any) {
+function SuccessScreen({ holdData, onHome, serviceEmoji }: any) {
+  const svcIcon = serviceEmoji || "💅";
   return (
     <PageWrap>
       <motion.div
@@ -1094,7 +1102,7 @@ function SuccessScreen({ holdData, onHome }: any) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {holdData?.slot_date && <SummaryRow icon="📅" label={fmtDate(holdData.slot_date)} />}
             {holdData?.start_time && <SummaryRow icon="🕐" label={`${holdData.start_time} – ${holdData.end_time}`} />}
-            {holdData?.service_name && <SummaryRow icon="💅" label={holdData.service_name} />}
+            {holdData?.service_name && <SummaryRow icon={svcIcon} label={holdData.service_name} />}
             {holdData?.customer_name && <SummaryRow icon="👤" label={holdData.customer_name} />}
           </div>
         </div>

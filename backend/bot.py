@@ -238,6 +238,42 @@ async def send_otp(telegram_id: int, otp_code: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+async def send_otp_with_config(bot_token: str, admin_group_id: str, otp_code: str) -> tuple[bool, str]:
+    """ส่ง OTP โดยใช้ credentials ของร้านนั้นๆ (per-shop Telegram bot)."""
+    from telegram import Bot
+    from telegram.error import TelegramError
+
+    try:
+        bot = Bot(token=bot_token)
+        raw = admin_group_id.strip()
+        if "_" in raw:
+            last = raw.rfind("_")
+            chat_id = int(raw[:last])
+            thread_id: Optional[int] = int(raw[last + 1:])
+        else:
+            chat_id = int(raw)
+            thread_id = None
+
+        extra_kwargs = {"message_thread_id": thread_id} if thread_id else {}
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"🔐 คำขอเข้าสู่ระบบแอดมิน\n\n"
+                f"รหัส OTP: <b>{otp_code}</b>\n\n"
+                f"⏰ หมดอายุใน 5 นาที"
+            ),
+            parse_mode="HTML",
+            **extra_kwargs,
+        )
+        return True, ""
+    except TelegramError as e:
+        logger.error(f"Failed to send OTP with custom config: {e}")
+        return False, str(e)
+    except Exception as e:
+        logger.error(f"Unexpected error sending OTP with custom config: {e}")
+        return False, str(e)
+
+
 async def send_finance_notification(action: str, description: str, amount: float, admin_name: str) -> bool:
     if not settings.bot_token or not settings.admin_group_id:
         return False

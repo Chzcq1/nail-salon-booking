@@ -362,6 +362,22 @@ def _run_migrations(engine):
         # nail_api_stats: เดิม unique เดี่ยวที่ stat_date (ร้านเดียว) → ต้องเปลี่ยนเป็น unique ต่อร้าน (shop_id, stat_date)
         "ALTER TABLE nail_api_stats DROP CONSTRAINT IF EXISTS nail_api_stats_stat_date_key",
         "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_api_stats_shop_date ON nail_api_stats (shop_id, stat_date)",
+
+        # ── Per-shop API keys (Telegram bot token, Slip2Go key, etc.) ─────────────
+        """CREATE TABLE IF NOT EXISTS nail_shop_api_keys (
+            id SERIAL PRIMARY KEY,
+            shop_id INTEGER NOT NULL UNIQUE REFERENCES shops(id),
+            telegram_bot_token VARCHAR(500),
+            admin_group_id VARCHAR(100),
+            slip2go_api_key VARCHAR(500),
+            slip_verify_mode VARCHAR(20) NOT NULL DEFAULT 'off',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_nail_shop_api_keys_shop_id ON nail_shop_api_keys (shop_id)",
+
+        # ── service_section_emoji — อีโมจิส่วนหัวบริการ (เจ้าของร้านแก้ได้เอง) ───────
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS service_section_emoji VARCHAR(20) DEFAULT '💅'",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

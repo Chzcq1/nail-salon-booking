@@ -261,6 +261,21 @@ class NailShopSettings(Base):
     accept_bank_transfer = Column(Boolean, server_default="true", default=True, nullable=False)
     accept_truemoney_angpao = Column(Boolean, server_default="true", default=True, nullable=False)
     brand_color = Column(String(20), nullable=True)   # hex สีหลักของร้าน เช่น "#B5174B"
+    service_section_emoji = Column(String(20), nullable=True, server_default="💅", default="💅")   # อีโมจิส่วนหัวบริการ
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class NailShopApiKeys(Base):
+    """API credentials ต่อร้าน — Telegram bot, Slip2Go, etc. (แยกจาก env vars หลัก)"""
+    __tablename__ = "nail_shop_api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, unique=True, index=True)
+    telegram_bot_token = Column(String(500), nullable=True)   # Bot token สำหรับส่ง OTP
+    admin_group_id = Column(String(100), nullable=True)       # Telegram group/thread ID รับ OTP
+    slip2go_api_key = Column(String(500), nullable=True)      # Slip2Go API key (optional)
+    slip_verify_mode = Column(String(20), nullable=False, server_default="off", default="off")  # 'auto' | 'off'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

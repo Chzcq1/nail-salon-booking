@@ -15,6 +15,7 @@ import {
   Shield, CheckCircle, XCircle, Clock, Loader2, RefreshCw,
   Calendar, AlertTriangle, Crown, LogOut, Eye, EyeOff, ExternalLink,
   Tag, Activity, Database, Save, Store, Plus, Ban, PlayCircle, PlusCircle, MinusCircle,
+  Copy, Key, Link,
 } from "lucide-react";
 
 // ── Design tokens (distinct dark-blue theme) ─────────────────────────────────
@@ -469,6 +470,16 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
   const [newName, setNewName] = useState("");
   const [newDays, setNewDays] = useState("30");
   const [err, setErr] = useState("");
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const copyLink = (e: React.MouseEvent, slug: string, id: number, isAdmin = false) => {
+    e.stopPropagation();
+    const path = isAdmin ? `/r/${slug}/admin` : `/r/${slug}`;
+    const url = `${window.location.origin}${path}`;
+    navigator.clipboard.writeText(url).catch(() => {});
+    setCopiedId(id + (isAdmin ? 100000 : 0));
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -552,7 +563,16 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
                 {sh.expired_at ? (sh.is_expired ? "หมดอายุแล้ว" : `เหลือ ${sh.days_left} วัน`) : "ไม่มีกำหนดหมดอายุ"}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+              {/* Copy shop & admin links */}
+              <button onClick={e => copyLink(e, sh.slug, sh.id)} title="คัดลอกลิงก์ร้าน"
+                style={{ background: copiedId === sh.id ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id ? S.success : S.accent, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <Copy size={12} /> {copiedId === sh.id ? "✓" : "ลิงก์ร้าน"}
+              </button>
+              <button onClick={e => copyLink(e, sh.slug, sh.id, true)} title="คัดลอกลิงก์แอดมิน"
+                style={{ background: copiedId === sh.id + 100000 ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id + 100000 ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id + 100000 ? S.success : S.muted, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <Key size={12} /> {copiedId === sh.id + 100000 ? "✓" : "ลิงก์ Admin"}
+              </button>
               <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: 30 })} title="เพิ่ม 30 วัน"
                 style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
                 <PlusCircle size={12} /> 30วัน
@@ -632,6 +652,169 @@ function TrafficSection({ sKey }: { sKey: string }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Shop API Keys Section ─────────────────────────────────────────────────────
+function ShopKeysSection({ sKey, shopId }: { sKey: string; shopId: number }) {
+  const qc = useQueryClient();
+  const [adminGroupId, setAdminGroupId] = useState("");
+  const [botToken, setBotToken] = useState("");
+  const [botTokenChanged, setBotTokenChanged] = useState(false);
+  const [slip2goKey, setSlip2goKey] = useState("");
+  const [slip2goChanged, setSlip2goChanged] = useState(false);
+  const [slipMode, setSlipMode] = useState("off");
+  const [newPasscode, setNewPasscode] = useState("");
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [showBotToken, setShowBotToken] = useState(false);
+  const [showSlip2go, setShowSlip2go] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [passcodeMsg, setPasscodeMsg] = useState("");
+
+  const { data, isLoading, refetch } = useQuery<any>({
+    queryKey: ["sa-shop-keys", shopId],
+    queryFn: () => saFetch(`${API}/superadmin/shops/${shopId}/api-keys`, sKey),
+    staleTime: 30000,
+    enabled: !!shopId,
+  });
+
+  useEffect(() => {
+    if (data) {
+      setAdminGroupId(data.admin_group_id ?? "");
+      setSlipMode(data.slip_verify_mode ?? "off");
+      setBotToken(""); setBotTokenChanged(false);
+      setSlip2goKey(""); setSlip2goChanged(false);
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const payload: any = {
+        admin_group_id: adminGroupId,
+        slip_verify_mode: slipMode,
+      };
+      if (botTokenChanged) payload.telegram_bot_token = botToken;
+      if (slip2goChanged) payload.slip2go_api_key = slip2goKey;
+      return saFetch(`${API}/superadmin/shops/${shopId}/api-keys`, sKey, { method: "PUT", body: JSON.stringify(payload) });
+    },
+    onSuccess: () => { setMsg("✓ บันทึก API keys แล้ว"); refetch(); },
+    onError: (e: any) => setMsg(`⚠ ${e.message}`),
+  });
+
+  const passcodeMutation = useMutation({
+    mutationFn: () =>
+      saFetch(`${API}/superadmin/shops/${shopId}/passcode`, sKey, {
+        method: "PUT", body: JSON.stringify({ new_passcode: newPasscode }),
+      }),
+    onSuccess: () => { setPasscodeMsg("✓ ตั้งรหัสผ่านแล้ว"); setNewPasscode(""); refetch(); qc.invalidateQueries({ queryKey: ["sa-shops"] }); },
+    onError: (e: any) => setPasscodeMsg(`⚠ ${e.message}`),
+  });
+
+  const FieldRow = ({ label, hasValue, masked, showState, setShowState, value, setValue, onChange, placeholder }: any) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <label style={{ color: S.sub, fontSize: 13 }}>{label}</label>
+        {hasValue && <span style={{ fontSize: 11, color: S.success, background: `${S.success}22`, borderRadius: 100, padding: "2px 8px" }}>✓ ตั้งค่าแล้ว</span>}
+      </div>
+      <div style={{ position: "relative" }}>
+        <input
+          type={showState ? "text" : "password"}
+          value={value}
+          onChange={e => { setValue(e.target.value); onChange && onChange(); }}
+          placeholder={hasValue ? (masked || "••••••••") : placeholder}
+          style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 44px 9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }}
+        />
+        <button type="button" onClick={() => setShowState(!showState)}
+          style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.muted, padding: 2 }}>
+          {showState ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <Key size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>API Keys & การเข้าถึง — ร้าน #{shopId}</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+      </div>
+
+      {/* Telegram Bot */}
+      <h4 style={{ color: S.sub, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderBottom: `1px solid ${S.border}`, paddingBottom: 6 }}>Telegram Bot (OTP)</h4>
+      <FieldRow
+        label="Telegram Bot Token"
+        hasValue={data?.has_telegram_bot_token}
+        masked={data?.telegram_bot_token_masked}
+        showState={showBotToken} setShowState={setShowBotToken}
+        value={botToken} setValue={setBotToken}
+        onChange={() => setBotTokenChanged(true)}
+        placeholder="1234567890:AABBccddeeff..."
+      />
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 5 }}>
+          Admin Group ID <span style={{ fontSize: 11, color: S.muted }}>(-1001234567 หรือ -1001234567_3 สำหรับ thread)</span>
+        </label>
+        <input
+          type="text"
+          value={adminGroupId}
+          onChange={e => setAdminGroupId(e.target.value)}
+          placeholder="-1001234567"
+          style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }}
+        />
+      </div>
+
+      {/* Slip2Go */}
+      <h4 style={{ color: S.sub, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderBottom: `1px solid ${S.border}`, paddingBottom: 6, marginTop: 18 }}>Slip2Go (ตรวจสลิปอัตโนมัติ)</h4>
+      <FieldRow
+        label="Slip2Go API Key (ไม่บังคับ)"
+        hasValue={data?.has_slip2go_api_key}
+        masked={data?.slip2go_api_key_masked}
+        showState={showSlip2go} setShowState={setShowSlip2go}
+        value={slip2goKey} setValue={setSlip2goKey}
+        onChange={() => setSlip2goChanged(true)}
+        placeholder="sk-xxxxxxxxxxxx"
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>ตรวจสลิปอัตโนมัติ</div>
+          <div style={{ fontSize: 11, color: S.muted }}>ต้องตั้ง Slip2Go API Key ก่อน</div>
+        </div>
+        <button onClick={() => setSlipMode(slipMode === "auto" ? "off" : "auto")}
+          style={{ width: 44, height: 24, borderRadius: 100, border: "none", cursor: "pointer", background: slipMode === "auto" ? S.success : S.border, position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+          <div style={{ position: "absolute", top: 3, left: slipMode === "auto" ? 23 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+        </button>
+      </div>
+
+      {msg && <p style={{ color: msg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginBottom: 10 }}>{msg}</p>}
+      <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+        style={{ width: "100%", background: saveMutation.isPending ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, border: "none", borderRadius: 10, padding: "12px", cursor: saveMutation.isPending ? "not-allowed" : "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 20 }}>
+        {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} บันทึก API Keys
+      </button>
+
+      {/* Admin Passcode */}
+      <h4 style={{ color: S.sub, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderBottom: `1px solid ${S.border}`, paddingBottom: 6 }}>
+        รหัสผ่าน Admin (/r/&lbrace;slug&rbrace;/admin) {data?.has_admin_passcode && <span style={{ color: S.success, fontSize: 11, fontWeight: 400 }}>✓ ตั้งค่าแล้ว</span>}
+      </h4>
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <input
+          type={showPasscode ? "text" : "password"}
+          value={newPasscode}
+          onChange={e => setNewPasscode(e.target.value)}
+          placeholder="กรอกรหัสผ่านใหม่ (ต้องมีอย่างน้อย 4 ตัว)"
+          style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 44px 9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }}
+        />
+        <button type="button" onClick={() => setShowPasscode(!showPasscode)}
+          style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.muted, padding: 2 }}>
+          {showPasscode ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </div>
+      {passcodeMsg && <p style={{ color: passcodeMsg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginBottom: 8 }}>{passcodeMsg}</p>}
+      <button onClick={() => passcodeMutation.mutate()} disabled={!newPasscode.trim() || passcodeMutation.isPending}
+        style={{ width: "100%", background: !newPasscode.trim() ? S.card : `linear-gradient(135deg, ${S.warning}, #D97706)`, border: "none", borderRadius: 10, padding: "11px", cursor: !newPasscode.trim() || passcodeMutation.isPending ? "not-allowed" : "pointer", color: newPasscode.trim() ? "#fff" : S.muted, fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !newPasscode.trim() ? 0.5 : 1 }}>
+        {passcodeMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />} ตั้งรหัสผ่านใหม่
+      </button>
     </div>
   );
 }
@@ -802,6 +985,9 @@ export default function NailSuperAdminPage() {
             </>
           )}
         </div>
+
+        {/* Per-shop API keys */}
+        <ShopKeysSection sKey={sKey} shopId={selectedShopId} />
 
         {/* Usage / Monitoring */}
         <UsageSection sKey={sKey} />

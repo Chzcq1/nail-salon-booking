@@ -2599,6 +2599,22 @@ function SettingsTab({ token }: { token: string }) {
       {F("shop_name", "ชื่อร้าน", "text", "ร้านทำเล็บของคุณ")}
       {F("shop_tagline", "สโลแกน / คำอธิบาย", "text", "ทำเล็บสวย สไตล์คุณ")}
       {F("shop_logo_url", "URL โลโก้ร้าน")}
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 13, color: A.sub, fontWeight: 500, display: "block", marginBottom: 5 }}>
+          อีโมจิส่วนหัวบริการ — แสดงในหน้าจองคิว
+        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input
+            type="text"
+            value={form?.service_section_emoji ?? "💅"}
+            onChange={e => setForm((p: any) => ({ ...p, service_section_emoji: e.target.value }))}
+            placeholder="💅"
+            maxLength={8}
+            style={{ width: 80, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 22, fontFamily: "inherit", boxSizing: "border-box", background: A.bg, textAlign: "center" }}
+          />
+          <span style={{ fontSize: 13, color: A.muted }}>พิมพ์หรือวางอีโมจิที่ต้องการ เช่น 💅 ✨ 🌸 💖</span>
+        </div>
+      </div>
 
       <Section title="โซเชียลมีเดีย" />
       <div style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: A.primary }}>
