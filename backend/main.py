@@ -303,6 +303,15 @@ def _run_migrations(engine):
             created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ
         )""",
 
+        # nail_slot_templates: gap_minutes / max_bookings / staff_id ถูกเพิ่มเข้า CREATE TABLE ทีหลัง
+        # → ฐานข้อมูลที่สร้างตารางในรุ่นแรกจะไม่มีคอลัมน์เหล่านี้ ทำให้ GET /admin/slot-templates พัง (500)
+        "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS gap_minutes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS max_bookings INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES nail_staff(id) ON DELETE SET NULL",
+        # nail_time_slots: max_bookings / staff_id ถูกเพิ่มเข้า CREATE TABLE ทีหลังเช่นกัน
+        "ALTER TABLE nail_time_slots ADD COLUMN IF NOT EXISTS max_bookings INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE nail_time_slots ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES nail_staff(id) ON DELETE SET NULL",
+
         # ── Link nail bookings to customer wallet accounts ──────────────────────
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id)",
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS wallet_refunded BOOLEAN NOT NULL DEFAULT FALSE",

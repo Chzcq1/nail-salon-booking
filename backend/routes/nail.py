@@ -1227,7 +1227,11 @@ class SlotTemplateBulkBody(BaseModel):
 def admin_get_slot_templates(db: Session = Depends(get_db), authorization: str = Header(None)):
     """ดึงเทมเพลตประจำสัปดาห์ (7 วัน) — ใช้ตั้งค่า 'เปิดกี่รอบ รอบละกี่นาที' ของแต่ละวัน"""
     shop_id = _check_admin(authorization)
-    _ensure_templates_exist(db, shop_id)
+    try:
+        _ensure_templates_exist(db, shop_id)
+    except Exception as e:
+        logger.warning(f"[slot-templates] _ensure_templates_exist failed (shop {shop_id}): {e}")
+        db.rollback()
     rows = db.query(NailSlotTemplate).filter_by(shop_id=shop_id).order_by(NailSlotTemplate.day_of_week).all()
     return [
         {
