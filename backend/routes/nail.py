@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import text, func, case
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -1449,16 +1449,32 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
     deleted = 0
     has_booked = False
     surviving_start_times: set[str] = set()
+
+    # นับ booking ของทุกสล็อตในวันนี้ทีเดียว (แทนการ query ทีละสล็อต) — ทั้งจำนวนที่ยัง active
+    # และจำนวนทั้งหมดรวม cancelled ด้วย เพื่อกัน N+1 query ตอน sync หลายวัน/หลายสล็อต
+    slot_ids = [sl.id for sl in existing]
+    active_counts: dict[int, int] = {}
+    any_counts: dict[int, int] = {}
+    if slot_ids:
+        rows = db.query(
+            NailBooking.slot_id,
+            func.count(NailBooking.id).label("total"),
+            func.sum(case((NailBooking.status.notin_(["cancelled"]), 1), else_=0)).label("active"),
+        ).filter(NailBooking.slot_id.in_(slot_ids)).group_by(NailBooking.slot_id).all()
+        for slot_id, total, active in rows:
+            any_counts[slot_id] = total or 0
+            active_counts[slot_id] = int(active or 0)
+
     for sl in existing:
-        booked = db.query(NailBooking).filter(
-            NailBooking.slot_id == sl.id,
-            NailBooking.status.notin_(["cancelled"]),
-        ).count()
-        if booked == 0:
+        active_booked = active_counts.get(sl.id, 0)
+        # ห้ามลบสล็อตถ้ายังมี booking แถวไหนอ้างอิง id นี้อยู่ (ต่อให้สถานะเป็น cancelled ก็ตาม)
+        # เพราะ FOREIGN KEY constraint จะทำให้ DELETE พังทันที (500)
+        any_reference = any_counts.get(sl.id, 0) > 0
+        if not any_reference:
             db.delete(sl)
             deleted += 1
         else:
-            has_booked = True
+            has_booked = has_booked or (active_booked > 0)
             surviving_start_times.add(sl.start_time)
             # สล็อตที่มีคนจองแล้ว: เก็บเวลาไว้เหมือนเดิม แต่อัปเดต capacity/staff ให้ตรงกับเทมเพลตล่าสุด
             # (ไม่งั้นถ้าร้านลดคิวจาก 8 เหลือ 6 วันที่มีคนจองแล้วจะค้างที่ 8 ตลอดไป)
