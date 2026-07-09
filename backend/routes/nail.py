@@ -1426,6 +1426,24 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
     ไม่ใช้ advisory lock (pg_advisory_xact_lock/hashtext) เพราะ sync เป็นการดำเนินการของ admin คนเดียว
     และ advisory lock บน Neon serverless pooler อาจทำให้เกิด 500 ได้
     """
+    # หาเทมเพลตของวันที่ระบุก่อน จะได้เอา max_bookings/staff_id ล่าสุดไปอัปเดตสล็อตที่ถูกเก็บไว้ (มีคนจองแล้ว) ด้วย
+    try:
+        d_lookup = datetime.strptime(date_str, "%Y-%m-%d")
+        tmpl_lookup = db.query(NailSlotTemplate).filter_by(
+            shop_id=shop_id, day_of_week=d_lookup.weekday(), is_open=True
+        ).first()
+    except ValueError:
+        tmpl_lookup = None
+    tmpl_by_start: dict[str, "NailSlotTemplate"] = {}
+    if tmpl_lookup and tmpl_lookup.rounds_count > 0:
+        try:
+            _cursor = datetime.strptime(tmpl_lookup.start_time or "", "%H:%M")
+            for i in range(tmpl_lookup.rounds_count):
+                _s = _cursor + timedelta(minutes=i * (tmpl_lookup.round_minutes + tmpl_lookup.gap_minutes))
+                tmpl_by_start[_s.strftime("%H:%M")] = tmpl_lookup
+        except (ValueError, TypeError):
+            pass
+
     # ── Step 1: ลบสล็อตที่ไม่มีการจองออก ──────────────────────────────────
     existing = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).all()
     deleted = 0
@@ -1442,6 +1460,14 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
         else:
             has_booked = True
             surviving_start_times.add(sl.start_time)
+            # สล็อตที่มีคนจองแล้ว: เก็บเวลาไว้เหมือนเดิม แต่อัปเดต capacity/staff ให้ตรงกับเทมเพลตล่าสุด
+            # (ไม่งั้นถ้าร้านลดคิวจาก 8 เหลือ 6 วันที่มีคนจองแล้วจะค้างที่ 8 ตลอดไป)
+            # ใช้ค่า max_bookings/staff_id ของเทมเพลตวันนั้นเสมอถ้ามีเทมเพลตเปิดอยู่ — แม้เวลาของสล็อต
+            # จะไม่ตรงกับรอบใดๆ ในเทมเพลตปัจจุบันแล้ว (เช่น ลดจำนวนรอบ หรือเลื่อนเวลาเริ่ม) ก็ยังต้องได้ค่า capacity ล่าสุด
+            match = tmpl_by_start.get(sl.start_time) or tmpl_lookup
+            if match:
+                sl.max_bookings = max(1, match.max_bookings or 1)
+                sl.staff_id = match.staff_id
     db.flush()  # flush เพื่อให้ delete มีผลก่อน insert
 
     # ── Step 2: สร้างสล็อตจากเทมเพลต เฉพาะที่ยังไม่มีอยู่ ─────────────────
@@ -1460,7 +1486,7 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
         db.commit()
         return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
 
-    tmpl = db.query(NailSlotTemplate).filter_by(shop_id=shop_id, day_of_week=d.weekday(), is_open=True).first()
+    tmpl = tmpl_lookup
     if tmpl and tmpl.rounds_count > 0:
         try:
             cursor = datetime.strptime(tmpl.start_time or "", "%H:%M")
@@ -1501,7 +1527,15 @@ def admin_apply_template_for_day(
     shop_id = _check_admin(authorization)
     shop = _get_shop(db, shop_id)
     date_str = body.date
-    result = _apply_template_for_date_core(db, shop_id, date_str, shop.closed_dates)
+    try:
+        result = _apply_template_for_date_core(db, shop_id, date_str, shop.closed_dates)
+    except Exception as e:
+        logger.error(f"apply-template-day failed for {date_str} (shop {shop_id}): {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"รีเซ็ตไม่สำเร็จ: {e}")
     return {"ok": True, **result}
 
 
