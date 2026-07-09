@@ -1931,53 +1931,71 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
   const [genResult, setGenResult] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const { data, isLoading } = useQuery<any[]>({
+  const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["nail-admin-slot-templates"],
-    queryFn: () => fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => r.json()),
+    queryFn: () =>
+      fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
     staleTime: 30000,
     retry: 1,
   });
 
   useEffect(() => {
-    if (data && !rows) setRows(data.map((d: any) => ({ ...d })));
+    if (Array.isArray(data) && !rows) setRows(data.map((d: any) => ({ ...d })));
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/slot-templates", {
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/slot-templates", {
         method: "PUT",
         headers: authH(token),
         body: JSON.stringify({ templates: rows }),
-      }).then(r => r.json()),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     onSuccess: () => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates"] });
     },
+    onError: (e: any) => alert(`บันทึกเทมเพลตไม่สำเร็จ: ${e.message}`),
   });
 
   const generateMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/slot-templates/generate", {
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/slot-templates/generate", {
         method: "POST",
         headers: authH(token),
         body: JSON.stringify({ days: 30 }),
-      }).then(r => r.json()),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     onSuccess: (d: any) => {
       setGenResult(`สร้างสล็อตให้แล้ว ${d.generated_count} วัน (จาก 30 วันข้างหน้า)`);
       onGenerated();
       setTimeout(() => setGenResult(null), 4000);
     },
+    onError: (e: any) => alert(`สร้างสล็อตไม่สำเร็จ: ${e.message}`),
   });
 
   // Sync สล็อตที่มีอยู่แล้วให้ตรงกับเทมเพลตล่าสุด (ต่างจาก generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน)
   const syncMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/slot-templates/sync-future", {
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/slot-templates/sync-future", {
         method: "POST",
         headers: authH(token),
         body: JSON.stringify({ days: 30 }),
-      }).then(r => r.json()),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     onSuccess: (d: any) => {
       setGenResult(
         d.changed_dates.length > 0
@@ -1987,11 +2005,20 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
       onGenerated();
       setTimeout(() => setGenResult(null), 6000);
     },
+    onError: (e: any) => alert(`ซิงค์สล็อตไม่สำเร็จ: ${e.message}`),
   });
 
   const updateRow = (day_of_week: number, patch: object) => {
     setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? { ...r, ...patch } : r));
   };
+
+  if (isError) {
+    return (
+      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+        <p style={{ color: A.error, fontSize: 13, textAlign: "center", margin: 0 }}>⚠️ โหลดเทมเพลตไม่สำเร็จ — กรุณา Refresh หรือล็อกอินใหม่</p>
+      </div>
+    );
+  }
 
   if (isLoading || !rows) {
     return (
@@ -2105,7 +2132,10 @@ function ScheduleTab({ token }: { token: string }) {
   // Load settings for closed_dates — use useEffect to handle cached data correctly
   const { data: settingsData } = useQuery<any>({
     queryKey: ["nail-admin-settings"],
-    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
+    queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }),
     staleTime: 60000,
     retry: 1,
   });
@@ -2118,7 +2148,11 @@ function ScheduleTab({ token }: { token: string }) {
 
   const { data: slots = [], isLoading } = useQuery<any[]>({
     queryKey: ["nail-admin-slots", selDate],
-    queryFn: () => fetch(`/api/nail/admin/slots?date=${selDate}`, { headers: authH(token) }).then(r => r.json()),
+    queryFn: () =>
+      fetch(`/api/nail/admin/slots?date=${selDate}`, { headers: authH(token) }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
     staleTime: 20000,
     retry: 1,
   });
@@ -2126,7 +2160,11 @@ function ScheduleTab({ token }: { token: string }) {
   // ใช้เช็คว่าสล็อตวันนี้ตรงกับเทมเพลตล่าสุดหรือไม่ (แจ้งเตือนถ้าไม่ตรง เพื่อลดความงงว่า "ทำไมเวลาไม่ตรง")
   const { data: templates = [] } = useQuery<any[]>({
     queryKey: ["nail-admin-slot-templates"],
-    queryFn: () => fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => r.json()),
+    queryFn: () =>
+      fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
     staleTime: 30000,
     retry: 1,
   });
@@ -2144,19 +2182,34 @@ function ScheduleTab({ token }: { token: string }) {
   })();
 
   const saveClosedDates = useMutation({
-    mutationFn: () => fetch("/api/nail/admin/settings", { method: "PUT", headers: authH(token), body: JSON.stringify({ closed_dates: JSON.stringify(closedDates) }) }).then(r => r.json()),
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/settings", { method: "PUT", headers: authH(token), body: JSON.stringify({ closed_dates: JSON.stringify(closedDates) }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     onSuccess: () => { setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 2000); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
+    onError: (e: any) => alert(`บันทึกวันปิดร้านไม่สำเร็จ: ${e.message}`),
   });
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      fetch("/api/nail/admin/slots", { method: "POST", headers: authH(token), body: JSON.stringify({ slot_date: selDate, start_time: startTime, end_time: endTime }) }).then(r => r.json()),
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/slots", { method: "POST", headers: authH(token), body: JSON.stringify({ slot_date: selDate, start_time: startTime, end_time: endTime }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }); setShowAdd(false); },
+    onError: (e: any) => alert(`เพิ่ม slot ไม่สำเร็จ: ${e.message}`),
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, is_available }: { id: number; is_available: boolean }) =>
-      fetch(`/api/nail/admin/slots/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ is_available }) }).then(r => r.json()),
+    mutationFn: async ({ id, is_available }: { id: number; is_available: boolean }) => {
+      const r = await fetch(`/api/nail/admin/slots/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ is_available }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
     // Optimistic update — อัปเดต UI ทันทีโดยไม่รอ server
     onMutate: async ({ id, is_available }) => {
       await qc.cancelQueries({ queryKey: ["nail-admin-slots", selDate] });
