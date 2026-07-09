@@ -1922,21 +1922,19 @@ def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
     """ตรวจสอบ JWT session token ที่ออกให้หลังผ่าน PIN + Telegram OTP เท่านั้น
     (ไม่ยอมรับ NAIL_SUPER_ADMIN_KEY ดิบๆ อีกต่อไป — ต้อง login ผ่าน /superadmin/login/* ก่อน)
     stateless JWT: ใช้ได้แม้ server restart เพราะไม่เก็บ state ใน memory
+
+    หมายเหตุ: ไม่มี rate limiter ที่นี่โดยเจตนา — JWT เซ็นด้วย secret key แล้ว ไม่มีประโยชน์ที่จะ
+    rate-limit การตรวจสอบ signature เพราะ brute-force ทำไม่ได้จริง และการใส่ rate limiter
+    ทำให้เกิด self-lockout เมื่อ session เก่าใน localStorage ยิง request หลายอันพร้อมกันก่อนที่
+    ผู้ใช้จะ login ใหม่ (token เก่า → decode fail ทุกครั้ง → เกิน limit → token ใหม่ก็ถูก block ด้วย)
+    Rate limiting ที่แท้จริงอยู่ที่ login endpoints (PIN/OTP) ใน _SUPERADMIN_LOGIN_FAILS แทน
     """
     cfg = get_settings()
     if not cfg.nail_super_admin_key:
         raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
 
-    now_ts = time.time()
-    while _SUPERADMIN_FAILS and now_ts - _SUPERADMIN_FAILS[0] > _SUPERADMIN_FAIL_WINDOW:
-        _SUPERADMIN_FAILS.pop(0)
-    if len(_SUPERADMIN_FAILS) >= _SUPERADMIN_FAIL_LIMIT:
-        logging.warning(f"[superadmin] rate-limited: {len(_SUPERADMIN_FAILS)} failed attempts in last {_SUPERADMIN_FAIL_WINDOW}s")
-        raise HTTPException(status_code=429, detail="พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอสักครู่")
-
     token = x_super_admin_key or ""
     if not token:
-        _SUPERADMIN_FAILS.append(now_ts)
         raise HTTPException(status_code=403, detail="เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่")
 
     try:
@@ -1944,11 +1942,9 @@ def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
         if payload.get("sub") != "superadmin":
             raise ValueError("wrong subject")
     except _pyjwt.ExpiredSignatureError:
-        _SUPERADMIN_FAILS.append(now_ts)
         logging.warning("[superadmin] expired JWT session token")
         raise HTTPException(status_code=403, detail="เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่")
     except Exception:
-        _SUPERADMIN_FAILS.append(now_ts)
         logging.warning("[superadmin] invalid JWT session token")
         raise HTTPException(status_code=403, detail="เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่")
 
@@ -2052,9 +2048,8 @@ def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Dep
 
 @router.post("/superadmin/logout")
 def superadmin_logout(x_super_admin_key: Optional[str] = Header(None)):
-    """ล้าง session token ฝั่ง server ทันที (แม้ token ยังไม่หมดอายุ)"""
-    if x_super_admin_key:
-        _SUPERADMIN_SESSIONS.pop(x_super_admin_key, None)
+    """Logout สำหรับ superadmin — ใช้ stateless JWT แล้ว ไม่ต้องล้าง server-side state
+    การ logout จริงเกิดที่ฝั่ง client (ลบ token จาก localStorage) token เก่าจะหมดอายุเองใน 12 ชม."""
     return {"ok": True}
 
 
