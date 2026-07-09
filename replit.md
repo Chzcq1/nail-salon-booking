@@ -175,3 +175,12 @@ artifacts/store/src/
 - Secrets ห้ามอยู่ในโค้ด — ต้องอยู่ใน Render Environment Variables เท่านั้น
 - Gen Z UX: Candy Pink + White, font Prompt, rounded corners, animation smooth
 - ระบบจองคิว: slot lock atomic (SELECT FOR UPDATE), hold 10 นาที, deposit random cents
+
+---
+
+## Replit Setup Notes (imported 2026-07-09)
+
+- Imported from GitHub into Replit for code editing. Production runs on Render; Replit is the dev/edit environment only.
+- All workflows (backend + frontend) require secrets that live on Render — they will fail locally unless a `DATABASE_URL` (Neon.tech) and other env vars are configured in Replit Secrets.
+- User intent: make specific code changes. No local dev server setup was requested at import time.
+- To enable local dev preview, see proposed task: "Get the dev server running so you can preview changes in Replit".
