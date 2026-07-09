@@ -209,6 +209,82 @@ function ApproveModal({ item, sKey, onDone, onClose }: { item: any; sKey: string
   );
 }
 
+// ── Payment Info Editor (ข้อมูลบัญชีรับเงินของ super-admin) ──────────────────
+function PaymentInfoSection({ sKey }: { sKey: string }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["sa-payment-info"],
+    queryFn: () => saFetch(`${API}/superadmin/payment-info`, sKey),
+    staleTime: 60000,
+  });
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    if (data) {
+      setVals({
+        sa_bank_name: data.sa_bank_name ?? "",
+        sa_bank_account_number: data.sa_bank_account_number ?? "",
+        sa_bank_account_name: data.sa_bank_account_name ?? "",
+        sa_truemoney_phone: data.sa_truemoney_phone ?? "",
+      });
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saFetch(`${API}/superadmin/payment-info`, sKey, {
+        method: "PUT",
+        body: JSON.stringify({
+          sa_bank_name: vals.sa_bank_name || undefined,
+          sa_bank_account_number: vals.sa_bank_account_number || undefined,
+          sa_bank_account_name: vals.sa_bank_account_name || undefined,
+          sa_truemoney_phone: vals.sa_truemoney_phone || undefined,
+        }),
+      }),
+    onSuccess: () => { setMsg("✓ บันทึกข้อมูลแล้ว"); qc.invalidateQueries({ queryKey: ["sa-payment-info"] }); },
+    onError: (e: any) => setMsg(`⚠ ${e.message}`),
+  });
+
+  const fields = [
+    { key: "sa_bank_name",           label: "ชื่อธนาคาร",        placeholder: "ธนาคารกสิกรไทย" },
+    { key: "sa_bank_account_number", label: "เลขบัญชี",           placeholder: "0001234567" },
+    { key: "sa_bank_account_name",   label: "ชื่อบัญชี",          placeholder: "นาย ..." },
+    { key: "sa_truemoney_phone",     label: "เบอร์ TrueMoney 🧧", placeholder: "0812345678" },
+  ];
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <Save size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>ข้อมูลรับชำระเงิน (admin ของคุณจะเห็นข้อมูลนี้ตอนต่ออายุ)</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+      </div>
+      <p style={{ color: S.muted, fontSize: 12, marginBottom: 16 }}>admin จะเห็นบัญชีนี้เพื่อรู้ว่าต้องโอนเงินค่าเช่าระบบไปที่ไหน</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+        {fields.map(f => (
+          <div key={f.key}>
+            <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>{f.label}</label>
+            <input
+              type="text"
+              placeholder={f.placeholder}
+              value={vals[f.key] ?? ""}
+              onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))}
+              style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }}
+            />
+          </div>
+        ))}
+      </div>
+      {msg && <p style={{ color: msg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginBottom: 10 }}>{msg}</p>}
+      <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+        style={{ background: `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, border: "none", borderRadius: 10, padding: "10px 18px", cursor: saveMutation.isPending ? "not-allowed" : "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+        {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+        บันทึก
+      </button>
+    </div>
+  );
+}
+
 // ── Pricing Editor ────────────────────────────────────────────────────────────
 function PricingSection({ sKey }: { sKey: string }) {
   const qc = useQueryClient();
@@ -540,6 +616,9 @@ export default function NailSuperAdminPage() {
 
         {/* Usage / Monitoring */}
         <UsageSection sKey={sKey} />
+
+        {/* Payment Info */}
+        <PaymentInfoSection sKey={sKey} />
 
         {/* Pricing */}
         <PricingSection sKey={sKey} />

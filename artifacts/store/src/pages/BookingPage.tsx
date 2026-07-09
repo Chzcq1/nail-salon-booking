@@ -7,7 +7,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Instagram, Facebook, Clock, ChevronLeft, ChevronRight,
-  Phone, User, StickyNote, Upload, CheckCircle, AlertCircle,
+  Phone, User, StickyNote, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
   MessageCircle, Video, HelpCircle, Wallet,
 } from "lucide-react";
@@ -270,7 +270,7 @@ const tutorialSteps = [
   { icon: "📅", title: "เลือกวันที่", desc: "เลือกวันที่สะดวก ระบบแสดงเฉพาะวันที่เปิดรับจอง" },
   { icon: "🕐", title: "เลือกช่วงเวลา", desc: "เลือกช่วงเวลาที่ว่างสำหรับวันที่คุณเลือก" },
   { icon: "📝", title: "กรอกข้อมูล + เลือกบริการ", desc: "ใส่ชื่อ เบอร์โทร และเลือกบริการที่ต้องการ (ถ้ามี)" },
-  { icon: "💳", title: "จ่ายมัดจำ", desc: "โอนค่ามัดจำและส่งสลิป ร้านจะยืนยันให้ภายใน 24 ชม." },
+  { icon: "💳", title: "จ่ายมัดจำ", desc: "เติมเครดิตในกระเป๋าเงิน แล้วกดจ่ายมัดจำทันที — ไม่ต้องโอนสลิป" },
 ];
 
 function TutorialPopup({ onClose }: { onClose: () => void }) {
@@ -761,17 +761,13 @@ function Field({ label, icon, children }: any) {
   );
 }
 
-// ── Payment Screen ───────────────────────────────────────────────────
+// ── Payment Screen (Credit only — ไม่มีโอนสลิปตรงแล้ว) ────────────────────
 function PaymentScreen({ booking, onBack, onSuccess }: any) {
   const [holdData, setHoldData] = useState<any>(null);
-  const [slipFile, setSlipFile] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [timer, setTimer] = useState(600);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [payError, setPayError] = useState("");
-  const [uploading, setUploading] = useState(false);
 
-  // Hold slot on mount
   const holdMutation = useMutation({
     mutationFn: () => api.hold({
       slot_id: booking.slot.id,
@@ -785,9 +781,9 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
     onError: (e: any) => setPayError(e.message),
   });
 
-  useEffect(() => { holdMutation.mutate(); }, []);
+  useEffect(() => { holdMutation.mutate(); }, []); // eslint-disable-line
 
-  // เมื่อได้ holdData ให้คำนวณเวลาที่เหลือจาก held_until จริง
+  // คำนวณเวลาที่เหลือจาก held_until จริง
   useEffect(() => {
     if (!holdData?.held_until) return;
     const heldUntil = new Date(holdData.held_until).getTime();
@@ -795,47 +791,21 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
     setTimer(remaining);
   }, [holdData]);
 
-  // Countdown timer
   useEffect(() => {
     if (!holdData) return;
     const interval = setInterval(() => {
-      setTimer(t => {
-        if (t <= 1) { clearInterval(interval); return 0; }
-        return t - 1;
-      });
+      setTimer(t => { if (t <= 1) { clearInterval(interval); return 0; } return t - 1; });
     }, 1000);
     return () => clearInterval(interval);
   }, [holdData]);
 
   const mm = String(Math.floor(timer / 60)).padStart(2, "0");
   const ss = String(timer % 60).padStart(2, "0");
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setSlipFile(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
   const copyAmount = () => {
     navigator.clipboard.writeText(String(holdData?.deposit_total?.toFixed(2)));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const payMutation = useMutation({
-    mutationFn: async () => {
-      if (!slipFile) throw new Error("กรุณาอัปโหลดสลิปก่อน");
-      setUploading(true);
-      // Upload slip file
-      const upRes = await api.uploadSlip(slipFile);
-      setUploading(false);
-      return api.pay({ hold_token: holdData.hold_token, payment_proof: upRes.url });
-    },
-    onSuccess: () => onSuccess(holdData),
-    onError: (e: any) => { setUploading(false); setPayError(e.message); },
-  });
 
   const isLoggedIn = !!getWalletToken();
   const walletBalance: number | null = holdData?.wallet_balance ?? null;
@@ -893,9 +863,8 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
             <h2 style={{ fontSize: 22, fontWeight: 700 }}>ชำระมัดจำ</h2>
-            <p style={{ color: P.sub, fontSize: 14, marginTop: 4 }}>โอนเงินและอัปโหลดสลิป</p>
+            <p style={{ color: P.sub, fontSize: 14, marginTop: 4 }}>ใช้เครดิตในกระเป๋าเงิน</p>
           </div>
-          {/* Countdown */}
           <div style={{ background: timer < 120 ? "#FEF2F2" : P.pinkPale, border: `1px solid ${timer < 120 ? "#FECACA" : P.pinkBorder}`, borderRadius: 12, padding: "8px 14px", textAlign: "center" }}>
             <div style={{ fontSize: 11, color: P.muted }}>เหลือเวลา</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: timer < 120 ? P.error : P.pink, fontVariantNumeric: "tabular-nums" }}>{mm}:{ss}</div>
@@ -916,7 +885,7 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
 
         {/* Payment amount */}
         <div style={{ background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 20, marginBottom: 20, textAlign: "center" }}>
-          <p style={{ color: P.sub, fontSize: 14, marginBottom: 8 }}>โอนเงินมัดจำ <span style={{ fontSize: 11, color: P.muted }}>(เศษสตางค์ช่วยยืนยันตัวตน)</span></p>
+          <p style={{ color: P.sub, fontSize: 14, marginBottom: 8 }}>ยอดมัดจำที่ต้องชำระ</p>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
             <span style={{ fontSize: 36, fontWeight: 800, color: P.pink }}>
               ฿{holdData?.deposit_total?.toFixed(2)}
@@ -925,19 +894,34 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
               {copied ? <><Check size={14} /> คัดลอกแล้ว</> : <><Copy size={14} /> คัดลอก</>}
             </button>
           </div>
-          {holdData?.bank_name && (
-            <div style={{ marginTop: 14, padding: "12px 16px", background: P.pinkPale, borderRadius: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: P.text }}>{holdData.bank_name}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: P.pink, letterSpacing: 2, marginTop: 4 }}>{holdData.bank_account_number}</div>
-              {holdData.bank_account_name && <div style={{ fontSize: 13, color: P.sub, marginTop: 2 }}>{holdData.bank_account_name}</div>}
-            </div>
-          )}
         </div>
 
-        {/* จ่ายด้วยเครดิตในกระเป๋าเงิน (ถ้าล็อกอินอยู่) */}
-        {isLoggedIn && (
+        {/* Credit payment — primary (and only) payment method */}
+        {!isLoggedIn ? (
+          <div style={{ background: P.pinkPale, border: `2px solid ${P.pink}`, borderRadius: 16, padding: 20, textAlign: "center" }}>
+            <Wallet size={36} color={P.pink} style={{ margin: "0 auto 12px" }} />
+            <p style={{ fontSize: 16, fontWeight: 700, color: P.text, marginBottom: 8 }}>ต้องเติมเครดิตก่อนจอง</p>
+            <p style={{ fontSize: 13, color: P.sub, marginBottom: 16, lineHeight: 1.6 }}>
+              ระบบรับชำระมัดจำจากเครดิตในกระเป๋าเงินเท่านั้น<br />
+              กรุณาสมัครบัญชีและเติมเครดิตให้ครบ <b>฿{holdData?.deposit_total?.toFixed(2)}</b> ก่อน แล้วกลับมาจองใหม่
+            </p>
+            <a
+              href="/wallet"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
+                color: "#fff", borderRadius: 14, padding: "12px 24px",
+                fontWeight: 700, fontSize: 15, textDecoration: "none",
+                boxShadow: `0 4px 16px ${P.pink}55`,
+              }}
+            >
+              <Wallet size={18} /> สมัคร / เติมเครดิต
+            </a>
+            <p style={{ fontSize: 11, color: P.muted, marginTop: 12 }}>หลังเติมเครดิตแล้ว กลับมาจองใหม่จากหน้าหลัก</p>
+          </div>
+        ) : (
           <div style={{ background: walletSufficient ? "#F0FDF4" : "#FFFBEB", border: `1.5px solid ${walletSufficient ? "#BBF7D0" : "#FDE68A"}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: P.text }}>💳 เครดิตในกระเป๋าเงิน</span>
               <span style={{ fontSize: 15, fontWeight: 700, color: walletSufficient ? "#16A34A" : "#B45309" }}>
                 ฿{walletBalance?.toFixed(2) ?? "0.00"}
@@ -954,62 +938,38 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                 }}
               >
-                {payWalletMutation.isPending ? <><Loader2 size={18} className="animate-spin" /> กำลังยืนยัน...</> : "จ่ายด้วยเครดิตทันที ✓"}
+                {payWalletMutation.isPending ? <><Loader2 size={18} className="animate-spin" /> กำลังยืนยัน...</> : "จ่ายด้วยเครดิต ✓"}
               </button>
             ) : (
               <div>
-                <p style={{ fontSize: 13, color: "#B45309", marginBottom: 8 }}>
-                  เครดิตไม่พอ ต้องเติมเงินเพิ่มอีก ฿{((holdData?.deposit_total ?? 0) - (walletBalance ?? 0)).toFixed(2)} ก่อนถึงจะจ่ายด้วยเครดิตได้
+                <p style={{ fontSize: 13, color: "#B45309", marginBottom: 12, fontWeight: 600 }}>
+                  ⚠️ เครดิตไม่พอ — ต้องเติมเพิ่มอีก <b>฿{((holdData?.deposit_total ?? 0) - (walletBalance ?? 0)).toFixed(2)}</b>
                 </p>
-                <a href="/wallet" target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: P.pinkDeep, fontWeight: 600, fontSize: 14, textDecoration: "underline" }}>
-                  เติมเครดิตที่หน้ากระเป๋าเงิน <ArrowRight size={14} />
+                <a
+                  href="/wallet"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
+                    color: "#fff", borderRadius: 14, padding: "13px",
+                    fontWeight: 700, fontSize: 15, textDecoration: "none",
+                    boxShadow: `0 4px 16px ${P.pink}55`,
+                  }}
+                >
+                  <ArrowRight size={18} /> เติมเครดิตที่กระเป๋าเงิน
                 </a>
+                <p style={{ fontSize: 11, color: P.muted, marginTop: 8, textAlign: "center" }}>หลังเติมเครดิตแล้ว กลับมากดจ่ายด้านนี้ได้เลย</p>
               </div>
             )}
-            <div style={{ textAlign: "center", fontSize: 12, color: P.muted, marginTop: 10 }}>— หรือโอนเงินและอัปโหลดสลิปด้านล่างแทน —</div>
           </div>
         )}
 
-        {/* Upload slip */}
-        <div style={{ marginBottom: 20 }}>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} />
-          {slipFile ? (
-            <div style={{ position: "relative" }}>
-              <img src={slipFile} alt="slip" style={{ width: "100%", maxHeight: 240, objectFit: "contain", borderRadius: 14, border: `2px solid ${P.pink}` }} />
-              <button onClick={() => setSlipFile(null)} style={{ position: "absolute", top: 8, right: 8, background: P.error, border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <X size={14} color="#fff" />
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => fileRef.current?.click()} style={{ width: "100%", border: `2px dashed ${P.pinkBorder}`, borderRadius: 16, padding: "24px", background: P.pinkPale, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-              <Upload size={28} color={P.pink} />
-              <span style={{ color: P.pink, fontWeight: 600 }}>อัปโหลดสลิปโอนเงิน</span>
-              <span style={{ color: P.muted, fontSize: 13 }}>กดที่นี่เพื่อเลือกรูปสลิป</span>
-            </button>
-          )}
-        </div>
-
         {payError && (
-          <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: "10px 14px", color: P.error, fontSize: 14, marginBottom: 16 }}>
+          <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: "10px 14px", color: P.error, fontSize: 14, marginTop: 16 }}>
             {payError}
           </div>
         )}
-
-        <button
-          onClick={() => payMutation.mutate()}
-          disabled={!slipFile || payMutation.isPending || uploading}
-          style={{
-            width: "100%",
-            background: slipFile && !payMutation.isPending ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : P.gray,
-            color: slipFile && !payMutation.isPending ? "#fff" : P.muted,
-            border: "none", borderRadius: 16, padding: "16px", fontSize: 17, fontWeight: 700,
-            cursor: slipFile && !payMutation.isPending ? "pointer" : "not-allowed",
-            boxShadow: slipFile ? `0 4px 20px ${P.pink}55` : "none",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          }}
-        >
-          {(payMutation.isPending || uploading) ? <><Loader2 size={20} className="animate-spin" /> กำลังตรวจสอบ...</> : "ยืนยันการจอง ✓"}
-        </button>
       </div>
     </PageWrap>
   );

@@ -355,9 +355,15 @@ async def topup_slip(
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
-    slip_enabled = (_get_setting(db, "topup_slip_enabled") or "on") == "on"
+    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ก่อน, fallback ไป StoreSettings
+    from backend.models import NailShopSettings as _NailShop
+    _nail_shop = db.query(_NailShop).filter_by(id=1).first()
+    if _nail_shop is not None:
+        slip_enabled = _nail_shop.accept_bank_transfer if _nail_shop.accept_bank_transfer is not None else True
+    else:
+        slip_enabled = (_get_setting(db, "topup_slip_enabled") or "on") == "on"
     if not slip_enabled:
-        raise HTTPException(status_code=403, detail="ปิดรับเติมเงินผ่านสลีปชั่วคราว")
+        raise HTTPException(status_code=403, detail="ร้านปิดรับเติมเงินผ่านสลิปชั่วคราว")
 
     payment_proof = body.get("payment_proof", "")
     if not payment_proof:
@@ -455,9 +461,15 @@ async def topup_truemoney(
     db: Session = Depends(get_db),
 ):
     settings = get_settings()
-    tm_enabled = (_get_setting(db, "topup_truemoney_enabled") or "on") == "on"
+    # ตรวจสอบว่าแอดมินเปิดช่องทางนี้ไว้ไหม — ดูจาก NailShopSettings ก่อน, fallback ไป StoreSettings
+    from backend.models import NailShopSettings as _NailShop
+    _nail_shop = db.query(_NailShop).filter_by(id=1).first()
+    if _nail_shop is not None:
+        tm_enabled = _nail_shop.accept_truemoney_angpao if _nail_shop.accept_truemoney_angpao is not None else True
+    else:
+        tm_enabled = (_get_setting(db, "topup_truemoney_enabled") or "on") == "on"
     if not tm_enabled:
-        raise HTTPException(status_code=403, detail="ปิดรับเติมเงินผ่าน TrueMoney ชั่วคราว")
+        raise HTTPException(status_code=403, detail="ร้านปิดรับเติมเงินผ่าน TrueMoney ชั่วคราว")
 
     voucher_raw = body.get("voucher", "")
     voucher_code = _extract_voucher_code(voucher_raw)
@@ -478,7 +490,12 @@ async def topup_truemoney(
 
     if settings.bot_token:
         try:
-            phone = (_get_setting(db, "truemoney_phone") or "").strip()
+            # ใช้เบอร์ TrueMoney จาก NailShopSettings ก่อน (admin ตั้งในหน้า nail-admin)
+            # ถ้าไม่ได้ตั้งไว้ → fallback ไปที่ StoreSettings (ระบบดิจิทัลเดิม)
+            from backend.models import NailShopSettings as _NailShop
+            _nail_shop = db.query(_NailShop).filter_by(id=1).first()
+            _nail_phone = (_nail_shop.truemoney_phone or "").strip() if _nail_shop else ""
+            phone = _nail_phone or (_get_setting(db, "truemoney_phone") or "").strip()
             result = await redeem_voucher(voucher_code, phone) if phone else await redeem_voucher(voucher_code)
             topup.truemoney_result = json.dumps(result["raw"])
             if result["success"]:

@@ -7,3 +7,4 @@
 - [Debugging opaque prod 500s without log access](opaque-prod-500-debugging.md) — add a FastAPI global exception handler that logs full tracebacks, since Render logs aren't reachable from Replit tools
 - [Thailand timezone handling](thailand-timezone-handling.md) — app stores naive UTC; any "today/now" business logic (e.g. past time-slot filtering) must convert via a dedicated UTC+7 helper, not assume server tz
 - [Schema drift between CREATE TABLE and prod tables](schema-drift-migrations.md) — new model columns need an explicit ALTER TABLE ADD COLUMN migration too, or prod tables silently miss them while dev looks fine
+- [SQLAlchemy server_default vs default for NOT NULL columns](sqlalchemy-server-default.md) — use server_default= (not just default=) for NOT NULL columns so create_all() adds a DB-level DEFAULT; also include new NOT NULL fields in seed INSERTs

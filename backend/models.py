@@ -235,6 +235,11 @@ class NailShopSettings(Base):
     price_3m = Column(Numeric(10, 2), nullable=True)
     price_6m = Column(Numeric(10, 2), nullable=True)
     price_12m = Column(Numeric(10, 2), nullable=True)
+    # ช่องทางรับเงินมัดจำจากลูกค้า
+    truemoney_phone = Column(String(20), nullable=True)       # เบอร์ TrueMoney สำหรับรับซองอั่งเปา
+    # server_default="true" เพื่อให้ create_all() สร้าง column พร้อม DB-level DEFAULT
+    accept_bank_transfer = Column(Boolean, server_default="true", default=True, nullable=False)
+    accept_truemoney_angpao = Column(Boolean, server_default="true", default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

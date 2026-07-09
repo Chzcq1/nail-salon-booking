@@ -630,6 +630,15 @@ interface StoreSettings {
   bank_qr_url?: string;
 }
 
+interface NailShopPublicSettings {
+  accept_bank_transfer?: boolean;
+  accept_truemoney_angpao?: boolean;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_name?: string;
+  bank_qr_url?: string;
+}
+
 // ── Main WalletPage ───────────────────────────────────────────────────────────
 export default function WalletPage() {
   const [, setLocation] = useLocation();
@@ -660,8 +669,21 @@ export default function WalletPage() {
     gcTime: 10 * 60_000,
   });
 
-  const slipEnabled = (storeSettings?.topup_slip_enabled ?? "on") === "on";
-  const trueMoneyEnabled = (storeSettings?.topup_truemoney_enabled ?? "on") === "on";
+  // ข้อมูลจาก nail shop settings — ใช้ toggling และ bank info สำหรับ nail wallet
+  const { data: nailSettings } = useQuery<NailShopPublicSettings>({
+    queryKey: ["nail-settings-wallet"],
+    queryFn: () => fetch("/api/nail/settings").then(r => r.json()),
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+  });
+
+  // Nail shop settings override digital store settings
+  const slipEnabled = nailSettings
+    ? (nailSettings.accept_bank_transfer ?? true)
+    : (storeSettings?.topup_slip_enabled ?? "on") === "on";
+  const trueMoneyEnabled = nailSettings
+    ? (nailSettings.accept_truemoney_angpao ?? true)
+    : (storeSettings?.topup_truemoney_enabled ?? "on") === "on";
 
   const walletQuery = useQuery<WalletData>({
     queryKey: ["wallet-me", token],
@@ -956,24 +978,30 @@ export default function WalletPage() {
 
               {topupType === "slip" && (
                 <div className="space-y-3">
-                  {/* Bank info card */}
-                  {(storeSettings?.bank_name || storeSettings?.bank_account) && (
+                  {/* Bank info card — ใช้ข้อมูลจาก nail shop settings */}
+                  {(nailSettings?.bank_name || nailSettings?.bank_account_number) && (
                     <div className="bg-green-500/10 border border-green-500/25 rounded-xl p-4 space-y-3">
                       <p className="text-xs font-semibold text-green-400 uppercase tracking-wide">📤 โอนเงินมาที่</p>
                       <div className="space-y-2">
-                        {storeSettings?.bank_name && (
+                        {nailSettings?.bank_name && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-0.5">ธนาคาร / ชื่อบัญชี</p>
-                            <p className="text-sm font-semibold text-foreground">{storeSettings.bank_name}</p>
+                            <p className="text-[10px] text-muted-foreground mb-0.5">ธนาคาร</p>
+                            <p className="text-sm font-semibold text-foreground">{nailSettings.bank_name}</p>
                           </div>
                         )}
-                        {storeSettings?.bank_account && (
+                        {nailSettings?.bank_account_name && (
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-0.5">ชื่อบัญชี</p>
+                            <p className="text-sm text-foreground">{nailSettings.bank_account_name}</p>
+                          </div>
+                        )}
+                        {nailSettings?.bank_account_number && (
                           <div>
                             <p className="text-[10px] text-muted-foreground mb-0.5">เลขบัญชี</p>
                             <div className="flex items-center gap-2">
-                              <p className="text-sm font-mono font-bold text-foreground tracking-wider">{storeSettings.bank_account}</p>
+                              <p className="text-sm font-mono font-bold text-foreground tracking-wider">{nailSettings.bank_account_number}</p>
                               <button
-                                onClick={() => navigator.clipboard.writeText(storeSettings.bank_account!)}
+                                onClick={() => navigator.clipboard.writeText(nailSettings.bank_account_number!)}
                                 className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded hover:bg-green-500/30 transition-colors"
                               >
                                 คัดลอก
@@ -982,10 +1010,10 @@ export default function WalletPage() {
                           </div>
                         )}
                       </div>
-                      {storeSettings?.bank_qr_url && (
+                      {nailSettings?.bank_qr_url && (
                         <div className="flex justify-center pt-1">
                           <img
-                            src={storeSettings.bank_qr_url}
+                            src={nailSettings.bank_qr_url}
                             alt="QR PromptPay"
                             className="w-40 h-40 object-contain rounded-lg bg-white p-1"
                           />

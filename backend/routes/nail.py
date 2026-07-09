@@ -291,6 +291,8 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "is_active": shop.is_active and not expired,
         "expired": expired,
         "closed_dates": shop.closed_dates or "[]",
+        "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
+        "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
     }
 
 
@@ -1439,6 +1441,9 @@ class ShopSettingsBody(BaseModel):
     slot_duration_minutes: Optional[int] = None
     is_active: Optional[bool] = None
     closed_dates: Optional[str] = None  # JSON array of "YYYY-MM-DD"
+    truemoney_phone: Optional[str] = None
+    accept_bank_transfer: Optional[bool] = None
+    accept_truemoney_angpao: Optional[bool] = None
 
 
 @router.get("/admin/settings")
@@ -1462,6 +1467,9 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "slot_duration_minutes": shop.slot_duration_minutes or 60,
         "is_active": shop.is_active,
         "closed_dates": shop.closed_dates or "[]",
+        "truemoney_phone": shop.truemoney_phone,
+        "accept_bank_transfer": shop.accept_bank_transfer if shop.accept_bank_transfer is not None else True,
+        "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
     }
 
 
@@ -2064,3 +2072,63 @@ def superadmin_set_expiry(
     shop.expired_at = datetime.fromisoformat(body.expired_at) if body.expired_at else None
     db.commit()
     return {"ok": True, "expired_at": shop.expired_at.isoformat() if shop.expired_at else None}
+
+
+# ── SuperAdmin Payment Info ──────────────────────────────────────────────────
+
+class SuperAdminPaymentInfoBody(BaseModel):
+    sa_bank_name: Optional[str] = None
+    sa_bank_account_number: Optional[str] = None
+    sa_bank_account_name: Optional[str] = None
+    sa_truemoney_phone: Optional[str] = None
+
+
+def _sa_payment_info(db: Session) -> dict:
+    from backend.models import StoreSettings
+    keys = ["sa_bank_name", "sa_bank_account_number", "sa_bank_account_name", "sa_truemoney_phone"]
+    result: dict = {}
+    for k in keys:
+        row = db.query(StoreSettings).filter_by(key=k).first()
+        result[k] = row.value if row else None
+    return result
+
+
+@router.get("/superadmin/payment-info")
+def superadmin_get_payment_info(
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ข้อมูลบัญชีรับเงินของ super-admin"""
+    _check_superadmin(x_super_admin_key)
+    return _sa_payment_info(db)
+
+
+@router.put("/superadmin/payment-info")
+def superadmin_set_payment_info(
+    body: SuperAdminPaymentInfoBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้งข้อมูลบัญชีรับเงิน — admin จะเห็นข้อมูลนี้ตอนต่ออายุระบบ"""
+    _check_superadmin(x_super_admin_key)
+    from backend.models import StoreSettings
+    for field, val in body.model_dump().items():
+        if val is None:
+            continue
+        row = db.query(StoreSettings).filter_by(key=field).first()
+        if row:
+            row.value = val.strip()
+        else:
+            db.add(StoreSettings(key=field, value=val.strip()))
+    db.commit()
+    return {"ok": True, **_sa_payment_info(db)}
+
+
+@router.get("/admin/superadmin-payment-info")
+def admin_get_superadmin_payment_info(
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """ดึงข้อมูลบัญชีรับเงินของ super-admin (admin ดูก่อนโอนเงินต่ออายุ)"""
+    _check_admin(authorization)
+    return _sa_payment_info(db)

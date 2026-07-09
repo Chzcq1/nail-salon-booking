@@ -1270,11 +1270,18 @@ function TopupRequestsView({ token }: { token: string }) {
                 {t.payment_proof && !t.payment_proof.startsWith("voucher:") && (
                   <img src={t.payment_proof} alt="slip" style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 10, border: `1px solid ${A.border}`, marginBottom: 10 }} />
                 )}
-                {(t.voucher_code || t.payment_proof?.startsWith("voucher:")) && (
-                  <div style={{ background: A.infoBg, border: `1px solid ${A.info}33`, borderRadius: 10, padding: "8px 12px", fontSize: 12, color: A.info, marginBottom: 10 }}>
-                    🧧 Voucher: {t.voucher_code || t.payment_proof?.replace("voucher:", "")}
-                  </div>
-                )}
+                {(t.voucher_code || t.payment_proof?.startsWith("voucher:")) && (() => {
+                  const code = t.voucher_code || t.payment_proof?.replace("voucher:", "");
+                  const link = `https://gift.truemoney.com/campaign/?v=${code}`;
+                  return (
+                    <div style={{ background: A.infoBg, border: `1px solid ${A.info}33`, borderRadius: 10, padding: "8px 12px", fontSize: 12, color: A.info, marginBottom: 10 }}>
+                      🧧 ซองอั่งเปา:{" "}
+                      <a href={link} target="_blank" rel="noreferrer" style={{ color: A.info, fontWeight: 700, wordBreak: "break-all" }}>
+                        {link}
+                      </a>
+                    </div>
+                  );
+                })()}
                 {isPending && (
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <input type="number" min="1" step="0.01" value={inputAmt}
@@ -1526,6 +1533,14 @@ function RenewalTab({ token }: { token: string }) {
     retry: 1,
   });
 
+  // ข้อมูลบัญชีรับเงินของ super-admin (ไปโอนที่ไหน)
+  const { data: saPayment } = useQuery<any>({
+    queryKey: ["nail-admin-sa-payment-info"],
+    queryFn: () => fetch("/api/nail/admin/superadmin-payment-info", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 120000,
+    retry: 1,
+  });
+
   const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
   const [voucher, setVoucher] = useState("");
   const [submitResult, setSubmitResult] = useState<{
@@ -1637,6 +1652,46 @@ function RenewalTab({ token }: { token: string }) {
             </span>
           </div>
           {lastReq.admin_note && <p style={{ fontSize: 12, color: A.muted, marginTop: 6 }}>หมายเหตุ: {lastReq.admin_note}</p>}
+        </div>
+      )}
+
+      {/* SuperAdmin payment info — ต้องโอนเงินไปที่ไหน */}
+      {(saPayment?.sa_bank_name || saPayment?.sa_bank_account_number || saPayment?.sa_truemoney_phone) && (
+        <div style={{ background: "#FFFBEB", border: `1.5px solid #FDE68A`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#92400E", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            💸 โอนเงินไปที่บัญชีนี้
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {saPayment?.sa_bank_name && (
+              <div style={{ fontSize: 13, color: "#78350F" }}>
+                <span style={{ fontWeight: 600 }}>ธนาคาร:</span> {saPayment.sa_bank_name}
+              </div>
+            )}
+            {saPayment?.sa_bank_account_name && (
+              <div style={{ fontSize: 13, color: "#78350F" }}>
+                <span style={{ fontWeight: 600 }}>ชื่อบัญชี:</span> {saPayment.sa_bank_account_name}
+              </div>
+            )}
+            {saPayment?.sa_bank_account_number && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 13, color: "#78350F" }}>
+                  <span style={{ fontWeight: 600 }}>เลขบัญชี:</span>{" "}
+                  <span style={{ fontFamily: "monospace", fontSize: 15, fontWeight: 700 }}>{saPayment.sa_bank_account_number}</span>
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(saPayment.sa_bank_account_number)}
+                  style={{ background: "#FDE68A", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 11, color: "#92400E", fontFamily: "inherit" }}
+                >
+                  คัดลอก
+                </button>
+              </div>
+            )}
+            {saPayment?.sa_truemoney_phone && (
+              <div style={{ fontSize: 13, color: "#78350F" }}>
+                <span style={{ fontWeight: 600 }}>🧧 TrueMoney เบอร์:</span> {saPayment.sa_truemoney_phone}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2339,6 +2394,38 @@ function SettingsTab({ token }: { token: string }) {
       {F("bank_account_number", "เลขบัญชี")}
       {F("bank_account_name", "ชื่อบัญชี")}
       {F("bank_qr_url", "URL รูป QR Code พร้อมเพย์")}
+
+      <Section title="ช่องทางรับเงินเติมเครดิต" />
+      <div style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: A.primary }}>
+        💡 ตั้งค่าช่องทางที่ลูกค้าใช้เติมเครดิตเพื่อจ่ายค่ามัดจำ
+      </div>
+      {F("truemoney_phone", "เบอร์ TrueMoney รับซองอั่งเปา", "text", "0812345678")}
+      {/* accept_bank_transfer toggle */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: A.bg, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: A.text }}>รับโอนธนาคาร (สลิป)</div>
+          <div style={{ fontSize: 12, color: A.muted }}>ลูกค้าเติมเครดิตโดยโอนเงินแล้วส่งสลิป</div>
+        </div>
+        <button
+          onClick={() => setForm((p: any) => ({ ...p, accept_bank_transfer: !(p.accept_bank_transfer ?? true) }))}
+          style={{ width: 44, height: 24, borderRadius: 100, border: "none", cursor: "pointer", background: (form?.accept_bank_transfer ?? true) ? A.primary : A.gray, position: "relative", transition: "background 0.2s", flexShrink: 0 }}
+        >
+          <div style={{ position: "absolute", top: 3, left: (form?.accept_bank_transfer ?? true) ? 23 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+        </button>
+      </div>
+      {/* accept_truemoney_angpao toggle */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: A.bg, border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: A.text }}>รับซองอั่งเปา TrueMoney</div>
+          <div style={{ fontSize: 12, color: A.muted }}>ลูกค้าเติมเครดิตด้วยซองของขวัญ (ต้องตั้งเบอร์ด้านบน)</div>
+        </div>
+        <button
+          onClick={() => setForm((p: any) => ({ ...p, accept_truemoney_angpao: !(p.accept_truemoney_angpao ?? true) }))}
+          style={{ width: 44, height: 24, borderRadius: 100, border: "none", cursor: "pointer", background: (form?.accept_truemoney_angpao ?? true) ? A.primary : A.gray, position: "relative", transition: "background 0.2s", flexShrink: 0 }}
+        >
+          <div style={{ position: "absolute", top: 3, left: (form?.accept_truemoney_angpao ?? true) ? 23 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+        </button>
+      </div>
 
       <Section title="ระบบจอง" />
       {F("max_advance_days", "จองล่วงหน้าได้สูงสุด (วัน)", "number", "14")}

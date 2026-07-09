@@ -178,6 +178,10 @@ def _run_migrations(engine):
         # closed_dates added to nail_shop_settings (วันปิดร้าน) — table already existed on
         # production before this column was added to the model, so create_all() never adds it
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS closed_dates TEXT",
+        # ช่องทางรับเงินมัดจำจากลูกค้า (nail shop)
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS truemoney_phone VARCHAR(20)",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS accept_bank_transfer BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS accept_truemoney_angpao BOOLEAN NOT NULL DEFAULT TRUE",
         # display_name / phone_number for customer wallet profile
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)",
@@ -212,7 +216,7 @@ def _run_migrations(engine):
             slot_duration_minutes INTEGER NOT NULL DEFAULT 60,
             created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ
         )""",
-        "INSERT INTO nail_shop_settings (id, shop_name, deposit_amount, max_advance_days, slot_duration_minutes, is_active) VALUES (1, 'ร้านทำเล็บ', 200, 14, 60, TRUE) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO nail_shop_settings (id, shop_name, deposit_amount, max_advance_days, slot_duration_minutes, is_active, accept_bank_transfer, accept_truemoney_angpao) VALUES (1, 'ร้านทำเล็บ', 200, 14, 60, TRUE, TRUE, TRUE) ON CONFLICT (id) DO NOTHING",
         """CREATE TABLE IF NOT EXISTS nail_services (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
