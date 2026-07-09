@@ -167,7 +167,7 @@ async def wallet_send_otp(body: dict, db: Session = Depends(get_db)):
         from backend import email_service
         await email_service.send_otp_email(email, otp_code)
     except Exception as e:
-        logger.error(f"Failed to send OTP email to {email}: {e}")
+        logger.error(f"Failed to send OTP email: {e}")
         db.delete(session)
         db.commit()
         raise HTTPException(status_code=500, detail=f"ส่งอีเมลไม่สำเร็จ: {e}")

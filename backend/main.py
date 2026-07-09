@@ -506,7 +506,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # หมายเหตุ: ระบบ auth ใช้ Bearer token ใน header ไม่ใช้ cookie ดังนั้นไม่จำเป็นต้อง
+    # allow_credentials=True (และเบราว์เซอร์ก็บล็อกการรวม wildcard origin กับ credentials อยู่แล้ว)
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

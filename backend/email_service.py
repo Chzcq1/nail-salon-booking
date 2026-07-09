@@ -54,7 +54,7 @@ async def _send_via_resend(to_email: str, otp_code: str, api_key: str, from_emai
         )
 
     if resp.status_code in (200, 201):
-        logger.info("ส่งอีเมล OTP ผ่าน Resend สำเร็จ → %s", to_email)
+        logger.info("ส่งอีเมล OTP ผ่าน Resend สำเร็จ")
         return True
 
     error_body = resp.text
@@ -113,7 +113,7 @@ async def _send_via_brevo(to_email: str, otp_code: str, api_key: str, from_email
         )
 
     if resp.status_code in (200, 201):
-        logger.info("ส่งอีเมล OTP ผ่าน Brevo สำเร็จ → %s", to_email)
+        logger.info("ส่งอีเมล OTP ผ่าน Brevo สำเร็จ")
         return True
 
     error_body = resp.text
