@@ -650,9 +650,10 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(booking)
 
-    # แจ้ง Telegram แอดมินทันทีเมื่อลูกค้าส่งสลิป
+    # แจ้ง Telegram แอดมินทันทีเมื่อลูกค้าส่งสลิป (ใช้ per-shop bot)
     try:
         from backend.bot import send_nail_slip_notify
+        _shop_keys = db.query(NailShopApiKeys).filter_by(shop_id=booking.shop_id).first()
         await send_nail_slip_notify(
             booking_ref=booking.booking_ref,
             customer_name=booking.customer_name or "ไม่ระบุ",
@@ -665,6 +666,8 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
             deposit_total=float(booking.deposit_total or 0),
             payment_proof=req.payment_proof,
             slip_verify_status=booking.slip_verify_status,
+            shop_bot_token=_shop_keys.telegram_bot_token if _shop_keys else None,
+            shop_admin_group_id=_shop_keys.admin_group_id if _shop_keys else None,
         )
     except Exception as e:
         logger.warning(f"Telegram slip notify failed (non-critical): {e}")
@@ -754,6 +757,7 @@ async def submit_payment_wallet(
 
     try:
         from backend.bot import send_nail_slip_notify
+        _shop_keys = db.query(NailShopApiKeys).filter_by(shop_id=booking.shop_id).first()
         await send_nail_slip_notify(
             booking_ref=booking.booking_ref,
             customer_name=booking.customer_name or "ไม่ระบุ",
@@ -766,6 +770,8 @@ async def submit_payment_wallet(
             deposit_total=float(booking.deposit_total or 0),
             payment_proof="[ชำระด้วยเครดิตในกระเป๋าเงิน]",
             slip_verify_status="wallet_paid",
+            shop_bot_token=_shop_keys.telegram_bot_token if _shop_keys else None,
+            shop_admin_group_id=_shop_keys.admin_group_id if _shop_keys else None,
         )
     except Exception as e:
         logger.warning(f"Telegram wallet-pay notify failed (non-critical): {e}")
@@ -1369,9 +1375,10 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
     เก็บสล็อตที่มีคนจองไว้แล้วเสมอ (ไม่ลบ/ไม่แก้เวลา) แม้เวลานั้นจะไม่ตรงกับเทมเพลตล่าสุดแล้วก็ตาม
     ใช้ร่วมกันทั้งจาก endpoint แบบทีละวัน (apply-template-day) และแบบ bulk (sync-future)
     """
-    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน ──
+    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน (scoped ต่อ shop) ──
+    shop_id = shop.shop_id
     try:
-        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_reset:{date_str}"})
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_reset:{shop_id}:{date_str}"})
     except Exception as _adv_lock_err:
         err_str = str(_adv_lock_err).lower()
         if "hashtext" in err_str or "function" in err_str or "does not exist" in err_str:
@@ -1383,7 +1390,6 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
             raise
 
     # ── Step 1: ลบสล็อตที่ไม่มีการจองออก ──────────────────────────────────
-    shop_id = shop.shop_id
     existing = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).all()
     deleted = 0
     has_booked = False

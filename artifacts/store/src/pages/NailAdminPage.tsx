@@ -1949,7 +1949,7 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
   const [rows, setRows] = useState<any[] | null>(null);
   const [saved, setSaved] = useState(false);
   const [genResult, setGenResult] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["nail-admin-slot-templates", shopKey],
@@ -2062,6 +2062,11 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
 
       {expanded && (
         <>
+          {rows.every(r => !r.is_open) && (
+            <div style={{ background: A.infoBg, border: `1px solid ${A.info}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: A.info }}>
+              💡 ยังไม่ได้เปิดวันใดเลย — ติ๊ก <b>เปิดร้าน</b> ในวันที่ต้องการรับลูกค้า ตั้งเวลา แล้วกด <b>บันทึกเทมเพลต</b> และ <b>สร้างสล็อตล่วงหน้า</b>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
             {rows.map(r => (
               <div key={r.day_of_week} style={{ border: `1.5px solid ${r.is_open ? A.border : A.grayBorder}`, borderRadius: 12, padding: 12, background: r.is_open ? A.pale : A.gray }}>

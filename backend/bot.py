@@ -489,20 +489,44 @@ async def send_nail_slip_notify(
     deposit_total: float,
     payment_proof: str,
     slip_verify_status: Optional[str] = None,
+    # Per-shop credentials (ถ้าส่งมา ใช้แทน global settings)
+    shop_bot_token: Optional[str] = None,
+    shop_admin_group_id: Optional[str] = None,
 ) -> None:
     """
     แจ้งแอดมินกลุ่มทันทีเมื่อลูกค้าส่งสลิปนัดทำเล็บ
     ส่งรูปสลิปพร้อมข้อมูลการจอง
+    รองรับ per-shop bot token/group ผ่าน shop_bot_token + shop_admin_group_id
+    ถ้าไม่ส่งมา fallback ไปใช้ global settings (legacy)
     """
     import html as _html
 
-    if not settings.bot_token or not settings.admin_group_id:
+    # เลือก credentials: per-shop ก่อน, fallback global
+    effective_token = shop_bot_token or settings.bot_token
+    effective_group = shop_admin_group_id or settings.admin_group_id
+
+    if not effective_token or not effective_group:
         logger.warning("Bot not configured — skipping nail slip notification")
         return
 
+    from telegram import Bot
     from telegram.error import TelegramError
-    bot = get_bot()
-    _chat_id, _thread_id = _parse_admin_group()
+
+    # ใช้ per-shop bot instance (ไม่ใช้ singleton get_bot() เพราะ token อาจต่างกัน)
+    bot = Bot(token=effective_token)
+
+    # Parse group_id เพื่อรองรับรูปแบบ "-100xxx_threadid"
+    _raw = effective_group.strip()
+    _thread_id: Optional[int] = None
+    if "_" in _raw:
+        _parts = _raw.split("_", 1)
+        _chat_id: int = int(_parts[0])
+        try:
+            _thread_id = int(_parts[1])
+        except ValueError:
+            pass
+    else:
+        _chat_id = int(_raw)
     extra_kwargs = {"message_thread_id": _thread_id} if _thread_id else {}
 
     # Escape all user-supplied fields to prevent HTML injection in Telegram HTML mode
