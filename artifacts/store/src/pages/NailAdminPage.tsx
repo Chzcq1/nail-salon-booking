@@ -469,8 +469,10 @@ export default function NailAdminPage() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: () => void }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const { data, isLoading, isError, refetch } = useQuery<any>({
-    queryKey: ["nail-admin-dashboard"],
+    queryKey: ["nail-admin-dashboard", shopKey],
     queryFn: () => aFetch("/api/nail/admin/dashboard", token),
     refetchInterval: 60000,
     staleTime: 30000,
@@ -567,6 +569,8 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
 
 // ─── Bookings ─────────────────────────────────────────────────────────────────
 function BookingsTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [filterDate, setFilterDate] = useState(toISO(new Date()));
   const [filterStatus, setFilterStatus] = useState("all");
@@ -583,7 +587,7 @@ function BookingsTab({ token }: { token: string }) {
 
   const url = `/api/nail/admin/bookings?date=${filterDate}` + (filterStatus !== "all" ? `&status=${filterStatus}` : "");
   const { data: bookings = [], isLoading, refetch } = useQuery<any[]>({
-    queryKey: ["nail-admin-bookings", filterDate, filterStatus],
+    queryKey: ["nail-admin-bookings", shopKey, filterDate, filterStatus],
     queryFn: () => fetch(url, { headers: authH(token) }).then(r => r.json()),
     refetchInterval: 30000,
     staleTime: 15000,
@@ -591,7 +595,7 @@ function BookingsTab({ token }: { token: string }) {
   });
 
   const { data: services = [] } = useQuery<any[]>({
-    queryKey: ["nail-admin-services"],
+    queryKey: ["nail-admin-services", shopKey],
     queryFn: () => fetch("/api/nail/admin/services", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
     retry: 1,
@@ -600,7 +604,7 @@ function BookingsTab({ token }: { token: string }) {
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
       fetch(`/api/nail/admin/bookings/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ status }) }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] }),
   });
 
   const [changeServiceResult, setChangeServiceResult] = useState<string | null>(null);
@@ -608,7 +612,7 @@ function BookingsTab({ token }: { token: string }) {
     mutationFn: ({ id, service_id }: { id: number; service_id: number }) =>
       fetch(`/api/nail/admin/bookings/${id}`, { method: "PUT", headers: authH(token), body: JSON.stringify({ service_id }) }).then(r => r.json()),
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] });
       setChangeServiceFor(null);
       if (data?.deposit_diff != null && data.deposit_diff !== 0) {
         setChangeServiceResult(
@@ -625,13 +629,13 @@ function BookingsTab({ token }: { token: string }) {
   const refundMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/bookings/${id}/refund`, { method: "POST", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }); qc.invalidateQueries({ queryKey: ["nail-admin-dashboard"] }); setConfirmRefundId(null); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] }); qc.invalidateQueries({ queryKey: ["nail-admin-dashboard", shopKey] }); setConfirmRefundId(null); },
   });
 
   const walkinMutation = useMutation({
     mutationFn: () =>
       fetch("/api/nail/admin/bookings/walkin", { method: "POST", headers: authH(token), body: JSON.stringify({ customer_name: wName, customer_phone: wPhone, slot_date: filterDate, start_time: wTime }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] }); setShowWalkin(false); setWName(""); setWPhone(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] }); setShowWalkin(false); setWName(""); setWPhone(""); },
   });
 
   const deleteMutation = useMutation({
@@ -648,8 +652,8 @@ function BookingsTab({ token }: { token: string }) {
       return d;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["nail-admin-bookings"] });
-      qc.invalidateQueries({ queryKey: ["nail-admin-dashboard"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-dashboard", shopKey] });
       setDeleteTarget(null); setDeletePasscode(""); setDeleteError("");
     },
     onError: (e: Error) => setDeleteError(e.message),
@@ -961,6 +965,8 @@ function BookingsTab({ token }: { token: string }) {
 
 // ─── Services ─────────────────────────────────────────────────────────────────
 function ServicesTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -971,7 +977,7 @@ function ServicesTab({ token }: { token: string }) {
   const [deposit, setDeposit] = useState("");
 
   const { data: services = [] } = useQuery<any[]>({
-    queryKey: ["nail-admin-services"],
+    queryKey: ["nail-admin-services", shopKey],
     queryFn: () => fetch("/api/nail/admin/services", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
     retry: 1,
@@ -991,7 +997,7 @@ function ServicesTab({ token }: { token: string }) {
       }
       return fetch("/api/nail/admin/services", { method: "POST", headers: authH(token), body }).then(r => r.json());
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services"] }); setShow(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services", shopKey] }); setShow(false); },
   });
 
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
@@ -999,7 +1005,7 @@ function ServicesTab({ token }: { token: string }) {
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/services/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services"] }); setConfirmDelete(null); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-services", shopKey] }); setConfirmDelete(null); },
   });
 
   return (
@@ -1085,13 +1091,15 @@ function ServicesTab({ token }: { token: string }) {
 
 // ─── Staff (ช่าง) ───────────────────────────────────────────────────────────
 function StaffTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [show, setShow] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState("#FF6B9D");
 
   const { data: staff = [], isLoading, isError, refetch } = useQuery<any[]>({
-    queryKey: ["nail-admin-staff"],
+    queryKey: ["nail-admin-staff", shopKey],
     queryFn: () => fetch("/api/nail/admin/staff", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
     retry: 1,
@@ -1102,7 +1110,7 @@ function StaffTab({ token }: { token: string }) {
   const saveMutation = useMutation({
     mutationFn: () =>
       fetch("/api/nail/admin/staff", { method: "POST", headers: authH(token), body: JSON.stringify({ name, color }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }); setShow(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff", shopKey] }); setShow(false); },
   });
 
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
@@ -1110,7 +1118,7 @@ function StaffTab({ token }: { token: string }) {
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/staff/${id}`, { method: "DELETE", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff"] }); setConfirmDelete(null); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-staff", shopKey] }); setConfirmDelete(null); },
   });
 
   if (isError) {
@@ -1213,8 +1221,10 @@ type AccountsView = "topups" | "credit" | "transactions";
 
 /** การ์ดแสดงช่องทางรับเงินของร้าน — ให้แอดมินเห็นว่าลูกค้าจะโอนมาที่ไหน */
 function ShopPaymentInfoCard({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const { data: settings } = useQuery<any>({
-    queryKey: ["nail-admin-settings"],
+    queryKey: ["nail-admin-settings", shopKey],
     queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60_000,
   });
@@ -1279,24 +1289,26 @@ function AccountsTab({ token }: { token: string }) {
 
 // ─── TopupRequestsView ────────────────────────────────────────────────────────
 function TopupRequestsView({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"pending" | "all">("pending");
   const [approveAmounts, setApproveAmounts] = useState<Record<number, string>>({});
 
   const { data: topups = [], isLoading, refetch } = useQuery<any[]>({
-    queryKey: ["nail-admin-topups", statusFilter],
+    queryKey: ["nail-admin-topups", shopKey, statusFilter],
     queryFn: () => fetch(`/api/nail/admin/topup-requests?status=${statusFilter}`, { headers: authH(token) }).then(r => r.json()),
     staleTime: 15000,
   });
   const approveMutation = useMutation({
     mutationFn: ({ id, amount }: { id: number; amount: number }) =>
       fetch(`/api/nail/admin/topup-requests/${id}/approve`, { method: "POST", headers: { ...authH(token), "Content-Type": "application/json" }, body: JSON.stringify({ amount }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups", shopKey] }); },
   });
   const rejectMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`/api/nail/admin/topup-requests/${id}/reject`, { method: "POST", headers: authH(token) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-topups", shopKey] }); },
   });
 
   const ttLabel: Record<string, string> = { slip: "🏦 สลิปโอนเงิน", truemoney: "🧧 TrueMoney" };
@@ -1417,6 +1429,8 @@ function TopupRequestsView({ token }: { token: string }) {
 
 // ─── AddCreditView ────────────────────────────────────────────────────────────
 function AddCreditView({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<any>(null);
@@ -1425,7 +1439,7 @@ function AddCreditView({ token }: { token: string }) {
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: customers = [], isLoading } = useQuery<any[]>({
-    queryKey: ["nail-admin-customers"],
+    queryKey: ["nail-admin-customers", shopKey],
     queryFn: () => fetch("/api/nail/admin/customers", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
   });
@@ -1441,8 +1455,8 @@ function AddCreditView({ token }: { token: string }) {
       setResult({ ok: true, message: `สำเร็จ! ยอดเครดิตใหม่: ฿${Number(data.balance).toFixed(2)}` });
       setAmount(""); setReason("");
       setSelected((s: any) => s ? { ...s, balance: data.balance } : null);
-      qc.invalidateQueries({ queryKey: ["nail-admin-customers"] });
-      qc.invalidateQueries({ queryKey: ["nail-admin-transactions"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-customers", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-transactions", shopKey] });
     },
     onError: (e: any) => setResult({ ok: false, message: e.message || "เกิดข้อผิดพลาด" }),
   });
@@ -1549,8 +1563,10 @@ function AddCreditView({ token }: { token: string }) {
 
 // ─── TransactionsView ─────────────────────────────────────────────────────────
 function TransactionsView({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const { data: txns = [], isLoading, refetch } = useQuery<any[]>({
-    queryKey: ["nail-admin-transactions"],
+    queryKey: ["nail-admin-transactions", shopKey],
     queryFn: () => fetch("/api/nail/admin/transactions?limit=100", { headers: authH(token) }).then(r => r.json()),
     staleTime: 15000,
   });
@@ -1619,6 +1635,8 @@ function TransactionsView({ token }: { token: string }) {
 }
 
 function RenewalTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [months, setMonths] = useState(1);
   const [preview, setPreview] = useState<string | null>(null);
@@ -1626,7 +1644,7 @@ function RenewalTab({ token }: { token: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: status, isLoading, isError, refetch } = useQuery<any>({
-    queryKey: ["nail-admin-rental-status"],
+    queryKey: ["nail-admin-rental-status", shopKey],
     queryFn: () => fetch("/api/nail/admin/rental-status", { headers: authH(token) }).then(r => r.json()),
     staleTime: 30000,
     retry: 1,
@@ -1634,7 +1652,7 @@ function RenewalTab({ token }: { token: string }) {
 
   // ราคาจริงของร้านนี้ (super-admin อาจตั้งราคาพิเศษไว้) — fallback เป็นราคากลางถ้ายังโหลดไม่เสร็จ
   const { data: plans = RENEWAL_PLANS } = useQuery<any[]>({
-    queryKey: ["nail-admin-renewal-plans"],
+    queryKey: ["nail-admin-renewal-plans", shopKey],
     queryFn: () => fetch("/api/nail/admin/renewal-plans", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
     retry: 1,
@@ -1642,7 +1660,7 @@ function RenewalTab({ token }: { token: string }) {
 
   // ข้อมูลบัญชีรับเงินของ super-admin (ไปโอนที่ไหน)
   const { data: saPayment } = useQuery<any>({
-    queryKey: ["nail-admin-sa-payment-info"],
+    queryKey: ["nail-admin-sa-payment-info", shopKey],
     queryFn: () => fetch("/api/nail/admin/superadmin-payment-info", { headers: authH(token) }).then(r => r.json()),
     staleTime: 120000,
     retry: 1,
@@ -1677,7 +1695,7 @@ function RenewalTab({ token }: { token: string }) {
       return data;
     },
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ["nail-admin-rental-status"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-rental-status", shopKey] });
       qc.invalidateQueries({ queryKey: ["shop-gate-settings"] });
       setPreview(null);
       setVoucher("");
@@ -1925,6 +1943,8 @@ function RenewalTab({ token }: { token: string }) {
 const DAY_NAMES_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
 
 function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenerated: () => void }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [rows, setRows] = useState<any[] | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1932,7 +1952,7 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
   const [expanded, setExpanded] = useState(false);
 
   const { data, isLoading, isError } = useQuery<any[]>({
-    queryKey: ["nail-admin-slot-templates"],
+    queryKey: ["nail-admin-slot-templates", shopKey],
     queryFn: () =>
       fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1960,7 +1980,7 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
     onSuccess: () => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates", shopKey] });
     },
     onError: (e: any) => alert(`บันทึกเทมเพลตไม่สำเร็จ: ${e.message}`),
   });
@@ -2121,6 +2141,8 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
 
 // ─── Schedule (Slots + Closed Days) ──────────────────────────────────────────
 function ScheduleTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [selDate, setSelDate] = useState(toISO(new Date()));
   const [showAdd, setShowAdd] = useState(false);
@@ -2131,7 +2153,7 @@ function ScheduleTab({ token }: { token: string }) {
 
   // Load settings for closed_dates — use useEffect to handle cached data correctly
   const { data: settingsData } = useQuery<any>({
-    queryKey: ["nail-admin-settings"],
+    queryKey: ["nail-admin-settings", shopKey],
     queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
@@ -2147,7 +2169,7 @@ function ScheduleTab({ token }: { token: string }) {
   }, [settingsData]);
 
   const { data: slots = [], isLoading } = useQuery<any[]>({
-    queryKey: ["nail-admin-slots", selDate],
+    queryKey: ["nail-admin-slots", shopKey, selDate],
     queryFn: () =>
       fetch(`/api/nail/admin/slots?date=${selDate}`, { headers: authH(token) }).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2159,7 +2181,7 @@ function ScheduleTab({ token }: { token: string }) {
 
   // ใช้เช็คว่าสล็อตวันนี้ตรงกับเทมเพลตล่าสุดหรือไม่ (แจ้งเตือนถ้าไม่ตรง เพื่อลดความงงว่า "ทำไมเวลาไม่ตรง")
   const { data: templates = [] } = useQuery<any[]>({
-    queryKey: ["nail-admin-slot-templates"],
+    queryKey: ["nail-admin-slot-templates", shopKey],
     queryFn: () =>
       fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2188,7 +2210,7 @@ function ScheduleTab({ token }: { token: string }) {
       if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
       return data;
     },
-    onSuccess: () => { setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 2000); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
+    onSuccess: () => { setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 2000); qc.invalidateQueries({ queryKey: ["nail-admin-settings", shopKey] }); },
     onError: (e: any) => alert(`บันทึกวันปิดร้านไม่สำเร็จ: ${e.message}`),
   });
 
@@ -2199,7 +2221,7 @@ function ScheduleTab({ token }: { token: string }) {
       if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
       return data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }); setShowAdd(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] }); setShowAdd(false); },
     onError: (e: any) => alert(`เพิ่ม slot ไม่สำเร็จ: ${e.message}`),
   });
 
@@ -2212,18 +2234,18 @@ function ScheduleTab({ token }: { token: string }) {
     },
     // Optimistic update — อัปเดต UI ทันทีโดยไม่รอ server
     onMutate: async ({ id, is_available }) => {
-      await qc.cancelQueries({ queryKey: ["nail-admin-slots", selDate] });
-      const prev = qc.getQueryData<any[]>(["nail-admin-slots", selDate]);
-      qc.setQueryData(["nail-admin-slots", selDate], (old: any[] = []) =>
+      await qc.cancelQueries({ queryKey: ["nail-admin-slots", shopKey, selDate] });
+      const prev = qc.getQueryData<any[]>(["nail-admin-slots", shopKey, selDate]);
+      qc.setQueryData(["nail-admin-slots", shopKey, selDate], (old: any[] = []) =>
         old.map(sl => sl.id === id ? { ...sl, is_available } : sl)
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
       // rollback ถ้า server ตอบว่า error
-      if (ctx?.prev) qc.setQueryData(["nail-admin-slots", selDate], ctx.prev);
+      if (ctx?.prev) qc.setQueryData(["nail-admin-slots", shopKey, selDate], ctx.prev);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots", selDate] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey, selDate] }),
   });
 
   const [deleteSlotId, setDeleteSlotId] = useState<number | null>(null);
@@ -2236,7 +2258,7 @@ function ScheduleTab({ token }: { token: string }) {
       if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
       return data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots"] }); setDeleteSlotId(null); setSlotDeleteError(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] }); setDeleteSlotId(null); setSlotDeleteError(""); },
     onError: (e: any) => setSlotDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
@@ -2252,7 +2274,7 @@ function ScheduleTab({ token }: { token: string }) {
       return data;
     },
     onSuccess: (d: any) => {
-      qc.invalidateQueries({ queryKey: ["nail-admin-slots"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
       if (d.generated_count === 0) alert("ทุกวันในช่วงนี้มีสล็อตอยู่แล้ว ไม่มีการสร้างใหม่");
     },
     onError: (e: any) => alert(`เกิดข้อผิดพลาด: ${e.message}`),
@@ -2270,7 +2292,7 @@ function ScheduleTab({ token }: { token: string }) {
       return data;
     },
     onSuccess: (d: any) => {
-      qc.invalidateQueries({ queryKey: ["nail-admin-slots"] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
       const msg = d.has_booked_slots_preserved
         ? `รีเซ็ตแล้ว (สร้าง ${d.created} สล็อต — สล็อตที่มีการจองถูกเก็บไว้)`
         : `รีเซ็ตแล้ว (สร้าง ${d.created} สล็อต)`;
@@ -2329,7 +2351,7 @@ function ScheduleTab({ token }: { token: string }) {
       </div>
 
       {/* Weekly recurring slot template */}
-      <WeeklyTemplateSection token={token} onGenerated={() => qc.invalidateQueries({ queryKey: ["nail-admin-slots"] })} />
+      <WeeklyTemplateSection token={token} onGenerated={() => qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] })} />
 
       {/* Slots Section */}
       <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
@@ -2490,6 +2512,8 @@ function ScheduleTab({ token }: { token: string }) {
 
 // ─── Gallery ──────────────────────────────────────────────────────────────────
 function GalleryTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [urlInput, setUrlInput] = useState("");
   const [caption, setCaption] = useState("");
@@ -2498,14 +2522,14 @@ function GalleryTab({ token }: { token: string }) {
   const [galleryDeleteError, setGalleryDeleteError] = useState("");
 
   const { data: items = [] } = useQuery<any[]>({
-    queryKey: ["nail-admin-gallery"],
+    queryKey: ["nail-admin-gallery", shopKey],
     queryFn: () => fetch("/api/nail/admin/gallery", { headers: authH(token) }).then(r => r.json()),
   });
 
   const addMutation = useMutation({
     mutationFn: (image_url: string) =>
       fetch("/api/nail/admin/gallery", { method: "POST", headers: authH(token), body: JSON.stringify({ image_url, caption }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setUrlInput(""); setCaption(""); setUrlError(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery", shopKey] }); setUrlInput(""); setCaption(""); setUrlError(""); },
   });
 
   const deleteMutation = useMutation({
@@ -2515,7 +2539,7 @@ function GalleryTab({ token }: { token: string }) {
       if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
       return data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setDeleteGalleryId(null); setGalleryDeleteError(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery", shopKey] }); setDeleteGalleryId(null); setGalleryDeleteError(""); },
     onError: (e: any) => setGalleryDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
@@ -2604,6 +2628,8 @@ function GalleryTab({ token }: { token: string }) {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 function SettingsTab({ token }: { token: string }) {
+  const shopKey = useShopSlug() ?? "default";
+
   const qc = useQueryClient();
   const [form, setForm] = useState<any>(null);
   const [saved, setSaved] = useState(false);
@@ -2611,7 +2637,7 @@ function SettingsTab({ token }: { token: string }) {
   // IMPORTANT: use useEffect to handle cached data — the queryFn may not re-run
   // when data is already in cache from ScheduleTab (same queryKey)
   const { data: settingsData, isLoading: settingsLoading, isError: settingsError } = useQuery<any>({
-    queryKey: ["nail-admin-settings"],
+    queryKey: ["nail-admin-settings", shopKey],
     queryFn: () => fetch("/api/nail/admin/settings", { headers: authH(token) }).then(r => r.json()),
     staleTime: 60000,
     retry: 1,
@@ -2634,12 +2660,12 @@ function SettingsTab({ token }: { token: string }) {
       if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
       return data;
     },
-    onSuccess: () => { setSaved(true); setSaveError(""); setTimeout(() => setSaved(false), 2500); qc.invalidateQueries({ queryKey: ["nail-admin-settings"] }); },
+    onSuccess: () => { setSaved(true); setSaveError(""); setTimeout(() => setSaved(false), 2500); qc.invalidateQueries({ queryKey: ["nail-admin-settings", shopKey] }); },
     onError: (e: any) => setSaveError(e.message || "บันทึกไม่สำเร็จ กรุณาลองใหม่"),
   });
 
   if (settingsLoading && !settingsData) return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>;
-  if (settingsError && !form) return <div style={{ textAlign: "center", padding: 40, color: A.error, fontSize: 14 }}>โหลดการตั้งค่าไม่สำเร็จ กรุณา <button onClick={() => qc.invalidateQueries({ queryKey: ["nail-admin-settings"] })} style={{ background: "none", border: "none", cursor: "pointer", color: A.primary, textDecoration: "underline", fontFamily: "inherit" }}>ลองใหม่</button></div>;
+  if (settingsError && !form) return <div style={{ textAlign: "center", padding: 40, color: A.error, fontSize: 14 }}>โหลดการตั้งค่าไม่สำเร็จ กรุณา <button onClick={() => qc.invalidateQueries({ queryKey: ["nail-admin-settings", shopKey] })} style={{ background: "none", border: "none", cursor: "pointer", color: A.primary, textDecoration: "underline", fontFamily: "inherit" }}>ลองใหม่</button></div>;
   if (!form) return <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>;
 
   const F = (key: string, label: string, type = "text", ph = "") => (
