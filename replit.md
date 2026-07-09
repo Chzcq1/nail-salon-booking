@@ -183,4 +183,15 @@ artifacts/store/src/
 - Imported from GitHub into Replit for code editing. Production runs on Render; Replit is the dev/edit environment only.
 - All workflows (backend + frontend) require secrets that live on Render — they will fail locally unless a `DATABASE_URL` (Neon.tech) and other env vars are configured in Replit Secrets.
 - User intent: make specific code changes. No local dev server setup was requested at import time.
-- To enable local dev preview, see proposed task: "Get the dev server running so you can preview changes in Replit".
+- To enable local dev preview, see proposed task: "Connect Replit to the live database so changes can be tested end-to-end".
+
+### First-run dependency install (completed 2026-07-09)
+
+```bash
+pip install -r requirements.txt   # installs FastAPI, SQLAlchemy, uvicorn, etc.
+pnpm install                       # installs all JS workspace deps (store, mockup-sandbox, api-server)
+```
+
+After install, two workflows are active:
+- `Backend API` (port 8000) — FastAPI/uvicorn; starts but DB calls fail without `DATABASE_URL`
+- `artifacts/store: web` (port 5000) — Vite dev server for the React storefront
