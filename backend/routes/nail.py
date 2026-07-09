@@ -2410,7 +2410,23 @@ def superadmin_rename_shop(
 
 
 # Sentinel email prefix ที่ใช้ใน EmailOTPSession สำหรับ delete-shop OTPs
-_DELETE_OTP_EMAIL_PREFIX = "superadmin:delete-shop:"
+_DELETE_OTP_SENTINEL_PREFIX = "superadmin:delete-shop:"
+
+
+async def _send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
+    """ส่งข้อความผ่าน Telegram Bot API คืน True ถ้าสำเร็จ"""
+    try:
+        import httpx
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+            if resp.status_code == 200:
+                return True
+            logging.error(f"[superadmin] Telegram sendMessage failed: {resp.status_code} {resp.text}")
+            return False
+    except Exception as e:
+        logging.error(f"[superadmin] Telegram sendMessage error: {e}")
+        return False
 
 
 @router.post("/superadmin/shops/{shop_id}/delete-otp")
@@ -2421,7 +2437,7 @@ async def superadmin_request_delete_otp(
 ):
     """ขอ OTP 6 หลักเพื่อยืนยันการลบร้าน
     - OTP เก็บใน DB (email_otp_sessions) จึงทำงานถูกต้องในทุก deployment scenario
-    - ถ้าตั้ง NAIL_SUPER_ADMIN_EMAIL → ส่ง email; ถ้าไม่ตั้ง → log ที่ server (ตรวจสอบได้จาก Render logs)
+    - ส่ง OTP ผ่าน Telegram Bot ไปยัง ADMIN_GROUP_ID; ถ้าไม่ตั้งค่า → log ที่ server
     """
     _check_superadmin(x_super_admin_key)
     shop_row = db.query(Shop).filter_by(id=shop_id).first()
@@ -2430,7 +2446,7 @@ async def superadmin_request_delete_otp(
     if shop_id == 1:
         raise HTTPException(status_code=400, detail="ไม่สามารถลบร้านหลัก (id=1) ได้")
 
-    sentinel_email = f"{_DELETE_OTP_EMAIL_PREFIX}{shop_id}"
+    sentinel_email = f"{_DELETE_OTP_SENTINEL_PREFIX}{shop_id}"
     now = _now()
 
     # ลบ OTP เก่าของร้านนี้ก่อน (ป้องกัน spam)
@@ -2451,28 +2467,28 @@ async def superadmin_request_delete_otp(
     db.commit()
 
     cfg = get_settings()
-    email_sent = False
-    if cfg.nail_super_admin_email:
-        try:
-            from backend import email_service
-            await email_service.send_otp_email(cfg.nail_super_admin_email, otp_code)
-            email_sent = True
-        except Exception as e:
-            logging.error(f"[superadmin] delete OTP email failed: {e}")
+    telegram_sent = False
+    if cfg.bot_token and cfg.admin_group_id:
+        message = (
+            f"🗑️ <b>Super Admin — ยืนยันลบร้าน</b>\n\n"
+            f"ร้าน: <b>{shop_row.name}</b> (slug: <code>{shop_row.slug}</code>)\n"
+            f"OTP: <code>{otp_code}</code>\n\n"
+            f"⚠️ OTP มีอายุ 5 นาที ห้ามแชร์กับผู้อื่น"
+        )
+        telegram_sent = await _send_telegram_message(cfg.bot_token, cfg.admin_group_id, message)
 
-    if not email_sent:
-        # Log OTP ฝั่ง server เพื่อให้ดูได้จาก Render logs (ไม่คืนค่าใน response)
+    if not telegram_sent:
+        # Fallback: log ฝั่ง server ให้ดูได้จาก Render logs
         logging.warning(
             f"[superadmin] delete-shop OTP for shop_id={shop_id} slug={shop_row.slug!r}: {otp_code} "
-            f"(email not configured — check server logs)"
+            f"(Telegram not configured or failed — check server logs)"
         )
 
     return {
         "ok": True,
-        "email_sent": email_sent,
-        "email": cfg.nail_super_admin_email if email_sent else None,
+        "telegram_sent": telegram_sent,
         "expires_in_seconds": 300,
-        # ไม่คืน OTP ใน response ไม่ว่ากรณีใด → ดูจาก email หรือ server log
+        # ไม่คืน OTP ใน response ไม่ว่ากรณีใด → ดูจาก Telegram หรือ server log
     }
 
 
@@ -2501,7 +2517,7 @@ def superadmin_delete_shop(
         raise HTTPException(status_code=400, detail="slug ไม่ตรงกับร้านที่ต้องการลบ")
 
     # ตรวจสอบ OTP จาก DB
-    sentinel_email = f"{_DELETE_OTP_EMAIL_PREFIX}{shop_id}"
+    sentinel_email = f"{_DELETE_OTP_SENTINEL_PREFIX}{shop_id}"
     now = _now()
     otp_session = (
         db.query(EmailOTPSession)

@@ -463,7 +463,7 @@ function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: str
   const [confirmSlug, setConfirmSlug] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [msg, setMsg] = useState("");
-  const [emailSent, setEmailSent] = useState<string | null>(null);
+  const [telegramSent, setTelegramSent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const requestOtp = async () => {
@@ -471,7 +471,7 @@ function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: str
     setLoading(true); setMsg("");
     try {
       const d = await saFetch(`${API}/superadmin/shops/${shop.id}/delete-otp`, sKey, { method: "POST" });
-      setEmailSent(d.email ?? null);
+      setTelegramSent(d.telegram_sent ?? false);
       setStep("otp");
     } catch (e: any) { setMsg(e.message); }
     finally { setLoading(false); }
@@ -527,9 +527,9 @@ function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: str
         {step === "otp" && (
           <>
             <div style={{ background: S.card, borderRadius: 10, padding: 12, marginBottom: 16 }}>
-              {emailSent
-                ? <p style={{ color: S.success, fontSize: 13, margin: 0 }}>✓ ส่ง OTP ไปที่ <strong>{emailSent}</strong> แล้ว</p>
-                : <p style={{ color: S.warning, fontSize: 13, margin: 0 }}>ยังไม่ได้ตั้ง NAIL_SUPER_ADMIN_EMAIL — ดู OTP ได้จาก Render server logs</p>
+              {telegramSent
+                ? <p style={{ color: S.success, fontSize: 13, margin: 0 }}>✅ ส่ง OTP ไปที่ <strong>Telegram Group</strong> แล้ว — ตรวจสอบได้เลย</p>
+                : <p style={{ color: S.warning, fontSize: 13, margin: 0 }}>⚠️ ยังไม่ได้ตั้งค่า BOT_TOKEN / ADMIN_GROUP_ID — ดู OTP ได้จาก Render server logs</p>
               }
             </div>
             <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>กรอก OTP 6 หลัก</label>
