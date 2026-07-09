@@ -1820,15 +1820,55 @@ def _effective_renewal_plans(shop: "NailShopSettings") -> dict:
     }
 
 
-_SUPERADMIN_FAILS: list = []   # [timestamp, ...] — in-memory rate limiter สำหรับ key ผิด (global, ไม่แยกตาม IP)
+_SUPERADMIN_FAILS: list = []   # [timestamp, ...] — in-memory rate limiter สำหรับ session token ผิด/หมดอายุ (global, ไม่แยกตาม IP)
 _SUPERADMIN_FAIL_WINDOW = 300  # 5 นาที
 _SUPERADMIN_FAIL_LIMIT = 10
 
+# Rate limiter แยกต่างหากสำหรับ login endpoints (PIN/OTP ผิด) — ไม่ปนกับ
+# ทราฟฟิกของ session token ที่หมดอายุ/ผิดบนหน้าแอดมิน ป้องกันไม่ให้ session
+# เก่าที่ยังเปิดหน้าค้างอยู่ทำให้เจ้าของระบบ login ใหม่ไม่ได้ (self-lockout)
+_SUPERADMIN_LOGIN_FAILS: list = []
+_SUPERADMIN_LOGIN_FAIL_WINDOW = 300  # 5 นาที
+_SUPERADMIN_LOGIN_FAIL_LIMIT = 10
+
+
+def _check_login_rate_limit():
+    now_ts = time.time()
+    while _SUPERADMIN_LOGIN_FAILS and now_ts - _SUPERADMIN_LOGIN_FAILS[0] > _SUPERADMIN_LOGIN_FAIL_WINDOW:
+        _SUPERADMIN_LOGIN_FAILS.pop(0)
+    if len(_SUPERADMIN_LOGIN_FAILS) >= _SUPERADMIN_LOGIN_FAIL_LIMIT:
+        logging.warning(f"[superadmin] login rate-limited: {len(_SUPERADMIN_LOGIN_FAILS)} failed attempts in last {_SUPERADMIN_LOGIN_FAIL_WINDOW}s")
+        raise HTTPException(status_code=429, detail="พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอสักครู่")
+    return now_ts
+
+# ── Super-Admin session tokens (issued only after PIN + Telegram OTP) ───────
+# token -> expiry timestamp (epoch seconds). In-memory only: on process restart
+# all sessions are invalidated and the owner must log in again with PIN+OTP.
+_SUPERADMIN_SESSIONS: dict = {}
+_SUPERADMIN_SESSION_TTL = 12 * 3600  # 12 ชั่วโมง
+_SUPERADMIN_LOGIN_OTP_SENTINEL = "superadmin:login"
+
+
+def _cleanup_superadmin_sessions():
+    now_ts = time.time()
+    expired = [t for t, exp in _SUPERADMIN_SESSIONS.items() if exp <= now_ts]
+    for t in expired:
+        _SUPERADMIN_SESSIONS.pop(t, None)
+
+
+def _issue_superadmin_session() -> str:
+    _cleanup_superadmin_sessions()
+    token = secrets.token_urlsafe(32)
+    _SUPERADMIN_SESSIONS[token] = time.time() + _SUPERADMIN_SESSION_TTL
+    return token
+
 
 def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
+    """ตรวจสอบ session token ที่ออกให้หลังผ่าน PIN + Telegram OTP เท่านั้น
+    (ไม่ยอมรับ NAIL_SUPER_ADMIN_KEY ดิบๆ อีกต่อไป — ต้อง login ผ่าน /superadmin/login/* ก่อน)
+    """
     cfg = get_settings()
-    key = cfg.nail_super_admin_key
-    if not key:
+    if not cfg.nail_super_admin_key:
         raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
 
     now_ts = time.time()
@@ -1838,10 +1878,118 @@ def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
         logging.warning(f"[superadmin] rate-limited: {len(_SUPERADMIN_FAILS)} failed attempts in last {_SUPERADMIN_FAIL_WINDOW}s")
         raise HTTPException(status_code=429, detail="พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอสักครู่")
 
-    if not secrets.compare_digest(x_super_admin_key or "", key):
+    _cleanup_superadmin_sessions()
+    token = x_super_admin_key or ""
+    exp = _SUPERADMIN_SESSIONS.get(token)
+    if not token or exp is None:
         _SUPERADMIN_FAILS.append(now_ts)
-        logging.warning("[superadmin] failed key attempt")
-        raise HTTPException(status_code=403, detail="Key ไม่ถูกต้อง")
+        logging.warning("[superadmin] invalid or expired session token")
+        raise HTTPException(status_code=403, detail="เซสชันไม่ถูกต้องหรือหมดอายุ กรุณาเข้าสู่ระบบใหม่")
+
+
+class SuperAdminRequestOtpBody(BaseModel):
+    pin: str
+
+
+class SuperAdminVerifyOtpBody(BaseModel):
+    pin: str
+    otp_code: str
+
+
+@router.post("/superadmin/login/request-otp")
+async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Session = Depends(get_db)):
+    """ขั้นตอนที่ 1: ตรวจ PIN แล้วส่ง OTP 6 หลักไปยังห้อง Telegram ของแอดมิน (ADMIN_GROUP_ID ผ่าน BOT_TOKEN)"""
+    cfg = get_settings()
+    key = cfg.nail_super_admin_key
+    if not key:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
+
+    now_ts = _check_login_rate_limit()
+
+    if not secrets.compare_digest(body.pin or "", key):
+        _SUPERADMIN_LOGIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] failed PIN attempt")
+        raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
+
+    if not cfg.bot_token or not cfg.admin_group_id:
+        raise HTTPException(
+            status_code=503,
+            detail="ยังไม่ได้ตั้งค่า BOT_TOKEN หรือ ADMIN_GROUP_ID สำหรับส่ง OTP",
+        )
+
+    # ลบ OTP เก่าของ login flow ก่อน (ป้องกัน spam / OTP ค้าง)
+    db.query(EmailOTPSession).filter(EmailOTPSession.email == _SUPERADMIN_LOGIN_OTP_SENTINEL).delete()
+
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    session = EmailOTPSession(
+        session_token=secrets.token_urlsafe(32),
+        email=_SUPERADMIN_LOGIN_OTP_SENTINEL,
+        otp_code=otp_code,
+        is_used=False,
+        expires_at=_now() + timedelta(minutes=5),
+    )
+    db.add(session)
+    db.commit()
+
+    message = (
+        "🔐 <b>Super Admin — รหัสยืนยันเข้าสู่ระบบ</b>\n\n"
+        f"OTP: <code>{otp_code}</code>\n\n"
+        "⚠️ OTP มีอายุ 5 นาที ห้ามแชร์กับผู้อื่น"
+    )
+    telegram_sent = await _send_telegram_message(cfg.bot_token, cfg.admin_group_id, message)
+    if not telegram_sent:
+        # ไม่ log ค่า OTP จริง — ป้องกัน OTP รั่วไหลผ่าน server log ถ้า Telegram ส่งไม่สำเร็จ
+        logging.warning("[superadmin] login OTP generated but Telegram send failed — check BOT_TOKEN/ADMIN_GROUP_ID")
+        raise HTTPException(status_code=502, detail="ส่ง OTP ผ่าน Telegram ไม่สำเร็จ กรุณาลองใหม่")
+
+    return {"ok": True, "telegram_sent": True, "expires_in_seconds": 300}
+
+
+@router.post("/superadmin/login/verify-otp")
+def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Depends(get_db)):
+    """ขั้นตอนที่ 2: ตรวจ PIN + OTP ที่ส่งไป Telegram แล้วออก session token ให้ใช้แทน PIN ในทุก request ถัดไป"""
+    cfg = get_settings()
+    key = cfg.nail_super_admin_key
+    if not key:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
+
+    now_ts = _check_login_rate_limit()
+
+    if not secrets.compare_digest(body.pin or "", key):
+        _SUPERADMIN_LOGIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] failed PIN attempt (verify-otp)")
+        raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
+
+    now = _now()
+    otp_session = (
+        db.query(EmailOTPSession)
+        .filter(
+            EmailOTPSession.email == _SUPERADMIN_LOGIN_OTP_SENTINEL,
+            EmailOTPSession.otp_code == (body.otp_code or "").strip(),
+            EmailOTPSession.is_used == False,  # noqa: E712
+            EmailOTPSession.expires_at > now,
+        )
+        .first()
+    )
+    if not otp_session:
+        _SUPERADMIN_LOGIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] invalid or expired OTP attempt")
+        raise HTTPException(status_code=403, detail="OTP ไม่ถูกต้องหรือหมดอายุ")
+
+    otp_session.is_used = True
+    db.commit()
+
+    token = _issue_superadmin_session()
+    logging.info("[superadmin] login success — session issued")
+    return {"ok": True, "token": token, "expires_in_seconds": _SUPERADMIN_SESSION_TTL}
+
+
+@router.post("/superadmin/logout")
+def superadmin_logout(x_super_admin_key: Optional[str] = Header(None)):
+    """ล้าง session token ฝั่ง server ทันที (แม้ token ยังไม่หมดอายุ)"""
+    if x_super_admin_key:
+        _SUPERADMIN_SESSIONS.pop(x_super_admin_key, None)
+    return {"ok": True}
 
 
 @router.get("/admin/rental-status")

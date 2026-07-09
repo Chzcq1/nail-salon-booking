@@ -3,9 +3,10 @@
  * Route: /superadmin
  *
  * วิธีใช้:
- * 1. ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน Render → Environment Variables
- * 2. เข้า /superadmin แล้วกรอก key เพื่อล็อกอิน
- * 3. อนุมัติ / ปฏิเสธคำขอต่ออายุ หรือตั้งวันหมดอายุตรงๆ ได้เลย
+ * 1. ตั้งค่า NAIL_SUPER_ADMIN_KEY, BOT_TOKEN, ADMIN_GROUP_ID ใน Render → Environment Variables
+ * 2. เข้า /superadmin แล้วกรอก PIN → ระบบส่ง OTP 6 หลักไปยังห้อง Telegram ของแอดมิน (ADMIN_GROUP_ID)
+ * 3. กรอก OTP เพื่อยืนยันตัวตน (2FA) แล้วเข้าสู่ระบบด้วย session token ชั่วคราว (อายุ 12 ชม.)
+ * 4. อนุมัติ / ปฏิเสธคำขอต่ออายุ หรือตั้งวันหมดอายุตรงๆ ได้เลย
  */
 
 import React, { useState, useEffect } from "react";
@@ -85,23 +86,57 @@ function fmtDate(iso?: string | null) {
   });
 }
 
-// ── Auth Screen ───────────────────────────────────────────────────────────────
-function AuthScreen({ onAuth }: { onAuth: (k: string) => void }) {
-  const [key, setKey] = useState("");
+// ── Auth Screen (PIN → Telegram OTP two-factor login) ───────────────────────
+function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
+  const [step, setStep] = useState<"pin" | "otp">("pin");
+  const [pin, setPin] = useState("");
+  const [otp, setOtp] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const tryAuth = async (e: React.FormEvent) => {
+  const requestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!key.trim()) return;
+    if (!pin.trim()) return;
+    setLoading(true); setErr(""); setInfo("");
+    try {
+      await fetch(`${API}/superadmin/login/request-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      }).then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.detail ?? `HTTP ${r.status}`);
+        return d;
+      });
+      setInfo("ส่ง OTP ไปยัง Telegram แล้ว กรุณาตรวจสอบห้องแอดมิน");
+      setStep("otp");
+    } catch (e: any) {
+      setErr(e.message ?? "PIN ไม่ถูกต้อง");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp.trim()) return;
     setLoading(true); setErr("");
     try {
-      await saFetch(`${API}/superadmin/status`, key);
-      localStorage.setItem(LOCAL_KEY, key);
-      onAuth(key);
+      const d = await fetch(`${API}/superadmin/login/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, otp_code: otp }),
+      }).then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      });
+      localStorage.setItem(LOCAL_KEY, d.token);
+      onAuth(d.token);
     } catch (e: any) {
-      setErr(e.message ?? "Key ไม่ถูกต้อง");
+      setErr(e.message ?? "OTP ไม่ถูกต้อง");
     } finally {
       setLoading(false);
     }
@@ -120,35 +155,69 @@ function AuthScreen({ onAuth }: { onAuth: (k: string) => void }) {
             <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>ระบบเจ้าของ — Nail Booking</p>
           </div>
         </div>
-        <form onSubmit={tryAuth}>
-          <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>NAIL_SUPER_ADMIN_KEY</label>
-          <div style={{ position: "relative", marginBottom: 12 }}>
+
+        {step === "pin" ? (
+          <form onSubmit={requestOtp}>
+            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส PIN</label>
+            <div style={{ position: "relative", marginBottom: 12 }}>
+              <input
+                type={show ? "text" : "password"}
+                name="superadmin-pin"
+                autoComplete="current-password"
+                value={pin}
+                onChange={e => setPin(e.target.value)}
+                placeholder="กรอกรหัส PIN"
+                autoFocus
+                style={{
+                  width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
+                  borderRadius: 10, padding: "12px 44px 12px 14px", fontSize: 14, color: S.text,
+                  fontFamily: "inherit", boxSizing: "border-box", outline: "none",
+                }}
+              />
+              <button type="button" onClick={() => setShow(!show)}
+                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.muted, padding: 2 }}>
+                {show ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
+            <button type="submit" disabled={!pin || loading}
+              style={{ width: "100%", background: loading || !pin ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: !pin || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !pin ? 0.5 : 1 }}>
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+              {loading ? "กำลังส่ง OTP…" : "ส่ง OTP ไปยัง Telegram"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={verifyOtp}>
+            {info && <p style={{ color: S.success, fontSize: 13, marginBottom: 12 }}>{info}</p>}
+            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส OTP (6 หลัก จาก Telegram)</label>
             <input
-              type={show ? "text" : "password"}
-              name="superadmin-key"
-              autoComplete="current-password"
-              value={key}
-              onChange={e => setKey(e.target.value)}
-              placeholder="กรอก Super Admin Key"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              name="superadmin-otp"
+              autoComplete="one-time-code"
+              value={otp}
+              onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
               autoFocus
               style={{
                 width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
-                borderRadius: 10, padding: "12px 44px 12px 14px", fontSize: 14, color: S.text,
-                fontFamily: "inherit", boxSizing: "border-box", outline: "none",
+                borderRadius: 10, padding: "12px 14px", fontSize: 20, letterSpacing: 6, textAlign: "center", color: S.text,
+                fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 12,
               }}
             />
-            <button type="button" onClick={() => setShow(!show)}
-              style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.muted, padding: 2 }}>
-              {show ? <EyeOff size={16} /> : <Eye size={16} />}
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
+            <button type="submit" disabled={otp.length !== 6 || loading}
+              style={{ width: "100%", background: loading || otp.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: otp.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: otp.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+              {loading ? "กำลังตรวจสอบ…" : "ยืนยันเข้าสู่ระบบ"}
             </button>
-          </div>
-          {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-          <button type="submit" disabled={!key || loading}
-            style={{ width: "100%", background: loading || !key ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: !key || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !key ? 0.5 : 1 }}>
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
-            {loading ? "กำลังตรวจสอบ…" : "เข้าสู่ระบบ"}
-          </button>
-        </form>
+            <button type="button" onClick={() => { setStep("pin"); setOtp(""); setErr(""); setInfo(""); }}
+              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              ← กลับไปกรอก PIN ใหม่
+            </button>
+          </form>
+        )}
       </motion.div>
     </div>
   );
@@ -1180,7 +1249,7 @@ export default function NailSuperAdminPage() {
     return (
       <div style={{ minHeight: "100vh", background: S.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: S.text }}>
         <AlertTriangle size={48} color={S.error} />
-        <p style={{ fontSize: 16 }}>Key ไม่ถูกต้องหรือหมดอายุ</p>
+        <p style={{ fontSize: 16 }}>เซสชันไม่ถูกต้องหรือหมดอายุ</p>
         <button onClick={() => { localStorage.removeItem(LOCAL_KEY); setSKey(null); }}
           style={{ background: S.accent, border: "none", borderRadius: 10, padding: "10px 24px", color: "#fff", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
           ล็อกอินใหม่
@@ -1207,7 +1276,7 @@ export default function NailSuperAdminPage() {
             {pendingCount} รอดำเนินการ
           </span>
         )}
-        <button onClick={() => { if (confirm("ออกจากระบบ?")) { localStorage.removeItem(LOCAL_KEY); setSKey(null); } }}
+        <button onClick={() => { if (confirm("ออกจากระบบ?")) { fetch(`${API}/superadmin/logout`, { method: "POST", headers: { "X-Super-Admin-Key": sKey!, "Content-Type": "application/json" } }).catch(() => {}); localStorage.removeItem(LOCAL_KEY); setSKey(null); } }}
           style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", color: S.muted }}>
           <LogOut size={16} />
         </button>
