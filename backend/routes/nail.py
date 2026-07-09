@@ -196,22 +196,9 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
         except Exception:
             pass
 
-    # ป้องกัน 2 request สร้างสล็อตวันเดียวกันพร้อมกันจนได้สล็อตซ้ำ (advisory lock ทั้ง transaction)
-    # หมายเหตุ: บาง serverless PostgreSQL (เช่น Neon.tech) อาจไม่รองรับ hashtext → fallback gracefully
-    try:
-        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{shop_id}:{date_str}"})
-    except Exception as _adv_lock_err:
-        # hashtext ไม่ถูกรองรับบน serverless PostgreSQL บางตัว (เช่น Neon)
-        # rollback เฉพาะ statement นั้น แล้วทำงานต่อโดยไม่มี lock
-        err_str = str(_adv_lock_err).lower()
-        if "hashtext" in err_str or "function" in err_str or "does not exist" in err_str:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-        else:
-            raise  # re-raise ถ้าเป็น error อื่น เช่น connection failed
-
+    # ตรวจสอบก่อนว่ามีสล็อตของวันนี้อยู่แล้วหรือไม่ — ถ้ามีแล้วข้ามไป (ไม่ทับสล็อตที่แอดมินแก้ไขเอง)
+    # ไม่ใช้ advisory lock เพราะ Neon serverless pooler อาจ reject hashtext() ทำให้เกิด 500
+    # สำหรับ nail salon admin คนเดียว race condition นี้ไม่มีนัยสำคัญในทางปฏิบัติ
     already = db.query(NailTimeSlot).filter_by(shop_id=shop_id, slot_date=date_str).first()
     if already:
         return
@@ -1306,17 +1293,21 @@ def admin_update_slot_templates(
 
     # sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตใหม่ทันที (ไม่ต้องรอแอดมินกดปุ่มแยก)
     shop = _get_shop(db, shop_id)
+    closed_dates_json = shop.closed_dates
     today = _now().date()
     sync_result = {"total_deleted": 0, "total_created": 0}
     for i in range(60):
         date_str = (today + timedelta(days=i)).isoformat()
         try:
-            r = _apply_template_for_date_core(db, shop, date_str)
+            r = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json)
             sync_result["total_deleted"] += r["deleted"]
             sync_result["total_created"] += r["created"]
         except Exception as e:
             logger.warning(f"[slot-templates] sync failed for {date_str} (shop {shop_id}): {e}")
-            db.rollback()
+            try:
+                db.rollback()
+            except Exception:
+                pass
     return {"ok": True, "synced": sync_result}
 
 
@@ -1381,6 +1372,7 @@ def admin_sync_future_slots_to_template(
         start_date = _now().date()
     days = max(1, min(body.days, 90))
 
+    closed_dates_json = shop.closed_dates
     total_deleted = 0
     total_created = 0
     changed_dates = []
@@ -1388,7 +1380,7 @@ def admin_sync_future_slots_to_template(
     for i in range(days):
         date_str = (start_date + timedelta(days=i)).isoformat()
         try:
-            result = _apply_template_for_date_core(db, shop, date_str)
+            result = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json)
             total_deleted += result["deleted"]
             total_created += result["created"]
             if result["deleted"] or result["created"]:
@@ -1422,27 +1414,18 @@ class ApplyTemplateDayBody(BaseModel):
     date: str   # "YYYY-MM-DD"
 
 
-def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str: str) -> dict:
+def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, closed_dates_json: Optional[str] = None) -> dict:
     """
     Sync สล็อตของวันที่ระบุให้ตรงกับเทมเพลตปัจจุบัน —
     ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
     เก็บสล็อตที่มีคนจองไว้แล้วเสมอ (ไม่ลบ/ไม่แก้เวลา) แม้เวลานั้นจะไม่ตรงกับเทมเพลตล่าสุดแล้วก็ตาม
     ใช้ร่วมกันทั้งจาก endpoint แบบทีละวัน (apply-template-day) และแบบ bulk (sync-future)
-    """
-    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน (scoped ต่อ shop) ──
-    shop_id = shop.shop_id
-    try:
-        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_reset:{shop_id}:{date_str}"})
-    except Exception as _adv_lock_err:
-        err_str = str(_adv_lock_err).lower()
-        if "hashtext" in err_str or "function" in err_str or "does not exist" in err_str:
-            try:
-                db.rollback()
-            except Exception:
-                pass
-        else:
-            raise
 
+    หมายเหตุ: รับ shop_id: int โดยตรงแทน ORM object เพื่อหลีกเลี่ยง DetachedInstanceError
+    ข้ามการวนซ้ำหลาย transaction ใน bulk sync loop
+    ไม่ใช้ advisory lock (pg_advisory_xact_lock/hashtext) เพราะ sync เป็นการดำเนินการของ admin คนเดียว
+    และ advisory lock บน Neon serverless pooler อาจทำให้เกิด 500 ได้
+    """
     # ── Step 1: ลบสล็อตที่ไม่มีการจองออก ──────────────────────────────────
     existing = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).all()
     deleted = 0
@@ -1463,9 +1446,9 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
 
     # ── Step 2: สร้างสล็อตจากเทมเพลต เฉพาะที่ยังไม่มีอยู่ ─────────────────
     created = 0
-    if shop.closed_dates:
+    if closed_dates_json:
         try:
-            if date_str in json.loads(shop.closed_dates):
+            if date_str in json.loads(closed_dates_json):
                 db.commit()
                 return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
         except Exception:
@@ -1518,7 +1501,7 @@ def admin_apply_template_for_day(
     shop_id = _check_admin(authorization)
     shop = _get_shop(db, shop_id)
     date_str = body.date
-    result = _apply_template_for_date_core(db, shop, date_str)
+    result = _apply_template_for_date_core(db, shop_id, date_str, shop.closed_dates)
     return {"ok": True, **result}
 
 
