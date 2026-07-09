@@ -76,6 +76,54 @@ def _run_cleanup(engine):
                 logger.warning(f"Cleanup step skipped: {e}")
 
 
+def _drop_single_col_unique_on_day_of_week(conn):
+    """Drop any single-column unique constraint/index on nail_slot_templates.day_of_week.
+
+    SQLAlchemy text() treats $ as a bind-param placeholder so PL/pgSQL dollar-quoting
+    cannot be used inside the string-based migration list.  This callable is placed in the
+    list instead; the runner calls it with the live connection.
+
+    Safe to run multiple times — IF NOT EXISTS / non-crashing SELECT ensures idempotency.
+    """
+    from sqlalchemy import text as _text
+
+    # 1. Find and drop unique CONSTRAINTS that cover only day_of_week
+    result = conn.execute(_text("""
+        SELECT c.conname
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        WHERE t.relname = 'nail_slot_templates'
+          AND c.contype = 'u'
+          AND array_length(c.conkey, 1) = 1
+          AND c.conkey[1] = (
+            SELECT a.attnum FROM pg_attribute a
+            WHERE a.attrelid = t.oid AND a.attname = 'day_of_week'
+          )
+    """))
+    for row in result.fetchall():
+        conn.execute(_text(f'ALTER TABLE nail_slot_templates DROP CONSTRAINT IF EXISTS "{row[0]}"'))
+
+    # 2. Find and drop unique INDEXes that cover only day_of_week (excluding our composite one)
+    result2 = conn.execute(_text("""
+        SELECT i.relname AS idxname
+        FROM pg_index ix
+        JOIN pg_class t ON t.oid = ix.indrelid
+        JOIN pg_class i ON i.oid = ix.indexrelid
+        WHERE t.relname = 'nail_slot_templates'
+          AND ix.indisunique = TRUE
+          AND array_length(ix.indkey, 1) = 1
+          AND ix.indkey[0] = (
+            SELECT a.attnum FROM pg_attribute a
+            WHERE a.attrelid = t.oid AND a.attname = 'day_of_week'
+          )
+          AND i.relname <> 'uix_nail_slot_templates_shop_day'
+    """))
+    for row in result2.fetchall():
+        conn.execute(_text(f'DROP INDEX IF EXISTS "{row[0]}"'))
+
+    conn.commit()
+
+
 def _run_migrations(engine):
     """Add missing columns to existing tables (safe to run on every startup)."""
     migrations = [
@@ -366,7 +414,8 @@ def _run_migrations(engine):
         "CREATE INDEX IF NOT EXISTS ix_nail_gallery_shop_id ON nail_gallery (shop_id)",
         "CREATE INDEX IF NOT EXISTS ix_nail_renewal_requests_shop_id ON nail_renewal_requests (shop_id)",
         # nail_slot_templates: เดิม unique เดี่ยวที่ day_of_week (ร้านเดียว) → ต้องเปลี่ยนเป็น unique ต่อร้าน (shop_id, day_of_week)
-        "ALTER TABLE nail_slot_templates DROP CONSTRAINT IF EXISTS nail_slot_templates_day_of_week_key",
+        # ใช้ callable เพราะ SQLAlchemy text() ตีความ $ เป็น bind parameter ทำให้ PL/pgSQL ใช้ไม่ได้
+        _drop_single_col_unique_on_day_of_week,
         "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_slot_templates_shop_day ON nail_slot_templates (shop_id, day_of_week)",
         # nail_api_stats: เดิม unique เดี่ยวที่ stat_date (ร้านเดียว) → ต้องเปลี่ยนเป็น unique ต่อร้าน (shop_id, stat_date)
         "ALTER TABLE nail_api_stats DROP CONSTRAINT IF EXISTS nail_api_stats_stat_date_key",
@@ -390,10 +439,14 @@ def _run_migrations(engine):
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
-        for sql in migrations:
+        for step in migrations:
             try:
-                conn.execute(text(sql))
-                conn.commit()
+                if callable(step):
+                    # Python callable — รับ conn เป็น argument, จัดการ commit เอง
+                    step(conn)
+                else:
+                    conn.execute(text(step))
+                    conn.commit()
             except Exception as e:
                 conn.rollback()  # ล้าง aborted transaction ก่อนไปต่อ
                 logger.warning(f"Migration skipped (probably already applied): {e}")
