@@ -117,6 +117,19 @@ def _release_expired_holds(db: Session):
         db.rollback()
 
 
+def _cleanup_old_otps(db: Session):
+    """ลบ OTP ที่หมดอายุหรือใช้แล้ว — ป้องกัน otp_sessions โต เรียกก่อนสร้าง OTP ใหม่ทุกครั้ง"""
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        db.query(OTPSession).filter(
+            (OTPSession.expires_at < cutoff) | (OTPSession.is_used == True)
+        ).delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"cleanup_old_otps: {e}")
+        db.rollback()
+
+
 def _count_confirmed_bookings(db: Session, slot_id: int) -> int:
     """นับ booking ที่ยังใช้งานอยู่ใน slot นี้"""
     return db.query(NailBooking).filter(
@@ -219,6 +232,8 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
     import hmac as _hmac
     if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
         raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+
+    _cleanup_old_otps(db)  # ล้าง OTP เก่าก่อนสร้างใหม่
 
     otp = generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
@@ -541,7 +556,18 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=410, detail="การจองหมดเวลาแล้ว กรุณาจองใหม่")
 
-    booking.payment_proof = req.payment_proof
+    # ตรวจสอบ payment_proof — รับเฉพาะ URL (https://) หรือรหัส voucher เท่านั้น
+    proof = (req.payment_proof or "").strip()
+    if not proof:
+        raise HTTPException(status_code=400, detail="กรุณาใส่ลิงก์หลักฐานการชำระ")
+    if len(proof) > 2048:
+        raise HTTPException(status_code=400, detail="ลิงก์ยาวเกินไป (สูงสุด 2048 ตัวอักษร)")
+    # ถ้าเป็น URL ต้องขึ้นต้นด้วย https:// (ไม่รับ http:// ป้องกัน mixed content)
+    # voucher code หรือ internal note รับได้เช่นกัน (ไม่ขึ้นต้นด้วย http)
+    if proof.startswith("http://") or (proof.startswith("http") and not proof.startswith("https://")):
+        raise HTTPException(status_code=400, detail="ลิงก์ต้องใช้ https:// เท่านั้น")
+
+    booking.payment_proof = proof
 
     # ไม่ตรวจสลิปอัตโนมัติแล้ว — แอดมินตรวจสอบยอดเงินและยืนยันเองทุกครั้ง
     # (เผื่ออนาคตอยากเปิดใช้ Slip2Go อัตโนมัติอีกครั้ง ดู backend/slip_verify.py)
@@ -922,6 +948,32 @@ def admin_delete_booking(
     db.delete(booking)
     db.commit()
     return {"ok": True, "message": "ลบการจองแล้ว"}
+
+
+@router.post("/admin/bookings/bulk-delete-cancelled")
+def admin_bulk_delete_cancelled(
+    body: DeleteBookingBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """
+    ลบการจองที่มีสถานะ cancelled ทั้งหมดออกจากระบบ (ล้างข้อมูลทดสอบ)
+    ต้องใส่ ADMIN_PASSCODE ยืนยัน — ไม่คืนเครดิตเพราะ cancelled แปลว่าคืนไปแล้ว
+    """
+    _check_admin(authorization)
+    cfg = get_settings()
+    passcode = cfg.admin_passcode
+    if not passcode:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE")
+    import hmac as _hmac
+    if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
+        raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+
+    deleted = db.query(NailBooking).filter(
+        NailBooking.status == "cancelled"
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "deleted": deleted, "message": f"ลบข้อมูลยกเลิก {deleted} รายการแล้ว"}
 
 
 class UpdateBookingBody(BaseModel):

@@ -2,7 +2,8 @@
 - [Nail Salon Booking System](nail-salon-system.md) — booking system built on existing stack; slot locking (SELECT FOR UPDATE), deposit random cents, rental expiry, admin auth guard
 - [Project deployment and Replit role](project-deployment.md) — deployed on Render, secrets already there, DB is Neon.tech; Replit writes code only, never ask for keys unless brand-new service
 - [React Query shared queryKey pitfall](react-query-shared-querykey-pitfall.md) — never put setState in queryFn .then(); use useEffect on returned data to handle cached-data case
-- [Render ephemeral filesystem](render-ephemeral-filesystem.md) — files written to disk are lost on redeploy; store gallery images as base64 in DB (TEXT column), not filesystem URLs
+- [Image link strategy](image-link-strategy.md) — all images use URL links (imgbb/postimages direct link), not base64 or filesystem; backend validates https:// scheme, max 2048 chars
+- [OTP cleanup policy](otp-cleanup-policy.md) — _cleanup_old_otps() runs before each OTP creation; deletes expired (>1h) and used OTPs lazily
 - [Testing Neon DB from Replit dev](neon-db-local-testing.md) — use a NEON_DATABASE_URL secret (not DATABASE_URL) to probe real prod data when a save/persistence bug is reported
 - [Debugging opaque prod 500s without log access](opaque-prod-500-debugging.md) — add a FastAPI global exception handler that logs full tracebacks, since Render logs aren't reachable from Replit tools
 - [Thailand timezone handling](thailand-timezone-handling.md) — app stores naive UTC; any "today/now" business logic (e.g. past time-slot filtering) must convert via a dedicated UTC+7 helper, not assume server tz

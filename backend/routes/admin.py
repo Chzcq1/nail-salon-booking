@@ -77,6 +77,17 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
     if body.passcode != expected:
         raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
 
+    # ลบ OTP เก่าที่หมดอายุหรือใช้แล้วก่อนสร้างใหม่ (ป้องกัน table โต)
+    try:
+        from datetime import timedelta as _td
+        cutoff = datetime.now(timezone.utc) - _td(hours=1)
+        db.query(OTPSession).filter(
+            (OTPSession.expires_at < cutoff) | (OTPSession.is_used == True)
+        ).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+
     otp = generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     session = OTPSession(

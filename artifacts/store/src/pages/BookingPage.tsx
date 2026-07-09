@@ -772,12 +772,15 @@ function Field({ label, icon, children }: any) {
   );
 }
 
-// ── Payment Screen (Credit only — ไม่มีโอนสลิปตรงแล้ว) ────────────────────
+// ── Payment Screen ────────────────────────────────────────────────────────────
 function PaymentScreen({ booking, onBack, onSuccess }: any) {
   const [holdData, setHoldData] = useState<any>(null);
   const [copied, setCopied] = useState(false);
   const [timer, setTimer] = useState(600);
   const [payError, setPayError] = useState("");
+  const [slipUrl, setSlipUrl] = useState("");
+  const [slipError, setSlipError] = useState("");
+  const [slipSubmitted, setSlipSubmitted] = useState(false);
 
   const holdMutation = useMutation({
     mutationFn: () => api.hold({
@@ -828,6 +831,21 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
     onError: (e: any) => setPayError(e.message),
   });
 
+  const submitSlipMutation = useMutation({
+    mutationFn: async () => {
+      if (!slipUrl.trim().startsWith("http")) throw new Error("กรุณาวางลิงก์ภาพที่ขึ้นต้นด้วย https://");
+      const r = await fetch("/api/nail/booking/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hold_token: holdData.hold_token, payment_proof: slipUrl.trim() }),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e?.detail || `HTTP ${r.status}`); }
+      return r.json();
+    },
+    onSuccess: () => setSlipSubmitted(true),
+    onError: (e: any) => setSlipError(e.message),
+  });
+
   if (holdMutation.isPending) {
     return (
       <PageWrap>
@@ -852,7 +870,8 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
     );
   }
 
-  if (timer === 0) {
+  // ถ้าส่งสลิป URL ไปแล้ว อย่าแสดง "หมดเวลา" — booking เป็น pending_payment แล้ว
+  if (timer === 0 && !slipSubmitted) {
     return (
       <PageWrap>
         <div style={{ padding: 24, textAlign: "center" }}>
@@ -979,6 +998,48 @@ function PaymentScreen({ booking, onBack, onSuccess }: any) {
         {payError && (
           <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: "10px 14px", color: P.error, fontSize: 14, marginTop: 16 }}>
             {payError}
+          </div>
+        )}
+
+        {/* Bank Transfer + Slip URL option — แสดงเมื่อร้านตั้งค่าบัญชีธนาคารไว้ */}
+        {(holdData?.bank_account_name || holdData?.bank_qr_url) && !slipSubmitted && (
+          <div style={{ marginTop: 20, background: "#F8FAFF", border: `1.5px solid #C7D6F5`, borderRadius: 16, padding: 16 }}>
+            <p style={{ fontSize: 14, fontWeight: 700, color: P.text, marginBottom: 10 }}>💳 หรือโอนผ่านบัญชีธนาคาร</p>
+            {holdData.bank_qr_url && (
+              <div style={{ textAlign: "center", marginBottom: 12 }}>
+                <img src={holdData.bank_qr_url} alt="QR PromptPay" style={{ maxWidth: 180, borderRadius: 12, border: "1px solid #C7D6F5" }} />
+              </div>
+            )}
+            {holdData.bank_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 2 }}>ธนาคาร: <strong>{holdData.bank_name}</strong></p>}
+            {holdData.bank_account_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 12 }}>ชื่อบัญชี: <strong>{holdData.bank_account_name}</strong></p>}
+            <p style={{ fontSize: 12, color: P.muted, marginBottom: 8, lineHeight: 1.6 }}>
+              หลังโอนแล้ว อัปโหลดสลิปที่{" "}
+              <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color: P.pink, fontWeight: 600 }}>imgbb.com</a>
+              {" "}แล้ววาง Direct Link ด้านล่าง
+            </p>
+            <input
+              value={slipUrl}
+              onChange={e => { setSlipUrl(e.target.value); setSlipError(""); }}
+              placeholder="https://i.ibb.co/xxxx/slip.jpg"
+              style={{ width: "100%", border: `1.5px solid ${slipError ? P.error : P.pinkBorder}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }}
+            />
+            {slipError && <p style={{ color: P.error, fontSize: 12, marginTop: 4 }}>{slipError}</p>}
+            <button
+              onClick={() => { if (!slipUrl.trim()) { setSlipError("กรุณาวางลิงก์สลิปก่อน"); return; } submitSlipMutation.mutate(); }}
+              disabled={submitSlipMutation.isPending}
+              style={{ width: "100%", marginTop: 10, background: `linear-gradient(135deg, #3B82F6, #1D4ED8)`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, cursor: submitSlipMutation.isPending ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}
+            >
+              {submitSlipMutation.isPending ? <><Loader2 size={16} className="animate-spin" /> กำลังส่ง...</> : "📎 ส่งสลิปให้แอดมินตรวจสอบ"}
+            </button>
+          </div>
+        )}
+
+        {/* Slip submitted confirmation */}
+        {slipSubmitted && (
+          <div style={{ marginTop: 20, background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 16, padding: 20, textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: "#166534", marginBottom: 4 }}>ส่งสลิปแล้ว</p>
+            <p style={{ fontSize: 13, color: "#16A34A", lineHeight: 1.6 }}>แอดมินจะตรวจสอบและยืนยันการจองให้ภายในไม่นาน</p>
           </div>
         )}
       </div>

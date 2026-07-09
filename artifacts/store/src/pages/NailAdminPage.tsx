@@ -625,7 +625,11 @@ function BookingsTab({ token }: { token: string }) {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/nail/admin/bookings/${id}/delete`, {
+      // id === -1 หมายถึง bulk-delete cancelled ทั้งหมด
+      const url = id === -1
+        ? "/api/nail/admin/bookings/bulk-delete-cancelled"
+        : `/api/nail/admin/bookings/${id}/delete`;
+      const r = await fetch(url, {
         method: "POST", headers: authH(token), body: JSON.stringify({ passcode: deletePasscode }),
       });
       const d = await r.json();
@@ -670,11 +674,19 @@ function BookingsTab({ token }: { token: string }) {
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <span style={{ color: A.sub, fontSize: 13 }}>{bookings.length} รายการ — {fmtDate(filterDate)}</span>
-        <button onClick={() => setShowWalkin(true)}
-          style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 100, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-          <Plus size={14} /> Walk-in
-        </button>
+        <span style={{ color: A.sub, fontSize: 13 }}>{bookings.length} รายการ — {filterStatus === "all" ? fmtDate(filterDate) : filterStatus}</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          {filterStatus === "cancelled" && bookings.length > 0 && (
+            <button onClick={() => { setDeleteTarget({ id: -1, name: `ยกเลิก ${bookings.length} รายการ` }); setDeletePasscode(""); setDeleteError(""); }}
+              style={{ background: A.errorBg, color: A.error, border: `1px solid ${A.error}44`, borderRadius: 100, padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}>
+              <Trash2 size={12} /> ล้างทั้งหมด
+            </button>
+          )}
+          <button onClick={() => setShowWalkin(true)}
+            style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 100, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+            <Plus size={14} /> Walk-in
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -782,13 +794,25 @@ function BookingsTab({ token }: { token: string }) {
                     </button>
                   </div>
 
-                  {/* Slip Image */}
+                  {/* Payment Proof */}
                   {b.payment_proof && (
                     <div style={{ marginTop: 10 }}>
                       <p style={{ fontSize: 12, color: A.sub, marginBottom: 6 }}>หลักฐานการชำระ:</p>
-                      <a href={b.payment_proof} target="_blank" rel="noopener noreferrer">
-                        <img src={b.payment_proof} alt="slip" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 10, border: `1px solid ${A.border}`, objectFit: "contain" }} />
-                      </a>
+                      {b.payment_proof.startsWith("http") ? (
+                        <div>
+                          <a href={b.payment_proof} target="_blank" rel="noopener noreferrer"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: A.primary, fontWeight: 600, textDecoration: "none", background: A.pale, borderRadius: 8, padding: "5px 12px", border: `1px solid ${A.border}`, marginBottom: 6 }}>
+                            🔗 เปิดลิงก์สลิป
+                          </a>
+                          <a href={b.payment_proof} target="_blank" rel="noopener noreferrer">
+                            <img src={b.payment_proof} alt="slip"
+                              style={{ display: "block", maxWidth: "100%", maxHeight: 200, borderRadius: 10, border: `1px solid ${A.border}`, objectFit: "contain" }}
+                              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                          </a>
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: 12, color: A.sub, background: A.gray, borderRadius: 8, padding: "6px 12px", wordBreak: "break-all" }}>{b.payment_proof}</p>
+                      )}
                     </div>
                   )}
                 </motion.div>
@@ -843,9 +867,15 @@ function BookingsTab({ token }: { token: string }) {
               onClick={e => e.stopPropagation()}
               style={{ background: A.card, borderRadius: 20, padding: 26, maxWidth: 340, width: "100%", boxShadow: "0 16px 48px rgba(136,14,79,0.3)", fontFamily: "'Prompt', sans-serif" }}>
               <div style={{ width: 54, height: 54, borderRadius: "50%", background: A.errorBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 26 }}>🗑️</div>
-              <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 6, textAlign: "center" }}>ลบรายการถาวร?</h3>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 6, textAlign: "center" }}>
+                {deleteTarget.id === -1 ? "ล้างข้อมูลยกเลิกทั้งหมด?" : "ลบรายการถาวร?"}
+              </h3>
               <p style={{ color: A.sub, fontSize: 13, marginBottom: 14, lineHeight: 1.5, textAlign: "center" }}>
-                จะลบการจองของ <strong>{deleteTarget.name}</strong> ออกจากระบบถาวร (ไม่ใช่แค่ยกเลิก) และคืนเครดิตกระเป๋าเงินให้ลูกค้าถ้าจ่ายด้วยเครดิต
+                {deleteTarget.id === -1 ? (
+                  <>จะลบ<strong>การจองที่ยกเลิกทุกรายการในระบบ</strong> (ทุกวัน ทุกช่วงเวลา) ออกถาวร ไม่มีผลกับการจองที่ยังใช้งาน<br /><strong style={{ color: A.error }}>⚠ ไม่สามารถกู้คืนได้</strong></>
+                ) : (
+                  <>จะลบการจองของ <strong>{deleteTarget.name}</strong> ออกจากระบบถาวร และคืนเครดิตกระเป๋าเงินให้ลูกค้าถ้าจ่ายด้วยเครดิต</>
+                )}
                 <br />กรุณาใส่<strong>รหัสผ่านร้าน</strong>เพื่อยืนยัน
               </p>
               <input
@@ -2338,10 +2368,11 @@ function ScheduleTab({ token }: { token: string }) {
 // ─── Gallery ──────────────────────────────────────────────────────────────────
 function GalleryTab({ token }: { token: string }) {
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
   const [caption, setCaption] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
+  const [urlError, setUrlError] = useState("");
+  const [deleteGalleryId, setDeleteGalleryId] = useState<number | null>(null);
+  const [galleryDeleteError, setGalleryDeleteError] = useState("");
 
   const { data: items = [] } = useQuery<any[]>({
     queryKey: ["nail-admin-gallery"],
@@ -2351,11 +2382,8 @@ function GalleryTab({ token }: { token: string }) {
   const addMutation = useMutation({
     mutationFn: (image_url: string) =>
       fetch("/api/nail/admin/gallery", { method: "POST", headers: authH(token), body: JSON.stringify({ image_url, caption }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setPreview(null); setCaption(""); setUploading(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-gallery"] }); setUrlInput(""); setCaption(""); setUrlError(""); },
   });
-
-  const [deleteGalleryId, setDeleteGalleryId] = useState<number | null>(null);
-  const [galleryDeleteError, setGalleryDeleteError] = useState("");
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -2368,57 +2396,49 @@ function GalleryTab({ token }: { token: string }) {
     onError: (e: any) => setGalleryDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
-  const [fileError, setFileError] = useState("");
+  const isValidUrl = urlInput.trim().startsWith("http");
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileError("");
-    // Guard: limit to 1.5 MB to prevent large base64 payloads in DB
-    if (file.size > 1.5 * 1024 * 1024) {
-      setFileError("รูปภาพต้องไม่เกิน 1.5 MB กรุณาลดขนาดรูปก่อนอัปโหลด");
-      e.target.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = ev => setPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  const handleUpload = async () => {
-    if (!preview) return;
-    setUploading(true);
-    // Store base64 data URI directly in DB (no filesystem — survives Render restarts)
-    addMutation.mutate(preview);
+  const handleAdd = () => {
+    if (!urlInput.trim()) { setUrlError("กรุณาใส่ลิงก์รูปภาพ"); return; }
+    if (!isValidUrl) { setUrlError("ลิงก์ต้องขึ้นต้นด้วย https://"); return; }
+    setUrlError("");
+    addMutation.mutate(urlInput.trim());
   };
 
   return (
     <div style={{ padding: 16 }}>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
-      {fileError && (
-        <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13 }}>
-          {fileError}
-        </div>
-      )}
-      {preview ? (
-        <div style={{ marginBottom: 16 }}>
-          <img src={preview} alt="" style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 12, border: `2px solid ${A.primary}` }} />
-          <input value={caption} onChange={e => setCaption(e.target.value)} placeholder="คำบรรยาย (optional)"
-            style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginTop: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }} />
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <button onClick={() => setPreview(null)} style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit" }}>ยกเลิก</button>
-            <button onClick={handleUpload} disabled={uploading || addMutation.isPending}
-              style={{ flex: 1, background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>
-              {(uploading || addMutation.isPending) ? <Loader2 size={14} className="animate-spin" /> : "อัปโหลด"}
-            </button>
+      {/* URL input card */}
+      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 4 }}>เพิ่มรูปผลงาน</div>
+        <p style={{ fontSize: 12, color: A.muted, marginBottom: 10, lineHeight: 1.7 }}>
+          อัปโหลดรูปที่{" "}
+          <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color: A.primary, fontWeight: 600 }}>imgbb.com</a>
+          {" "}หรือ{" "}
+          <a href="https://postimages.org" target="_blank" rel="noreferrer" style={{ color: A.primary, fontWeight: 600 }}>postimages.org</a>
+          {" "}แล้ววาง <strong>Direct Link</strong> ด้านล่าง (ไม่ใช่ลิงก์หน้าเว็บ)
+        </p>
+        <input
+          value={urlInput}
+          onChange={e => { setUrlInput(e.target.value); setUrlError(""); }}
+          placeholder="https://i.ibb.co/xxxx/photo.jpg"
+          style={{ width: "100%", border: `1.5px solid ${urlError ? A.error : A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }}
+        />
+        {urlError && <p style={{ color: A.error, fontSize: 12, marginTop: 4 }}>{urlError}</p>}
+        {isValidUrl && (
+          <div style={{ marginTop: 8, borderRadius: 10, overflow: "hidden", border: `1px solid ${A.border}`, maxHeight: 180, background: A.gray }}>
+            <img src={urlInput} alt="preview" style={{ width: "100%", maxHeight: 180, objectFit: "contain", display: "block" }}
+              onError={() => setUrlError("โหลดภาพไม่ได้ — ลองใช้ Direct Link (ลงท้ายด้วย .jpg/.png)")} />
           </div>
-        </div>
-      ) : (
-        <button onClick={() => fileRef.current?.click()}
-          style={{ width: "100%", border: `2px dashed ${A.border}`, borderRadius: 14, padding: "20px", background: A.pale, cursor: "pointer", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: A.primary, fontWeight: 600, fontFamily: "inherit", fontSize: 14 }}>
-          <Upload size={20} /> อัปโหลดรูปผลงาน
+        )}
+        <input value={caption} onChange={e => setCaption(e.target.value)} placeholder="คำบรรยาย (ไม่บังคับ)"
+          style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginTop: 8, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }} />
+        <button onClick={handleAdd} disabled={!urlInput.trim() || addMutation.isPending}
+          style={{ width: "100%", marginTop: 10, background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: !urlInput.trim() || addMutation.isPending ? "not-allowed" : "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, opacity: !urlInput.trim() ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          {addMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <><Plus size={16} /> เพิ่มรูปในแกลเลอรี</>}
         </button>
-      )}
+      </div>
+
+      {/* Gallery grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
         {items.map((g: any) => (
           <div key={g.id} style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: A.gray, aspectRatio: "1" }}>
@@ -2430,7 +2450,7 @@ function GalleryTab({ token }: { token: string }) {
           </div>
         ))}
       </div>
-      {items.length === 0 && !preview && (
+      {items.length === 0 && (
         <div style={{ textAlign: "center", padding: 32, color: A.muted, fontSize: 14 }}>
           <Image size={32} style={{ margin: "0 auto 8px" }} /><p>ยังไม่มีผลงาน</p>
         </div>
@@ -2448,7 +2468,7 @@ function GalleryTab({ token }: { token: string }) {
               <button onClick={() => { setDeleteGalleryId(null); setGalleryDeleteError(""); }}
                 style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
               <button onClick={() => deleteMutation.mutate(deleteGalleryId!)} disabled={deleteMutation.isPending}
-                style={{ flex: 1, background: A.error, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                style={{ flex: 1, background: A.error, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", opacity: deleteMutation.isPending ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 {deleteMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "ลบรูป"}
               </button>
             </div>
