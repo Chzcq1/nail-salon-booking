@@ -25,7 +25,8 @@ from backend.models import (
     NailBooking, NailGallery, NailRenewalRequest, NailApiStats, OTPSession,
     Customer, CreditTransaction,
 )
-from backend.auth import generate_otp, create_admin_token, verify_admin_token
+from backend.auth import generate_otp, create_admin_token, verify_admin_token, hash_passcode, verify_passcode
+from backend.models import Shop
 from backend.routes.wallet import get_wallet_customer
 import backend.bot as bot_module
 
@@ -46,7 +47,7 @@ def _now_th() -> datetime:
     return _now().astimezone(TH_TZ)
 
 
-def _increment_api_counter() -> None:
+def _increment_api_counter(shop_id: int = 1) -> None:
     """นับ public API request ต่อวัน (Thai time) — รันเป็น background task
     ใช้ session แยก เพื่อไม่กระทบ transaction หลักของ request
     ใช้ UPSERT เพื่อกันเงื่อนไข race condition"""
@@ -59,14 +60,14 @@ def _increment_api_counter() -> None:
         db.execute(
             text(
                 """
-                INSERT INTO nail_api_stats (stat_date, request_count)
-                VALUES (:d, 1)
-                ON CONFLICT (stat_date)
+                INSERT INTO nail_api_stats (shop_id, stat_date, request_count)
+                VALUES (:shop_id, :d, 1)
+                ON CONFLICT (shop_id, stat_date)
                 DO UPDATE SET request_count = nail_api_stats.request_count + 1,
                               updated_at = NOW()
                 """
             ),
-            {"d": today},
+            {"shop_id": shop_id, "d": today},
         )
         db.commit()
     except Exception:
@@ -75,28 +76,53 @@ def _increment_api_counter() -> None:
         db.close()
 
 
-def _get_shop(db: Session) -> NailShopSettings:
-    shop = db.query(NailShopSettings).filter_by(id=1).first()
+def _get_shop(db: Session, shop_id: int = 1) -> NailShopSettings:
+    shop = db.query(NailShopSettings).filter_by(shop_id=shop_id).first()
     if not shop:
-        shop = NailShopSettings(id=1)
-        db.add(shop)
-        db.commit()
-        db.refresh(shop)
+        if shop_id == 1:
+            shop = NailShopSettings(shop_id=1)
+            db.add(shop)
+            db.commit()
+            db.refresh(shop)
+        else:
+            raise HTTPException(status_code=404, detail="ไม่พบข้อมูลร้าน")
     return shop
+
+
+def _resolve_shop_by_slug(db: Session, shop_slug: Optional[str]) -> Shop:
+    """Resolve a Shop row by slug. None/'default' → shop id=1."""
+    if not shop_slug or shop_slug == "default":
+        shop_row = db.query(Shop).filter_by(id=1).first()
+        if not shop_row:
+            raise HTTPException(status_code=404, detail="ไม่พบร้านค้า default")
+        return shop_row
+    shop_row = db.query(Shop).filter_by(slug=shop_slug).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail=f"ไม่พบร้านค้า: {shop_slug}")
+    if not shop_row.is_active:
+        raise HTTPException(status_code=404, detail="ร้านนี้ปิดให้บริการชั่วคราว")
+    return shop_row
+
+
+def get_shop_by_slug(shop_slug: Optional[str] = None, db: Session = Depends(get_db)) -> Shop:
+    """FastAPI dependency: resolve Shop from optional slug query param."""
+    return _resolve_shop_by_slug(db, shop_slug)
 
 
 # Telegram session ID สำหรับ nail admin OTP (ต่างจาก store admin ที่ใช้ 0)
 NAIL_ADMIN_SESSION_ID = -1
 
 
-def _check_admin(authorization: str = Header(None)):
-    """ตรวจสอบ JWT token ที่ได้จาก /api/nail/admin/verify-otp"""
+def _check_admin(authorization: str = Header(None)) -> int:
+    """ตรวจสอบ JWT token ที่ได้จาก /api/nail/admin/verify-otp
+    Returns shop_id from the token (defaults to 1 for tokens issued before multi-tenant)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization[7:]
     payload = verify_admin_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Token หมดอายุหรือไม่ถูกต้อง กรุณาล็อกอินใหม่")
+    return int(payload.get("shop_id", 1))
 
 
 def _gen_ref(booking_id: int) -> str:
@@ -141,13 +167,13 @@ def _count_confirmed_bookings(db: Session, slot_id: int) -> int:
 DAY_NAMES_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
 
 
-def _ensure_templates_exist(db: Session):
+def _ensure_templates_exist(db: Session, shop_id: int = 1):
     """สร้างแถวเทมเพลต 7 วัน (จันทร์–อาทิตย์) ถ้ายังไม่มี"""
-    existing_days = {t.day_of_week for t in db.query(NailSlotTemplate).all()}
+    existing_days = {t.day_of_week for t in db.query(NailSlotTemplate).filter_by(shop_id=shop_id).all()}
     changed = False
     for dow in range(7):
         if dow not in existing_days:
-            db.add(NailSlotTemplate(day_of_week=dow, is_open=False))
+            db.add(NailSlotTemplate(day_of_week=dow, is_open=False, shop_id=shop_id))
             changed = True
     if changed:
         db.commit()
@@ -158,6 +184,7 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
     สร้างสล็อตอัตโนมัติจากเทมเพลตประจำสัปดาห์ — ทำงานเฉพาะตอนที่ 'ยังไม่มีสล็อตใดๆ' ของวันนั้นเลย
     เพื่อไม่ไปทับ/ลบสล็อตที่แอดมินเคยแก้ไขเองแล้ว (แก้ครั้งเดียวหลังจากนั้นคุมเองได้เต็มที่)
     """
+    shop_id = shop.shop_id
     if shop.closed_dates:
         try:
             closed = json.loads(shop.closed_dates)
@@ -169,7 +196,7 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
     # ป้องกัน 2 request สร้างสล็อตวันเดียวกันพร้อมกันจนได้สล็อตซ้ำ (advisory lock ทั้ง transaction)
     # หมายเหตุ: บาง serverless PostgreSQL (เช่น Neon.tech) อาจไม่รองรับ hashtext → fallback gracefully
     try:
-        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{date_str}"})
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_gen:{shop_id}:{date_str}"})
     except Exception as _adv_lock_err:
         # hashtext ไม่ถูกรองรับบน serverless PostgreSQL บางตัว (เช่น Neon)
         # rollback เฉพาะ statement นั้น แล้วทำงานต่อโดยไม่มี lock
@@ -182,7 +209,7 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
         else:
             raise  # re-raise ถ้าเป็น error อื่น เช่น connection failed
 
-    already = db.query(NailTimeSlot).filter_by(slot_date=date_str).first()
+    already = db.query(NailTimeSlot).filter_by(shop_id=shop_id, slot_date=date_str).first()
     if already:
         return
 
@@ -191,7 +218,7 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
     except ValueError:
         return
 
-    tmpl = db.query(NailSlotTemplate).filter_by(day_of_week=d.weekday(), is_open=True).first()
+    tmpl = db.query(NailSlotTemplate).filter_by(shop_id=shop_id, day_of_week=d.weekday(), is_open=True).first()
     if not tmpl or tmpl.rounds_count <= 0:
         return
 
@@ -204,6 +231,7 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
         start = cursor + timedelta(minutes=i * (tmpl.round_minutes + tmpl.gap_minutes))
         end = start + timedelta(minutes=tmpl.round_minutes)
         db.add(NailTimeSlot(
+            shop_id=shop_id,
             slot_date=date_str,
             start_time=start.strftime("%H:%M"),
             end_time=end.strftime("%H:%M"),
@@ -217,28 +245,43 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
 
 class NailAdminOTPRequest(BaseModel):
     passcode: str
+    shop_slug: Optional[str] = None
 
 class NailAdminOTPVerify(BaseModel):
     otp_code: str
+    shop_slug: Optional[str] = None
 
 @router.post("/admin/request-otp")
 async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_db)):
     """ขั้นที่ 1 — ตรวจรหัสผ่าน แล้วส่ง OTP ไปยัง Telegram group admin"""
     cfg = get_settings()
-    passcode = cfg.admin_passcode
-    if not passcode:
-        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
 
-    import hmac as _hmac
-    if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
-        raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+    # Resolve target shop
+    shop_row = _resolve_shop_by_slug(db, body.shop_slug)
+    if not shop_row.is_active:
+        raise HTTPException(status_code=403, detail="ร้านนี้ปิดให้บริการชั่วคราว")
+
+    # Check passcode: per-shop hash first, then global fallback
+    if shop_row.admin_passcode_hash:
+        if not verify_passcode(body.passcode.strip(), shop_row.admin_passcode_hash):
+            raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+    else:
+        passcode = cfg.admin_passcode
+        if not passcode:
+            raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
+        import hmac as _hmac
+        if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
+            raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
 
     _cleanup_old_otps(db)  # ล้าง OTP เก่าก่อนสร้างใหม่
+
+    # Use a per-shop OTP session ID to allow concurrent OTP sessions for different shops
+    otp_session_id = NAIL_ADMIN_SESSION_ID - shop_row.id  # -1 for shop1, -2 for shop2, etc.
 
     otp = generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     session = OTPSession(
-        telegram_id=NAIL_ADMIN_SESSION_ID,
+        telegram_id=otp_session_id,
         otp_code=otp,
         expires_at=expires,
     )
@@ -255,11 +298,18 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
 @router.post("/admin/verify-otp")
 def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
     """ขั้นที่ 2 — ยืนยัน OTP แล้วรับ JWT token"""
+    # Resolve target shop
+    shop_row = _resolve_shop_by_slug(db, body.shop_slug)
+    if not shop_row.is_active:
+        raise HTTPException(status_code=403, detail="ร้านนี้ปิดให้บริการชั่วคราว")
+
+    otp_session_id = NAIL_ADMIN_SESSION_ID - shop_row.id
+
     otp_input = (body.otp_code or "").strip()
     session = (
         db.query(OTPSession)
         .filter(
-            OTPSession.telegram_id == NAIL_ADMIN_SESSION_ID,
+            OTPSession.telegram_id == otp_session_id,
             OTPSession.otp_code == otp_input,
             OTPSession.is_used == False,
             OTPSession.expires_at > datetime.now(timezone.utc),
@@ -273,21 +323,22 @@ def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
     session.is_used = True
     db.commit()
 
-    token = create_admin_token(NAIL_ADMIN_SESSION_ID)
+    token = create_admin_token(NAIL_ADMIN_SESSION_ID, shop_id=shop_row.id)
     return {"access_token": token}
 
 
 # ─── Public endpoints ────────────────────────────────────────────────────────
 
 @router.get("/settings")
-def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    shop = _get_shop(db)
+def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends(get_db), shop_slug: Optional[str] = None):
+    shop_row = _resolve_shop_by_slug(db, shop_slug)
+    shop = _get_shop(db, shop_row.id)
     # ตรวจสอบ rental expiry
     expired = False
     if shop.expired_at and _now() > shop.expired_at:
         expired = True
     # นับ request เป็น background task — ไม่กระทบ transaction หลัก
-    background_tasks.add_task(_increment_api_counter)
+    background_tasks.add_task(_increment_api_counter, shop_row.id)
     return {
         "shop_name": shop.shop_name,
         "shop_logo_url": shop.shop_logo_url,
@@ -313,10 +364,11 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
 
 
 @router.get("/gallery")
-def get_gallery(db: Session = Depends(get_db)):
+def get_gallery(db: Session = Depends(get_db), shop_slug: Optional[str] = None):
+    shop_row = _resolve_shop_by_slug(db, shop_slug)
     items = (
         db.query(NailGallery)
-        .filter_by(is_active=True)
+        .filter_by(shop_id=shop_row.id, is_active=True)
         .order_by(NailGallery.sort_order, NailGallery.id.desc())
         .all()
     )
@@ -324,10 +376,11 @@ def get_gallery(db: Session = Depends(get_db)):
 
 
 @router.get("/services")
-def get_services(db: Session = Depends(get_db)):
+def get_services(db: Session = Depends(get_db), shop_slug: Optional[str] = None):
+    shop_row = _resolve_shop_by_slug(db, shop_slug)
     items = (
         db.query(NailService)
-        .filter_by(is_active=True)
+        .filter_by(shop_id=shop_row.id, is_active=True)
         .order_by(NailService.sort_order, NailService.id)
         .all()
     )
@@ -343,11 +396,12 @@ def get_services(db: Session = Depends(get_db)):
 
 
 @router.get("/slots")
-def get_slots(date: str, db: Session = Depends(get_db)):
+def get_slots(date: str, db: Session = Depends(get_db), shop_slug: Optional[str] = None):
     """ดึงช่วงเวลาที่เปิดให้จองของวันนั้น พร้อมสถานะ available/held/full"""
     _release_expired_holds(db)
+    shop_row = _resolve_shop_by_slug(db, shop_slug)
     # ตรวจวันปิดร้าน
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_row.id)
     if shop.closed_dates:
         try:
             closed = json.loads(shop.closed_dates)
@@ -358,7 +412,7 @@ def get_slots(date: str, db: Session = Depends(get_db)):
     _ensure_slots_for_date(db, shop, date)
     slots = (
         db.query(NailTimeSlot)
-        .filter_by(slot_date=date, is_available=True)
+        .filter_by(shop_id=shop_row.id, slot_date=date, is_available=True)
         .order_by(NailTimeSlot.start_time)
         .all()
     )
@@ -461,11 +515,11 @@ def hold_slot(
     if confirmed >= (slot.max_bookings or 1):
         raise HTTPException(status_code=409, detail="ช่วงเวลานี้เต็มแล้ว กรุณาเลือกเวลาอื่น")
 
-    shop = _get_shop(db)
+    shop = _get_shop(db, slot.shop_id)
     # ป้องกันการจองใหม่ถ้าร้านถูกปิด/หมดอายุการเช่าระบบ (บังคับที่ฝั่งเซิร์ฟเวอร์ ไม่พึ่งแค่ frontend gate)
     if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
         raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
-    service = db.query(NailService).filter_by(id=req.service_id).first() if req.service_id else None
+    service = db.query(NailService).filter_by(id=req.service_id, shop_id=slot.shop_id).first() if req.service_id else None
 
     # ค่ามัดจำ: ใช้ของบริการถ้าตั้งไว้ ไม่งั้น fallback เป็นค่าเริ่มต้นของร้าน
     if service is not None and service.deposit_amount is not None:
@@ -479,6 +533,7 @@ def hold_slot(
     held_until = _now() + timedelta(minutes=10)
 
     booking = NailBooking(
+        shop_id=slot.shop_id,
         booking_ref="PENDING",  # ตั้ง placeholder ก่อน — จะแทนที่ด้วย ID จริงหลัง flush
         slot_id=slot.id,
         service_id=req.service_id,
@@ -536,7 +591,8 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     """
     Step 2: อัปโหลดสลิป — ตรวจสอบและเปลี่ยนสถานะ
     """
-    shop = _get_shop(db)
+    booking_pre = db.query(NailBooking).filter_by(hold_token=req.hold_token).first()
+    shop = _get_shop(db, booking_pre.shop_id if booking_pre else 1)
     if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
         raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
 
@@ -619,10 +675,6 @@ async def submit_payment_wallet(
     """
     ชำระมัดจำด้วยเครดิตในกระเป๋าเงิน (ต้องล็อกอินและมีเครดิตพอ) — ยืนยันคิวทันที ไม่ต้องรอแอดมินตรวจสลิป
     """
-    shop = _get_shop(db)
-    if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
-        raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
-
     booking = (
         db.query(NailBooking)
         .filter_by(hold_token=req.hold_token)
@@ -631,6 +683,9 @@ async def submit_payment_wallet(
     )
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง")
+    shop = _get_shop(db, booking.shop_id)
+    if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
+        raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
 
     if booking.status == "cancelled":
         raise HTTPException(status_code=410, detail="การจองหมดเวลา กรุณาจองใหม่")
@@ -761,10 +816,10 @@ def admin_list_bookings(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     _release_expired_holds(db)
 
-    q = db.query(NailBooking)
+    q = db.query(NailBooking).filter(NailBooking.shop_id == shop_id)
     if date:
         q = q.filter(NailBooking.slot_date == date)
     if status:
@@ -804,12 +859,12 @@ def admin_list_bookings(
 
 @router.get("/admin/dashboard")
 def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(None)):
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     today = _now().date().isoformat()
     week_start = (_now().date() - timedelta(days=_now().weekday())).isoformat()
 
     def count_status(status: str, date: str = None):
-        q = db.query(NailBooking).filter(NailBooking.status == status)
+        q = db.query(NailBooking).filter(NailBooking.status == status, NailBooking.shop_id == shop_id)
         if date:
             q = q.filter(NailBooking.slot_date == date)
         return q.count()
@@ -820,17 +875,19 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
 
     from sqlalchemy import func as sqlfunc
     week_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.shop_id == shop_id,
         NailBooking.slot_date >= week_start,
         NailBooking.status.in_(["confirmed", "completed", "walkin"]),
     ).scalar() or 0
 
     total_bookings = db.query(NailBooking).filter(
+        NailBooking.shop_id == shop_id,
         NailBooking.status.in_(["confirmed", "completed", "walkin"])
     ).count()
 
     recent = (
         db.query(NailBooking)
-        .filter(NailBooking.status.in_(["pending_payment", "confirmed", "held"]))
+        .filter(NailBooking.shop_id == shop_id, NailBooking.status.in_(["pending_payment", "confirmed", "held"]))
         .order_by(NailBooking.created_at.desc())
         .limit(5)
         .all()
@@ -901,8 +958,8 @@ def admin_refund_booking(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    booking = db.query(NailBooking).filter_by(id=booking_id).with_for_update().first()
+    shop_id = _check_admin(authorization)
+    booking = db.query(NailBooking).filter_by(id=booking_id, shop_id=shop_id).with_for_update().first()
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบการจอง")
     if booking.status not in ("pending_payment", "confirmed"):
@@ -930,17 +987,23 @@ def admin_delete_booking(
     (ADMIN_PASSCODE) ซ้ำอีกครั้งเพื่อยืนยัน นอกเหนือจาก session token ปกติ
     ถ้าการจองนี้จ่ายด้วยเครดิตในกระเป๋าเงิน จะคืนเครดิตให้ลูกค้าก่อนลบ
     """
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
 
-    cfg = get_settings()
-    passcode = cfg.admin_passcode
-    if not passcode:
-        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
-    import hmac as _hmac
-    if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
-        raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+    # Verify passcode — for per-shop admins: check per-shop hash first, then global
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if shop_row and shop_row.admin_passcode_hash:
+        if not verify_passcode((body.passcode or "").strip(), shop_row.admin_passcode_hash):
+            raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+    else:
+        cfg = get_settings()
+        passcode = cfg.admin_passcode
+        if not passcode:
+            raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE บนเซิร์ฟเวอร์")
+        import hmac as _hmac
+        if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
+            raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
 
-    booking = db.query(NailBooking).filter_by(id=booking_id).with_for_update().first()
+    booking = db.query(NailBooking).filter_by(id=booking_id, shop_id=shop_id).with_for_update().first()
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบการจอง")
 
@@ -960,16 +1023,22 @@ def admin_bulk_delete_cancelled(
     ลบการจองที่มีสถานะ cancelled ทั้งหมดออกจากระบบ (ล้างข้อมูลทดสอบ)
     ต้องใส่ ADMIN_PASSCODE ยืนยัน — ไม่คืนเครดิตเพราะ cancelled แปลว่าคืนไปแล้ว
     """
-    _check_admin(authorization)
-    cfg = get_settings()
-    passcode = cfg.admin_passcode
-    if not passcode:
-        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE")
-    import hmac as _hmac
-    if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
-        raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+    shop_id = _check_admin(authorization)
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if shop_row and shop_row.admin_passcode_hash:
+        if not verify_passcode((body.passcode or "").strip(), shop_row.admin_passcode_hash):
+            raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
+    else:
+        cfg = get_settings()
+        passcode = cfg.admin_passcode
+        if not passcode:
+            raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า ADMIN_PASSCODE")
+        import hmac as _hmac
+        if not _hmac.compare_digest((body.passcode or "").strip(), passcode.strip()):
+            raise HTTPException(status_code=403, detail="รหัสยืนยันไม่ถูกต้อง")
 
     deleted = db.query(NailBooking).filter(
+        NailBooking.shop_id == shop_id,
         NailBooking.status == "cancelled"
     ).delete(synchronize_session=False)
     db.commit()
@@ -989,8 +1058,8 @@ def admin_update_booking(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    booking = db.query(NailBooking).filter_by(id=booking_id).first()
+    shop_id = _check_admin(authorization)
+    booking = db.query(NailBooking).filter_by(id=booking_id, shop_id=shop_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบการจอง")
     if body.status:
@@ -1000,7 +1069,7 @@ def admin_update_booking(
 
     deposit_diff = None
     if body.service_id is not None and body.service_id != booking.service_id:
-        new_service = db.query(NailService).filter_by(id=body.service_id).first()
+        new_service = db.query(NailService).filter_by(id=body.service_id, shop_id=shop_id).first()
         if not new_service:
             raise HTTPException(status_code=404, detail="ไม่พบบริการที่ต้องการเปลี่ยน")
         old_name = booking.service_name or "-"
@@ -1038,9 +1107,10 @@ def admin_add_walkin(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    service = db.query(NailService).filter_by(id=body.service_id).first() if body.service_id else None
+    shop_id = _check_admin(authorization)
+    service = db.query(NailService).filter_by(id=body.service_id, shop_id=shop_id).first() if body.service_id else None
     booking = NailBooking(
+        shop_id=shop_id,
         booking_ref="PENDING",
         slot_id=body.slot_id,
         service_id=body.service_id,
@@ -1079,13 +1149,13 @@ def admin_list_slots(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     _release_expired_holds(db)
     if date:
-        _ensure_slots_for_date(db, _get_shop(db), date)
-    q = db.query(NailTimeSlot)
+        _ensure_slots_for_date(db, _get_shop(db, shop_id), date)
+    q = db.query(NailTimeSlot).filter(NailTimeSlot.shop_id == shop_id)
     if date:
-        q = q.filter_by(slot_date=date)
+        q = q.filter(NailTimeSlot.slot_date == date)
     slots = q.order_by(NailTimeSlot.slot_date, NailTimeSlot.start_time).all()
     # ── Single GROUP BY query replaces N+1 calls ──
     from sqlalchemy import func as sqlfunc
@@ -1138,9 +1208,9 @@ class SlotTemplateBulkBody(BaseModel):
 @router.get("/admin/slot-templates")
 def admin_get_slot_templates(db: Session = Depends(get_db), authorization: str = Header(None)):
     """ดึงเทมเพลตประจำสัปดาห์ (7 วัน) — ใช้ตั้งค่า 'เปิดกี่รอบ รอบละกี่นาที' ของแต่ละวัน"""
-    _check_admin(authorization)
-    _ensure_templates_exist(db)
-    rows = db.query(NailSlotTemplate).order_by(NailSlotTemplate.day_of_week).all()
+    shop_id = _check_admin(authorization)
+    _ensure_templates_exist(db, shop_id)
+    rows = db.query(NailSlotTemplate).filter_by(shop_id=shop_id).order_by(NailSlotTemplate.day_of_week).all()
     return [
         {
             "id": t.id,
@@ -1166,13 +1236,13 @@ def admin_update_slot_templates(
 ):
     """บันทึกเทมเพลตประจำสัปดาห์ — จะมีผลกับสล็อตของวันที่ยัง 'ไม่เคยถูกสร้าง' เท่านั้น
     วันที่แอดมินเคยแก้ไขสล็อตเองแล้วจะไม่ถูกสร้างทับ (ต้องแก้ผ่าน /admin/slots เอง)"""
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     for item in body.templates:
         if not (0 <= item.day_of_week <= 6):
             continue
-        row = db.query(NailSlotTemplate).filter_by(day_of_week=item.day_of_week).first()
+        row = db.query(NailSlotTemplate).filter_by(shop_id=shop_id, day_of_week=item.day_of_week).first()
         if not row:
-            row = NailSlotTemplate(day_of_week=item.day_of_week)
+            row = NailSlotTemplate(shop_id=shop_id, day_of_week=item.day_of_week)
             db.add(row)
         row.is_open = item.is_open
         row.start_time = item.start_time

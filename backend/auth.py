@@ -27,9 +27,9 @@ def verify_telegram_login(data: dict) -> bool:
     return hmac.compare_digest(computed_hash, check_hash)
 
 
-def create_admin_token(telegram_id: int) -> str:
+def create_admin_token(telegram_id: int, shop_id: int = 1) -> str:
     s = URLSafeTimedSerializer(settings.secret_key)
-    return s.dumps({"telegram_id": telegram_id, "role": "admin"})
+    return s.dumps({"telegram_id": telegram_id, "role": "admin", "shop_id": shop_id})
 
 
 def verify_admin_token(token: str) -> Optional[dict]:
@@ -44,3 +44,14 @@ def verify_admin_token(token: str) -> Optional[dict]:
 def generate_otp() -> str:
     import secrets
     return str(secrets.randbelow(900000) + 100000)
+
+
+def hash_passcode(passcode: str) -> str:
+    """SHA-256 hex digest of a passcode (consistent with existing pattern)"""
+    return hashlib.sha256(passcode.encode()).hexdigest()
+
+
+def verify_passcode(plain: str, hashed: str) -> bool:
+    """Compare plain passcode against stored hash (constant-time)"""
+    computed = hashlib.sha256(plain.encode()).hexdigest()
+    return hmac.compare_digest(computed, hashed)
