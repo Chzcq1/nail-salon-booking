@@ -1221,24 +1221,63 @@ def admin_generate_slots_from_template(
     return {"ok": True, "generated_dates": generated, "generated_count": len(generated)}
 
 
+class SyncFutureBody(BaseModel):
+    days: int = 30
+    from_date: Optional[str] = None   # "YYYY-MM-DD" — ถ้าไม่ระบุ ใช้วันนี้
+
+
+@router.post("/admin/slot-templates/sync-future")
+def admin_sync_future_slots_to_template(
+    body: SyncFutureBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """Sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตปัจจุบันทุกวัน (ต่างจาก /generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน) —
+    ใช้ตอนแก้เทมเพลตแล้วต้องการให้มีผลกับวันที่เคย generate สล็อตไปแล้วด้วย
+    สล็อตที่มีคนจองไว้แล้วจะถูกเก็บไว้เสมอ ไม่ถูกลบหรือแก้เวลา"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    if body.from_date:
+        try:
+            start_date = datetime.strptime(body.from_date, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = _now().date()
+    else:
+        start_date = _now().date()
+    days = max(1, min(body.days, 90))
+
+    total_deleted = 0
+    total_created = 0
+    changed_dates = []
+    for i in range(days):
+        date_str = (start_date + timedelta(days=i)).isoformat()
+        result = _apply_template_for_date_core(db, shop, date_str)
+        total_deleted += result["deleted"]
+        total_created += result["created"]
+        if result["deleted"] or result["created"]:
+            changed_dates.append(date_str)
+
+    return {
+        "ok": True,
+        "days_scanned": days,
+        "changed_dates": changed_dates,
+        "total_deleted": total_deleted,
+        "total_created": total_created,
+    }
+
+
 class ApplyTemplateDayBody(BaseModel):
     date: str   # "YYYY-MM-DD"
 
 
-@router.post("/admin/slots/apply-template-day")
-def admin_apply_template_for_day(
-    body: ApplyTemplateDayBody,
-    db: Session = Depends(get_db),
-    authorization: str = Header(None),
-):
-    """รีเซ็ตสล็อตวันนั้นให้ตรงกับเทมเพลต —
+def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str: str) -> dict:
+    """
+    Sync สล็อตของวันที่ระบุให้ตรงกับเทมเพลตปัจจุบัน —
     ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
-    ต่างจาก _ensure_slots_for_date ตรงที่ทำงานได้แม้จะมีสล็อตเดิมอยู่แล้ว"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
-    date_str = body.date
-
-    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน (ลอก pattern จาก _ensure_slots_for_date) ──
+    เก็บสล็อตที่มีคนจองไว้แล้วเสมอ (ไม่ลบ/ไม่แก้เวลา) แม้เวลานั้นจะไม่ตรงกับเทมเพลตล่าสุดแล้วก็ตาม
+    ใช้ร่วมกันทั้งจาก endpoint แบบทีละวัน (apply-template-day) และแบบ bulk (sync-future)
+    """
+    # ── Advisory lock ป้องกัน concurrent reset วันเดียวกัน ──
     try:
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:d))"), {"d": f"nail_slot_reset:{date_str}"})
     except Exception as _adv_lock_err:
@@ -1275,7 +1314,7 @@ def admin_apply_template_for_day(
         try:
             if date_str in json.loads(shop.closed_dates):
                 db.commit()
-                return {"ok": True, "deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
+                return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
         except Exception:
             pass
 
@@ -1283,7 +1322,7 @@ def admin_apply_template_for_day(
         d = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
         db.commit()
-        return {"ok": True, "deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
+        return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
 
     tmpl = db.query(NailSlotTemplate).filter_by(day_of_week=d.weekday(), is_open=True).first()
     if tmpl and tmpl.rounds_count > 0:
@@ -1310,12 +1349,23 @@ def admin_apply_template_for_day(
                     created += 1
 
     db.commit()
-    return {
-        "ok": True,
-        "deleted": deleted,
-        "created": created,
-        "has_booked_slots_preserved": has_booked,
-    }
+    return {"deleted": deleted, "created": created, "has_booked_slots_preserved": has_booked}
+
+
+@router.post("/admin/slots/apply-template-day")
+def admin_apply_template_for_day(
+    body: ApplyTemplateDayBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """รีเซ็ตสล็อตวันนั้นให้ตรงกับเทมเพลต —
+    ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
+    ต่างจาก _ensure_slots_for_date ตรงที่ทำงานได้แม้จะมีสล็อตเดิมอยู่แล้ว"""
+    _check_admin(authorization)
+    shop = _get_shop(db)
+    date_str = body.date
+    result = _apply_template_for_date_core(db, shop, date_str)
+    return {"ok": True, **result}
 
 
 @router.post("/admin/slots")

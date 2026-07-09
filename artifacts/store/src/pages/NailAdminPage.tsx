@@ -1959,6 +1959,25 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
     },
   });
 
+  // Sync สล็อตที่มีอยู่แล้วให้ตรงกับเทมเพลตล่าสุด (ต่างจาก generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน)
+  const syncMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/nail/admin/slot-templates/sync-future", {
+        method: "POST",
+        headers: authH(token),
+        body: JSON.stringify({ days: 30 }),
+      }).then(r => r.json()),
+    onSuccess: (d: any) => {
+      setGenResult(
+        d.changed_dates.length > 0
+          ? `ซิงค์แล้ว ${d.changed_dates.length} วัน (ลบสล็อตว่างเก่า ${d.total_deleted} • สร้างใหม่ ${d.total_created} • สล็อตที่มีคนจองแล้วไม่ถูกแตะต้อง)`
+          : "ทุกวันตรงกับเทมเพลตล่าสุดอยู่แล้ว ไม่มีอะไรต้องแก้"
+      );
+      onGenerated();
+      setTimeout(() => setGenResult(null), 6000);
+    },
+  });
+
   const updateRow = (day_of_week: number, patch: object) => {
     setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? { ...r, ...patch } : r));
   };
@@ -2043,8 +2062,17 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
           </button>
 
           <button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}
-            style={{ width: "100%", background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
-            {generateMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "สร้างสล็อตล่วงหน้า 30 วันตามเทมเพลตทันที"}
+            style={{ width: "100%", background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 8 }}>
+            {generateMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "สร้างสล็อตล่วงหน้า 30 วันตามเทมเพลตทันที (เฉพาะวันที่ยังไม่มีสล็อต)"}
+          </button>
+
+          <button onClick={() => {
+              if (confirm("ซิงค์สล็อต 30 วันข้างหน้าให้ตรงกับเทมเพลตล่าสุด?\n\nระบบจะลบสล็อตว่าง (ยังไม่มีคนจอง) ที่ไม่ตรงกับเทมเพลตปัจจุบัน แล้วสร้างใหม่ให้ตรง — สล็อตที่มีคนจองแล้วจะไม่ถูกแตะต้องเด็ดขาด")) {
+                syncMutation.mutate();
+              }
+            }} disabled={syncMutation.isPending}
+            style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+            {syncMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "ซิงค์สล็อตให้ตรงเทมเพลตล่าสุด (ใช้เมื่อแก้เทมเพลตแล้ววันในอนาคตยังเป็นเวลาเก่า)"}
           </button>
           {genResult && <p style={{ textAlign: "center", color: A.success, fontSize: 12, marginTop: 8 }}>{genResult}</p>}
         </>
@@ -2083,6 +2111,26 @@ function ScheduleTab({ token }: { token: string }) {
     staleTime: 20000,
     retry: 1,
   });
+
+  // ใช้เช็คว่าสล็อตวันนี้ตรงกับเทมเพลตล่าสุดหรือไม่ (แจ้งเตือนถ้าไม่ตรง เพื่อลดความงงว่า "ทำไมเวลาไม่ตรง")
+  const { data: templates = [] } = useQuery<any[]>({
+    queryKey: ["nail-admin-slot-templates"],
+    queryFn: () => fetch("/api/nail/admin/slot-templates", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  const templateSyncStatus = (() => {
+    if (isLoading || !templates.length) return null;
+    const dow = (new Date(selDate + "T00:00:00").getDay() + 6) % 7; // 0=จันทร์
+    const tmpl = templates.find((t: any) => t.day_of_week === dow);
+    if (!tmpl || !tmpl.is_open) return null;
+    const expected = new Set(computeSlotTimes(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes ?? 0));
+    const actual = new Set(slots.map((s: any) => s.start_time));
+    if (expected.size === 0) return null;
+    const matches = expected.size === actual.size && [...expected].every(t => actual.has(t));
+    return matches ? "match" : "mismatch";
+  })();
 
   const saveClosedDates = useMutation({
     mutationFn: () => fetch("/api/nail/admin/settings", { method: "PUT", headers: authH(token), body: JSON.stringify({ closed_dates: JSON.stringify(closedDates) }) }).then(r => r.json()),
@@ -2251,6 +2299,17 @@ function ScheduleTab({ token }: { token: string }) {
       {isClosed && (
         <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13, fontWeight: 600 }}>
           🚫 วันนี้ตั้งเป็นวันปิดร้าน ลูกค้าจองไม่ได้
+        </div>
+      )}
+
+      {!isClosed && templateSyncStatus === "mismatch" && (
+        <div style={{ background: A.warningBg ?? "#FFF6E5", border: `1px solid ${A.warning}66`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.warning, fontSize: 12, fontWeight: 600 }}>
+          ⚠️ สล็อตวันนี้ไม่ตรงกับเทมเพลตล่าสุดแล้ว (อาจเป็นเพราะแก้เทมเพลตทีหลัง) — กด "🔄 รีเซ็ตวันนี้" ด้านล่าง หรือใช้ปุ่ม "ซิงค์สล็อตให้ตรงเทมเพลตล่าสุด" ในส่วนเทมเพลตด้านบนเพื่อแก้ทีเดียวหลายวัน
+        </div>
+      )}
+      {!isClosed && templateSyncStatus === "match" && (
+        <div style={{ color: A.success, fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
+          ✅ สล็อตวันนี้ตรงกับเทมเพลตล่าสุด
         </div>
       )}
 
