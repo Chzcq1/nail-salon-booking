@@ -322,6 +322,46 @@ def _run_migrations(engine):
 
         # ── ค่ามัดจำแยกตามบริการ — บริการที่ราคาต่างกันควรมัดจำไม่เท่ากัน ──────────
         "ALTER TABLE nail_services ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2)",
+
+        # ── Multi-shop: shops table + shop_id ทุกตาราง nail_* ────────────────────
+        # เดิมระบบสมมติว่ามีร้านเดียวเท่านั้น (nail_shop_settings id=1) — ตอนนี้แยกเป็นตาราง shops
+        # และเพิ่ม shop_id ในทุกตารางธุรกิจของระบบจองคิว เพื่อให้ 1 DB รองรับได้หลายร้าน
+        """CREATE TABLE IF NOT EXISTS shops (
+            id SERIAL PRIMARY KEY,
+            slug VARCHAR(100) UNIQUE NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            admin_passcode_hash VARCHAR(255),
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ
+        )""",
+        # สร้างร้าน default (id=1) จากข้อมูลร้านที่มีอยู่แล้วในระบบ — ทุกแถวเดิมทั้งหมดถือเป็นของร้านนี้
+        """INSERT INTO shops (id, slug, name, is_active)
+           SELECT 1, 'default', COALESCE((SELECT shop_name FROM nail_shop_settings ORDER BY id LIMIT 1), 'ร้านทำเล็บ'), TRUE
+           WHERE NOT EXISTS (SELECT 1 FROM shops WHERE id = 1)""",
+        "SELECT setval('shops_id_seq', (SELECT COALESCE(MAX(id), 1) FROM shops))",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_services ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_staff ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_time_slots ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_gallery ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        "ALTER TABLE nail_renewal_requests ALTER COLUMN shop_id SET DEFAULT 1",
+        "ALTER TABLE nail_api_stats ADD COLUMN IF NOT EXISTS shop_id INTEGER NOT NULL DEFAULT 1 REFERENCES shops(id)",
+        # index สำหรับ query ตาม shop (ทุกตารางธุรกิจต้องกรองด้วย shop_id เสมอในโค้ดที่รองรับ multi-shop)
+        "CREATE INDEX IF NOT EXISTS ix_nail_shop_settings_shop_id ON nail_shop_settings (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_services_shop_id ON nail_services (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_staff_shop_id ON nail_staff (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_time_slots_shop_id ON nail_time_slots (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_bookings_shop_id ON nail_bookings (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_gallery_shop_id ON nail_gallery (shop_id)",
+        "CREATE INDEX IF NOT EXISTS ix_nail_renewal_requests_shop_id ON nail_renewal_requests (shop_id)",
+        # nail_slot_templates: เดิม unique เดี่ยวที่ day_of_week (ร้านเดียว) → ต้องเปลี่ยนเป็น unique ต่อร้าน (shop_id, day_of_week)
+        "ALTER TABLE nail_slot_templates DROP CONSTRAINT IF EXISTS nail_slot_templates_day_of_week_key",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_slot_templates_shop_day ON nail_slot_templates (shop_id, day_of_week)",
+        # nail_api_stats: เดิม unique เดี่ยวที่ stat_date (ร้านเดียว) → ต้องเปลี่ยนเป็น unique ต่อร้าน (shop_id, stat_date)
+        "ALTER TABLE nail_api_stats DROP CONSTRAINT IF EXISTS nail_api_stats_stat_date_key",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_api_stats_shop_date ON nail_api_stats (shop_id, stat_date)",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

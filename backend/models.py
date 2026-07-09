@@ -205,14 +205,32 @@ class GafiwOrder(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Nail Salon Booking System
+#  Nail Salon Booking System — Multi-shop
 # ─────────────────────────────────────────────────────────────────────────────
 
+class Shop(Base):
+    """
+    ร้านหนึ่งร้านในระบบ multi-tenant — 1 แถว = 1 ร้านที่เช่าใช้ระบบ
+    ทุกตาราง nail_* ผูกกับ shop_id เพื่อแยกข้อมูลแต่ละร้านออกจากกันใน DB เดียว
+    slug ใช้ทำลิงก์ /r/{slug} (หน้าร้าน) และ /r/{slug}/admin (หลังร้าน)
+    """
+    __tablename__ = "shops"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String(100), unique=True, nullable=False, index=True)  # ใช้ในลิงก์ /r/{slug}
+    name = Column(String(255), nullable=False)
+    admin_passcode_hash = Column(String(255), nullable=True)  # รหัสเข้าหลังร้านของร้านนี้ (แยกจากร้านอื่น)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class NailShopSettings(Base):
-    """การตั้งค่าร้านทำเล็บ (singleton row id=1)"""
+    """การตั้งค่าร้านทำเล็บ — เดิมเป็น singleton (id=1), ตอนนี้ 1 แถว = 1 ร้าน ผูกกับ shop_id"""
     __tablename__ = "nail_shop_settings"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     shop_name = Column(String(255), nullable=False, default="ร้านทำเล็บ")
     shop_logo_url = Column(String(1000), nullable=True)
     shop_tagline = Column(String(500), nullable=True, default="ทำเล็บสวย สไตล์คุณ")
@@ -250,6 +268,7 @@ class NailService(Base):
     __tablename__ = "nail_services"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     duration_minutes = Column(Integer, default=60, nullable=False)
@@ -267,6 +286,7 @@ class NailStaff(Base):
     __tablename__ = "nail_staff"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     name = Column(String(255), nullable=False)
     color = Column(String(20), default="#FF6B9D", nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
@@ -278,7 +298,8 @@ class NailSlotTemplate(Base):
     __tablename__ = "nail_slot_templates"
 
     id = Column(Integer, primary_key=True, index=True)
-    day_of_week = Column(Integer, nullable=False, unique=True, index=True)  # 0=จันทร์ ... 6=อาทิตย์
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
+    day_of_week = Column(Integer, nullable=False, index=True)  # 0=จันทร์ ... 6=อาทิตย์ (unique ร่วมกับ shop_id ผ่าน migration index)
     is_open = Column(Boolean, default=False, nullable=False)
     start_time = Column(String(5), nullable=False, default="09:00")  # HH:MM รอบแรกเริ่มกี่โมง
     rounds_count = Column(Integer, nullable=False, default=0)        # เปิดกี่รอบต่อวัน
@@ -295,6 +316,7 @@ class NailTimeSlot(Base):
     __tablename__ = "nail_time_slots"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     slot_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
     start_time = Column(String(5), nullable=False)              # HH:MM
     end_time = Column(String(5), nullable=False)
@@ -309,6 +331,7 @@ class NailBooking(Base):
     __tablename__ = "nail_bookings"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     booking_ref = Column(String(20), unique=True, nullable=False, index=True)  # NB-0001
     slot_id = Column(Integer, ForeignKey("nail_time_slots.id"), nullable=True, index=True)
     service_id = Column(Integer, ForeignKey("nail_services.id"), nullable=True)
@@ -345,6 +368,7 @@ class NailGallery(Base):
     __tablename__ = "nail_gallery"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     image_url = Column(String(1000), nullable=False)
     caption = Column(String(255), nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
@@ -357,7 +381,7 @@ class NailRenewalRequest(Base):
     __tablename__ = "nail_renewal_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    shop_id = Column(Integer, nullable=False, default=1)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     duration_months = Column(Integer, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
     slip_image = Column(Text, nullable=False)          # base64 data URI (หรือ "voucher:<code>")
@@ -374,6 +398,7 @@ class NailApiStats(Base):
     __tablename__ = "nail_api_stats"
 
     id = Column(Integer, primary_key=True, index=True)
-    stat_date = Column(String(10), nullable=False, unique=True, index=True)  # YYYY-MM-DD (Thai time)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
+    stat_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD (Thai time)
     request_count = Column(Integer, nullable=False, default=0, server_default="0")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
