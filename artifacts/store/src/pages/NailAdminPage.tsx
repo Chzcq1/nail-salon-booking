@@ -186,14 +186,42 @@ export default function NailAdminPage() {
     setToken(stored);
   }, [storageKey]);
 
+  // ── Subscription expiry gate — blocks all admin tabs if shop has expired ──
+  const shopKeyForGate = slug ?? "default";
+  const qcGate = useQueryClient();
+  const {
+    data: rentalGate,
+    isLoading: rentalGateLoading,
+    isError: rentalGateError,
+  } = useQuery<any>({
+    queryKey: ["nail-admin-rental-status", shopKeyForGate],
+    queryFn: () =>
+      fetch("/api/nail/admin/rental-status", {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
+    enabled: !!token,
+    staleTime: 30_000,
+    // Auto-poll every 30 s while expired so the block lifts automatically after renewal
+    refetchInterval: (query) => (query.state.data?.is_expired ? 30_000 : false),
+    retry: 1,
+    retryDelay: 2000,
+  });
+
   const [newBookingAlert, setNewBookingAlert] = useState(false);
   const knownBookingIds = useRef<Set<number>>(new Set());
   const isFirstPoll = useRef(true);
   const lastPollDate = useRef("");
 
-  // ── Background booking poller (runs when admin is logged in) ──────────────
+  // ── Background booking poller (runs when admin is logged in AND subscription active) ──
   useEffect(() => {
-    if (!token) return;
+    // Do not poll sensitive booking data while:
+    //   • not logged in
+    //   • rental status is still loading (rentalGate undefined)
+    //   • shop subscription is expired
+    if (!token || rentalGate === undefined || rentalGate?.is_expired) return;
     // Reset detection state every time a new session starts
     knownBookingIds.current = new Set();
     isFirstPoll.current = true;
@@ -230,7 +258,7 @@ export default function NailAdminPage() {
     poll(); // immediate first poll
     const id = setInterval(poll, 30000);
     return () => clearInterval(id);
-  }, [token]); // eslint-disable-line
+  }, [token, rentalGate?.is_expired]); // eslint-disable-line
 
   // login steps: "passcode" → "otp"
   const [loginStep, setLoginStep] = useState<"passcode" | "otp">("passcode");
@@ -352,6 +380,59 @@ export default function NailAdminPage() {
           )}
         </div>
       </div>
+    );
+  }
+
+  // ── ตรวจสอบการหมดอายุ — บล็อกทุกหน้าและแสดงเฉพาะหน้าต่ออายุ ──────────────
+  if (token && rentalGateLoading) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+        background: "#0d0d0d", fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif",
+      }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');`}</style>
+        <div style={{ fontSize: 36, animation: "spin 1.5s linear infinite" }}>🌸</div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Fail-closed: if rental status errors after retry, block admin rather than leak data
+  if (token && rentalGateError) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        background: "#0d0d0d", fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif", gap: 16,
+      }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');`}</style>
+        <div style={{ fontSize: 36 }}>🔒</div>
+        <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 14, textAlign: "center", maxWidth: 280 }}>
+          ไม่สามารถตรวจสอบสถานะการสมัครสมาชิกได้<br />กรุณาลองโหลดหน้าใหม่
+        </p>
+        <button
+          onClick={() => qcGate.invalidateQueries({ queryKey: ["nail-admin-rental-status", shopKeyForGate] })}
+          style={{
+            background: "#be185d", color: "#fff", border: "none", borderRadius: 10,
+            padding: "10px 20px", cursor: "pointer", fontFamily: "inherit",
+            fontSize: 14, fontWeight: 600,
+          }}
+        >
+          ลองใหม่
+        </button>
+      </div>
+    );
+  }
+
+  if (token && rentalGate?.is_expired) {
+    return (
+      <AdminBillingBlock
+        token={token}
+        slug={slug}
+        onRenewalSuccess={() =>
+          qcGate.invalidateQueries({ queryKey: ["nail-admin-rental-status", shopKeyForGate] })
+        }
+      />
     );
   }
 
@@ -1950,6 +2031,415 @@ function RenewalTab({ token }: { token: string }) {
               </>
             );
           })()
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Admin Billing Block — แสดงเมื่อแพ็กเกจหมดอายุ ────────────────────────────
+function AdminBillingBlock({
+  token, slug, onRenewalSuccess,
+}: { token: string; slug: string | null; onRenewalSuccess: () => void }) {
+  const shopKey = slug ?? "default";
+  const qc = useQueryClient();
+
+  const [months, setMonths] = useState(1);
+  const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
+  const [preview, setPreview] = useState<string | null>(null);
+  const [fileError, setFileError] = useState("");
+  const [voucher, setVoucher] = useState("");
+  const [submitResult, setSubmitResult] = useState<{
+    auto_approved: boolean; message: string | null; new_expired_at?: string;
+  } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const { data: plans = RENEWAL_PLANS } = useQuery<any[]>({
+    queryKey: ["nail-admin-renewal-plans", shopKey],
+    queryFn: () => fetch("/api/nail/admin/renewal-plans", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 60_000, retry: 1,
+  });
+
+  const { data: saPayment } = useQuery<any>({
+    queryKey: ["nail-admin-sa-payment-info", shopKey],
+    queryFn: () => fetch("/api/nail/admin/superadmin-payment-info", { headers: authH(token) }).then(r => r.json()),
+    staleTime: 120_000, retry: 1,
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      const body: any = {
+        duration_months: months,
+        payment_channel: payMethod === "slip" ? "bank_slip" : "angpao",
+      };
+      if (payMethod === "slip") body.slip_image = preview;
+      else body.voucher_code = voucher.trim();
+      const r = await fetch("/api/nail/admin/renewal-request", {
+        method: "POST",
+        headers: { ...authH(token), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-rental-status", shopKey] });
+      setSubmitResult({ auto_approved: data.auto_approved, message: data.message, new_expired_at: data.new_expired_at });
+      if (data.auto_approved) {
+        // Short delay so the user can read the success message, then lift the block
+        setTimeout(() => onRenewalSuccess(), 2500);
+      }
+    },
+  });
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileError("");
+    if (file.size > 1.5 * 1024 * 1024) {
+      setFileError("รูปสลิปต้องไม่เกิน 1.5 MB");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ev => setPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const canSubmit = payMethod === "slip" ? !!preview : !!voucher.trim();
+  const selectedPlan = (plans as any[]).find(p => p.months === months);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.88)",
+      backdropFilter: "blur(6px)",
+      WebkitBackdropFilter: "blur(6px)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      overflowY: "auto",
+      fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif",
+    }}>
+      {/* Keyframe animations */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+        @keyframes bb-spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes bb-pulse {
+          0%, 100% { transform: scale(1);    opacity: 0.85; }
+          50%       { transform: scale(1.12); opacity: 1;    }
+        }
+        @keyframes bb-orbit {
+          from { transform: rotate(0deg)   translateX(56px) rotate(0deg); }
+          to   { transform: rotate(360deg) translateX(56px) rotate(-360deg); }
+        }
+        @keyframes bb-orbit2 {
+          from { transform: rotate(120deg) translateX(56px) rotate(-120deg); }
+          to   { transform: rotate(480deg) translateX(56px) rotate(-480deg); }
+        }
+        @keyframes bb-orbit3 {
+          from { transform: rotate(240deg) translateX(56px) rotate(-240deg); }
+          to   { transform: rotate(600deg) translateX(56px) rotate(-600deg); }
+        }
+        @keyframes bb-fade-in {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bb-glow {
+          0%, 100% { box-shadow: 0 0 28px 8px rgba(244,114,182,0.25); }
+          50%       { box-shadow: 0 0 48px 16px rgba(244,114,182,0.45); }
+        }
+      `}</style>
+
+      {/* ── Cherry-blossom spinner ── */}
+      <div style={{
+        position: "relative",
+        width: 140, height: 140,
+        marginTop: 48, marginBottom: 8,
+        flexShrink: 0,
+      }}>
+        {/* Outer glow ring */}
+        <div style={{
+          position: "absolute", inset: 10,
+          borderRadius: "50%",
+          animation: "bb-glow 3s ease-in-out infinite",
+        }} />
+        {/* Spinning ring */}
+        <div style={{
+          position: "absolute", inset: 0,
+          animation: "bb-spin 8s linear infinite",
+        }}>
+          {/* Orbit petal 1 */}
+          <div style={{ position: "absolute", top: "50%", left: "50%", marginTop: -10, marginLeft: -10, animation: "bb-orbit 8s linear infinite", fontSize: 20, lineHeight: 1 }}>🌸</div>
+          {/* Orbit petal 2 */}
+          <div style={{ position: "absolute", top: "50%", left: "50%", marginTop: -10, marginLeft: -10, animation: "bb-orbit2 8s linear infinite", fontSize: 16, lineHeight: 1 }}>🌸</div>
+          {/* Orbit petal 3 */}
+          <div style={{ position: "absolute", top: "50%", left: "50%", marginTop: -10, marginLeft: -10, animation: "bb-orbit3 8s linear infinite", fontSize: 14, lineHeight: 1 }}>🌸</div>
+        </div>
+        {/* Center blossom — pulses */}
+        <div style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%, -50%)",
+          fontSize: 52, lineHeight: 1,
+          animation: "bb-pulse 3s ease-in-out infinite",
+          filter: "drop-shadow(0 0 12px rgba(244,114,182,0.7))",
+        }}>🌸</div>
+      </div>
+
+      {/* ── Notification message ── */}
+      <div style={{
+        maxWidth: 340, textAlign: "center", padding: "0 20px 12px",
+        animation: "bb-fade-in 0.6s ease both",
+        flexShrink: 0,
+      }}>
+        <h2 style={{
+          fontSize: 17, fontWeight: 700,
+          color: "#f9a8d4",
+          lineHeight: 1.6, marginBottom: 6,
+        }}>
+          ระบบจัดการคิวอัตโนมัติ CSC ของร้านคุณเข้าสู่โหมดจำศีลชั่วคราว 🌸
+        </h2>
+        <p style={{
+          fontSize: 13, color: "rgba(255,255,255,0.7)",
+          lineHeight: 1.75, marginBottom: 0,
+        }}>
+          เพื่อเปิดใช้งานหน้าเว็บหน้าร้านให้ลูกค้าจองคิวต่อ และเข้าถึงแดชบอร์ดสถิติ
+          กรุณาต่ออายุแพ็กเกจรายเดือนด้านล่างนี้ได้เลยครับ
+        </p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 8 }}>
+          ระบบตรวจสอบการต่ออายุอัตโนมัติทุก 30 วินาที
+        </p>
+      </div>
+
+      {/* ── Renewal card ── */}
+      <div style={{
+        width: "100%", maxWidth: 400,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(244,114,182,0.25)",
+        borderRadius: 20,
+        padding: 20,
+        margin: "8px 16px 48px",
+        animation: "bb-fade-in 0.7s ease 0.15s both",
+        flexShrink: 0,
+      }}>
+
+        {/* Bank info from superadmin-payment-info */}
+        {(saPayment?.sa_bank_name || saPayment?.sa_bank_account_number || saPayment?.sa_truemoney_phone) && (
+          <div style={{
+            background: "rgba(253,230,138,0.1)",
+            border: "1px solid rgba(253,230,138,0.3)",
+            borderRadius: 12, padding: 14, marginBottom: 16,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a", marginBottom: 8 }}>
+              💸 โอนเงินค่าต่ออายุมาที่บัญชีนี้
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {saPayment?.sa_bank_name && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
+                  <span style={{ fontWeight: 600 }}>ธนาคาร:</span> {saPayment.sa_bank_name}
+                </div>
+              )}
+              {saPayment?.sa_bank_account_name && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
+                  <span style={{ fontWeight: 600 }}>ชื่อบัญชี:</span> {saPayment.sa_bank_account_name}
+                </div>
+              )}
+              {saPayment?.sa_bank_account_number && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 13, color: "#fde68a", fontFamily: "monospace", fontWeight: 700 }}>
+                    {saPayment.sa_bank_account_number}
+                  </div>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(saPayment.sa_bank_account_number)}
+                    style={{
+                      background: "rgba(253,230,138,0.2)", border: "1px solid rgba(253,230,138,0.4)",
+                      borderRadius: 6, padding: "2px 8px", cursor: "pointer",
+                      fontSize: 11, color: "#fde68a", fontFamily: "inherit",
+                    }}
+                  >
+                    คัดลอก
+                  </button>
+                </div>
+              )}
+              {saPayment?.sa_truemoney_phone && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
+                  <span style={{ fontWeight: 600 }}>🧧 TrueMoney เบอร์:</span> {saPayment.sa_truemoney_phone}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Plan selector */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>
+            เลือกระยะเวลาที่ต้องการต่ออายุ
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {(plans as any[]).map(p => (
+              <button key={p.months} onClick={() => setMonths(p.months)} style={{
+                border: `1.5px solid ${months === p.months ? "#f472b6" : "rgba(255,255,255,0.15)"}`,
+                background: months === p.months ? "rgba(244,114,182,0.18)" : "rgba(255,255,255,0.04)",
+                borderRadius: 10, padding: "10px 8px", cursor: "pointer",
+                fontFamily: "inherit", textAlign: "center",
+              }}>
+                <div style={{ fontWeight: 700, color: months === p.months ? "#f9a8d4" : "rgba(255,255,255,0.8)", fontSize: 14 }}>
+                  {p.months} เดือน
+                </div>
+                <div style={{ fontSize: 12, color: months === p.months ? "#f472b6" : "rgba(255,255,255,0.5)", fontWeight: 600 }}>
+                  ฿{p.price.toLocaleString()}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Payment method */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {([["slip", "🏦 โอนสลิป"], ["truemoney", "🧧 TrueMoney"]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setPayMethod(m)} style={{
+              flex: 1,
+              border: `1.5px solid ${payMethod === m ? "#f472b6" : "rgba(255,255,255,0.15)"}`,
+              background: payMethod === m ? "rgba(244,114,182,0.18)" : "rgba(255,255,255,0.04)",
+              borderRadius: 10, padding: "9px 6px", cursor: "pointer",
+              fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+              color: payMethod === m ? "#f9a8d4" : "rgba(255,255,255,0.6)",
+            }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* File input (hidden) */}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+
+        {fileError && (
+          <div style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: "#fca5a5", fontSize: 13 }}>
+            {fileError}
+          </div>
+        )}
+
+        {payMethod === "slip" ? (
+          preview ? (
+            <div style={{ marginBottom: 14 }}>
+              <img src={preview} alt="" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 12, border: "2px solid #f472b6" }} />
+              <button onClick={() => setPreview(null)} style={{
+                marginTop: 8, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 13, color: "rgba(255,255,255,0.7)",
+              }}>
+                เปลี่ยนรูปสลิป
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => fileRef.current?.click()} style={{
+              width: "100%",
+              border: "2px dashed rgba(244,114,182,0.4)",
+              borderRadius: 14, padding: "18px",
+              background: "rgba(244,114,182,0.06)",
+              cursor: "pointer", marginBottom: 14,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              color: "#f9a8d4", fontWeight: 600, fontFamily: "inherit", fontSize: 14,
+            }}>
+              <Upload size={18} /> อัปโหลดสลิปโอนเงิน
+            </button>
+          )
+        ) : (
+          <div style={{ marginBottom: 14 }}>
+            <input
+              type="text"
+              value={voucher}
+              onChange={e => setVoucher(e.target.value)}
+              placeholder="https://gift.truemoney.com/campaign/?v=... หรือรหัสซอง"
+              style={{
+                width: "100%", border: "1.5px solid rgba(255,255,255,0.2)",
+                borderRadius: 10, padding: "10px 12px", fontSize: 13,
+                fontFamily: "inherit", outline: "none",
+                background: "rgba(255,255,255,0.06)", color: "#fff",
+                boxSizing: "border-box",
+              }}
+            />
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6 }}>
+              วางลิงก์ซอง TrueMoney Gift จาก TrueMoney Wallet App
+            </p>
+          </div>
+        )}
+
+        {/* Result / Submit */}
+        {submitResult ? (
+          <div style={{
+            background: submitResult.auto_approved ? "rgba(34,197,94,0.12)" : "rgba(244,114,182,0.1)",
+            border: `1.5px solid ${submitResult.auto_approved ? "rgba(34,197,94,0.4)" : "rgba(244,114,182,0.3)"}`,
+            borderRadius: 12, padding: 16, textAlign: "center",
+          }}>
+            {submitResult.auto_approved ? (
+              <>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+                <p style={{ fontWeight: 700, color: "#86efac", fontSize: 15, marginBottom: 4 }}>ต่ออายุสำเร็จ! กำลังเปิดระบบ…</p>
+                <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 13 }}>{submitResult.message}</p>
+                {submitResult.new_expired_at && (
+                  <p style={{ color: "#f9a8d4", fontSize: 13, fontWeight: 600, marginTop: 4 }}>
+                    หมดอายุใหม่: {fmtDate(submitResult.new_expired_at.slice(0, 10))}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>📋</div>
+                <p style={{ fontWeight: 700, color: "#f9a8d4", fontSize: 14, marginBottom: 4 }}>
+                  ส่ง{payMethod === "slip" ? "สลิป" : "ซอง"}แล้ว — รอ CSC ตรวจสอบ
+                </p>
+                <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 13, lineHeight: 1.6 }}>
+                  {submitResult.message || "ทีมงานจะดำเนินการตรวจสอบและเปิดระบบให้ภายใน 24 ชั่วโมง"}
+                </p>
+                <p style={{ color: "rgba(255,255,255,0.3)", fontSize: 11, marginTop: 8 }}>
+                  ระบบจะเปิดโดยอัตโนมัติเมื่อ CSC อนุมัติ
+                </p>
+                <button onClick={() => setSubmitResult(null)} style={{
+                  marginTop: 12,
+                  background: "rgba(244,114,182,0.15)", border: "1px solid rgba(244,114,182,0.3)",
+                  borderRadius: 8, padding: "7px 16px", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: 13, color: "#f9a8d4", fontWeight: 600,
+                }}>
+                  ส่งสลิปใหม่อีกครั้ง
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+            {selectedPlan && (
+              <div style={{ textAlign: "center", color: "rgba(255,255,255,0.5)", fontSize: 12, marginBottom: 10 }}>
+                ยอดที่ต้องโอน: <span style={{ color: "#f9a8d4", fontWeight: 700, fontSize: 15 }}>฿{selectedPlan.price.toLocaleString()}</span> ({months} เดือน)
+              </div>
+            )}
+            <button
+              onClick={() => submitMutation.mutate()}
+              disabled={!canSubmit || submitMutation.isPending}
+              style={{
+                width: "100%",
+                background: canSubmit ? "linear-gradient(135deg, #be185d, #831843)" : "rgba(255,255,255,0.08)",
+                color: canSubmit ? "#fff" : "rgba(255,255,255,0.3)",
+                border: "none", borderRadius: 10, padding: "13px",
+                cursor: canSubmit && !submitMutation.isPending ? "pointer" : "not-allowed",
+                fontWeight: 700, fontFamily: "inherit", fontSize: 14,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                transition: "background 0.2s",
+              }}
+            >
+              {submitMutation.isPending
+                ? <><Loader2 size={15} style={{ animation: "bb-spin 1s linear infinite" }} /> {payMethod === "truemoney" ? "กำลังแลกซอง…" : "กำลังส่ง…"}</>
+                : <><Save size={15} /> {payMethod === "truemoney" ? "แลกซองและต่ออายุ" : "ส่งสลิปต่ออายุ"}</>
+              }
+            </button>
+            {submitMutation.isError && (
+              <p style={{ textAlign: "center", color: "#fca5a5", fontSize: 13, marginTop: 8 }}>
+                {(submitMutation.error as any)?.message ?? "เกิดข้อผิดพลาด กรุณาลองใหม่"}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
