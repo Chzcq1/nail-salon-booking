@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, CheckCircle, XCircle, Clock, Loader2, RefreshCw,
   Calendar, AlertTriangle, Crown, LogOut, Eye, EyeOff, ExternalLink,
-  Tag, Activity, Database, Save,
+  Tag, Activity, Database, Save, Store, Plus, Ban, PlayCircle, PlusCircle, MinusCircle,
 } from "lucide-react";
 
 // ── Design tokens (distinct dark-blue theme) ─────────────────────────────────
@@ -286,11 +286,11 @@ function PaymentInfoSection({ sKey }: { sKey: string }) {
 }
 
 // ── Pricing Editor ────────────────────────────────────────────────────────────
-function PricingSection({ sKey }: { sKey: string }) {
+function PricingSection({ sKey, shopId }: { sKey: string; shopId: number }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<any>({
-    queryKey: ["sa-pricing"],
-    queryFn: () => saFetch(`${API}/superadmin/pricing`, sKey),
+    queryKey: ["sa-pricing", shopId],
+    queryFn: () => saFetch(`${API}/superadmin/pricing?shop_id=${shopId}`, sKey),
     staleTime: 15000,
   });
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -309,7 +309,7 @@ function PricingSection({ sKey }: { sKey: string }) {
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      saFetch(`${API}/superadmin/pricing`, sKey, {
+      saFetch(`${API}/superadmin/pricing?shop_id=${shopId}`, sKey, {
         method: "PUT",
         body: JSON.stringify({
           price_1m: vals.price_1m ? Number(vals.price_1m) : null,
@@ -318,7 +318,7 @@ function PricingSection({ sKey }: { sKey: string }) {
           price_12m: vals.price_12m ? Number(vals.price_12m) : null,
         }),
       }),
-    onSuccess: () => { setMsg("✓ บันทึกราคาแล้ว"); qc.invalidateQueries({ queryKey: ["sa-pricing"] }); },
+    onSuccess: () => { setMsg("✓ บันทึกราคาแล้ว"); qc.invalidateQueries({ queryKey: ["sa-pricing", shopId] }); },
     onError: (e: any) => setMsg(`⚠ ${e.message}`),
   });
 
@@ -455,6 +455,125 @@ function UsageSection({ sKey }: { sKey: string }) {
   );
 }
 
+// ── Shops Management ─────────────────────────────────────────────────────────
+function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; selectedShopId: number; onSelectShop: (id: number) => void }) {
+  const qc = useQueryClient();
+  const { data: shops = [], isLoading } = useQuery<any[]>({
+    queryKey: ["sa-shops"],
+    queryFn: () => saFetch(`${API}/superadmin/shops`, sKey),
+    staleTime: 15000,
+  });
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newSlug, setNewSlug] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newDays, setNewDays] = useState("30");
+  const [err, setErr] = useState("");
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      saFetch(`${API}/superadmin/shops`, sKey, {
+        method: "POST",
+        body: JSON.stringify({ slug: newSlug.trim(), name: newName.trim(), expiry_days: newDays ? Number(newDays) : null }),
+      }),
+    onSuccess: (d: any) => {
+      qc.invalidateQueries({ queryKey: ["sa-shops"] });
+      setShowCreate(false); setNewSlug(""); setNewName(""); setNewDays("30"); setErr("");
+      onSelectShop(d.id);
+    },
+    onError: (e: any) => setErr(e.message),
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) =>
+      saFetch(`${API}/superadmin/shops/${id}/active`, sKey, { method: "PUT", body: JSON.stringify({ is_active }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sa-shops"] }),
+  });
+
+  const adjustDaysMutation = useMutation({
+    mutationFn: ({ id, days }: { id: number; days: number }) =>
+      saFetch(`${API}/superadmin/shops/${id}/expiry-days`, sKey, { method: "PUT", body: JSON.stringify({ days }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sa-shops"] }),
+  });
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <Store size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>ร้านทั้งหมด ({shops.length})</span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+        <button onClick={() => setShowCreate(v => !v)}
+          style={{ background: S.accent, border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+          <Plus size={13} /> สร้างร้านใหม่
+        </button>
+      </div>
+
+      {showCreate && (
+        <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>Slug (สำหรับ URL)</label>
+              <input value={newSlug} onChange={e => setNewSlug(e.target.value)} placeholder="my-nail-shop"
+                style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>ชื่อร้าน</label>
+              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ร้านทำเล็บ ABC"
+                style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>อายุการเช่าเริ่มต้น (วัน, เว้นว่าง = ไม่มีกำหนด)</label>
+            <input value={newDays} onChange={e => setNewDays(e.target.value)} type="number" min={0}
+              style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
+          </div>
+          {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{err}</p>}
+          <button onClick={() => createMutation.mutate()} disabled={!newSlug.trim() || !newName.trim() || createMutation.isPending}
+            style={{ background: S.success, border: "none", borderRadius: 8, padding: "9px 16px", cursor: "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            {createMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} สร้างร้าน
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {shops.map((sh: any) => (
+          <div key={sh.id}
+            onClick={() => onSelectShop(sh.id)}
+            style={{
+              background: selectedShopId === sh.id ? `${S.accent}18` : S.card,
+              border: `1.5px solid ${selectedShopId === sh.id ? S.accent : S.border}`,
+              borderRadius: 12, padding: 14, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+            }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{sh.name} <span style={{ color: S.muted, fontSize: 12, fontWeight: 400 }}>/{sh.slug}</span></div>
+              <div style={{ color: sh.is_expired ? S.error : S.muted, fontSize: 12, marginTop: 2 }}>
+                {sh.is_active ? "" : "🚫 ระงับการใช้งาน · "}
+                {sh.expired_at ? (sh.is_expired ? "หมดอายุแล้ว" : `เหลือ ${sh.days_left} วัน`) : "ไม่มีกำหนดหมดอายุ"}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+              <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: 30 })} title="เพิ่ม 30 วัน"
+                style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <PlusCircle size={12} /> 30วัน
+              </button>
+              <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: -30 })} title="ลด 30 วัน"
+                style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.warning, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <MinusCircle size={12} /> 30วัน
+              </button>
+              <button onClick={() => toggleActiveMutation.mutate({ id: sh.id, is_active: !sh.is_active })}
+                title={sh.is_active ? "ระงับการใช้งาน" : "เปิดใช้งาน"}
+                style={{ background: sh.is_active ? `${S.error}22` : `${S.success}22`, border: `1px solid ${sh.is_active ? S.error : S.success}55`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: sh.is_active ? S.error : S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                {sh.is_active ? <Ban size={12} /> : <PlayCircle size={12} />} {sh.is_active ? "ระงับ" : "เปิด"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function NailSuperAdminPage() {
   const [sKey, setSKey] = useState<string | null>(() => localStorage.getItem(LOCAL_KEY));
@@ -467,19 +586,22 @@ export default function NailSuperAdminPage() {
   const [expiryLoading, setExpiryLoading] = useState(false);
   const [expiryMsg, setExpiryMsg] = useState("");
 
+  // ร้านที่กำลังเลือกจัดการ (multi-shop) — ค่าเริ่มต้น 1 = ร้านหลัก
+  const [selectedShopId, setSelectedShopId] = useState<number>(1);
+
   const qc = useQueryClient();
 
   const { data: shopStatus, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useQuery({
-    queryKey: ["sa-status"],
-    queryFn: () => saFetch(`${API}/superadmin/status`, sKey!),
+    queryKey: ["sa-status", selectedShopId],
+    queryFn: () => saFetch(`${API}/superadmin/status?shop_id=${selectedShopId}`, sKey!),
     enabled: !!sKey,
     retry: 1,
     staleTime: 30000,
   });
 
   const { data: renewals = [], isLoading: renewalsLoading, refetch: refetchRenewals } = useQuery<any[]>({
-    queryKey: ["sa-renewals", filterStatus],
-    queryFn: () => saFetch(`${API}/superadmin/renewals${filterStatus ? `?status=${filterStatus}` : ""}`, sKey!),
+    queryKey: ["sa-renewals", filterStatus, selectedShopId],
+    queryFn: () => saFetch(`${API}/superadmin/renewals?shop_id=${selectedShopId}${filterStatus ? `&status=${filterStatus}` : ""}`, sKey!),
     enabled: !!sKey,
     staleTime: 15000,
   });
@@ -487,7 +609,7 @@ export default function NailSuperAdminPage() {
   const rejectMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       saFetch(`${API}/superadmin/renewals/${id}/reject`, sKey!, { method: "POST", body: JSON.stringify({ reason }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sa-renewals"] }); qc.invalidateQueries({ queryKey: ["sa-status"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sa-renewals"] }); qc.invalidateQueries({ queryKey: ["sa-status"] }); qc.invalidateQueries({ queryKey: ["sa-shops"] }); },
   });
 
   useEffect(() => {
@@ -500,9 +622,10 @@ export default function NailSuperAdminPage() {
   const setExpiry = async () => {
     setExpiryLoading(true); setExpiryMsg("");
     try {
-      await saFetch(`${API}/superadmin/set-expiry`, sKey!, { method: "PUT", body: JSON.stringify({ expired_at: newExpiry || null }) });
+      await saFetch(`${API}/superadmin/set-expiry?shop_id=${selectedShopId}`, sKey!, { method: "PUT", body: JSON.stringify({ expired_at: newExpiry || null }) });
       setExpiryMsg("✓ บันทึกแล้ว");
       refetchStatus();
+      qc.invalidateQueries({ queryKey: ["sa-shops"] });
     } catch (e: any) { setExpiryMsg(`⚠ ${e.message}`); }
     finally { setExpiryLoading(false); }
   };
@@ -511,9 +634,10 @@ export default function NailSuperAdminPage() {
     if (!confirm("ยืนยันลบวันหมดอายุ? ร้านจะเปิดไม่มีกำหนด")) return;
     setExpiryLoading(true);
     try {
-      await saFetch(`${API}/superadmin/set-expiry`, sKey!, { method: "PUT", body: JSON.stringify({ expired_at: null }) });
+      await saFetch(`${API}/superadmin/set-expiry?shop_id=${selectedShopId}`, sKey!, { method: "PUT", body: JSON.stringify({ expired_at: null }) });
       setNewExpiry(""); setExpiryMsg("✓ ลบวันหมดอายุแล้ว");
       refetchStatus();
+      qc.invalidateQueries({ queryKey: ["sa-shops"] });
     } catch (e: any) { setExpiryMsg(`⚠ ${e.message}`); }
     finally { setExpiryLoading(false); }
   };
@@ -563,11 +687,14 @@ export default function NailSuperAdminPage() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px 16px" }}>
+        {/* Shops management + selector */}
+        <ShopsSection sKey={sKey} selectedShopId={selectedShopId} onSelectShop={setSelectedShopId} />
+
         {/* Shop Status Card */}
         <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
             <Crown size={18} color={S.accent} />
-            <span style={{ fontWeight: 700, fontSize: 15 }}>สถานะร้าน</span>
+            <span style={{ fontWeight: 700, fontSize: 15 }}>สถานะร้าน #{selectedShopId}</span>
             {statusLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
           </div>
           {shopStatus && (
@@ -621,7 +748,7 @@ export default function NailSuperAdminPage() {
         <PaymentInfoSection sKey={sKey} />
 
         {/* Pricing */}
-        <PricingSection sKey={sKey} />
+        <PricingSection sKey={sKey} shopId={selectedShopId} />
 
         {/* Renewal Requests */}
         <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20 }}>

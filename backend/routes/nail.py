@@ -7,8 +7,10 @@ Admin   : /api/nail/admin/* (requires admin bearer token)
 import json
 import logging
 import random
+import re
 import secrets
 import string
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -1269,8 +1271,8 @@ def admin_generate_slots_from_template(
     """สร้างสล็อตล่วงหน้าจากเทมเพลตทันที (แทนที่จะรอให้ลูกค้าเปิดหน้าจองก่อน) —
     ข้ามวันที่มีสล็อตอยู่แล้ว (ทั้งจากเทมเพลตเดิมหรือที่แอดมินสร้างเอง)
     รองรับ from_date เพื่อ generate จากวันที่กำหนด แทนวันนี้"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     # กำหนดจุดเริ่มต้น
     if body.from_date:
         try:
@@ -1283,9 +1285,9 @@ def admin_generate_slots_from_template(
     generated = []
     for i in range(days):
         date_str = (start_date + timedelta(days=i)).isoformat()
-        before = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
+        before = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).count()
         _ensure_slots_for_date(db, shop, date_str)
-        after = db.query(NailTimeSlot).filter_by(slot_date=date_str).count()
+        after = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).count()
         if after > before:
             generated.append(date_str)
     return {"ok": True, "generated_dates": generated, "generated_count": len(generated)}
@@ -1305,8 +1307,8 @@ def admin_sync_future_slots_to_template(
     """Sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตปัจจุบันทุกวัน (ต่างจาก /generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน) —
     ใช้ตอนแก้เทมเพลตแล้วต้องการให้มีผลกับวันที่เคย generate สล็อตไปแล้วด้วย
     สล็อตที่มีคนจองไว้แล้วจะถูกเก็บไว้เสมอ ไม่ถูกลบหรือแก้เวลา"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     if body.from_date:
         try:
             start_date = datetime.strptime(body.from_date, "%Y-%m-%d").date()
@@ -1361,7 +1363,8 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
             raise
 
     # ── Step 1: ลบสล็อตที่ไม่มีการจองออก ──────────────────────────────────
-    existing = db.query(NailTimeSlot).filter_by(slot_date=date_str).all()
+    shop_id = shop.shop_id
+    existing = db.query(NailTimeSlot).filter_by(slot_date=date_str, shop_id=shop_id).all()
     deleted = 0
     has_booked = False
     surviving_start_times: set[str] = set()
@@ -1394,7 +1397,7 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
         db.commit()
         return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
 
-    tmpl = db.query(NailSlotTemplate).filter_by(day_of_week=d.weekday(), is_open=True).first()
+    tmpl = db.query(NailSlotTemplate).filter_by(shop_id=shop_id, day_of_week=d.weekday(), is_open=True).first()
     if tmpl and tmpl.rounds_count > 0:
         try:
             cursor = datetime.strptime(tmpl.start_time, "%H:%M")
@@ -1409,6 +1412,7 @@ def _apply_template_for_date_core(db: Session, shop: NailShopSettings, date_str:
                 # เพิ่มเฉพาะสล็อตที่ไม่ซ้ำกับที่เหลืออยู่ (สล็อตที่มี booking)
                 if start_str not in surviving_start_times:
                     db.add(NailTimeSlot(
+                        shop_id=shop_id,
                         slot_date=date_str,
                         start_time=start_str,
                         end_time=end.strftime("%H:%M"),
@@ -1431,8 +1435,8 @@ def admin_apply_template_for_day(
     """รีเซ็ตสล็อตวันนั้นให้ตรงกับเทมเพลต —
     ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
     ต่างจาก _ensure_slots_for_date ตรงที่ทำงานได้แม้จะมีสล็อตเดิมอยู่แล้ว"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     date_str = body.date
     result = _apply_template_for_date_core(db, shop, date_str)
     return {"ok": True, **result}
@@ -1444,8 +1448,9 @@ def admin_create_slot(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     slot = NailTimeSlot(
+        shop_id=shop_id,
         slot_date=body.slot_date,
         start_time=body.start_time,
         end_time=body.end_time,
@@ -1473,17 +1478,18 @@ def admin_create_slots_batch(
     authorization: str = Header(None),
 ):
     """สร้าง slot หลายวัน/หลายเวลาพร้อมกัน"""
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     created = 0
     for date in body.dates:
         for t in body.times:
             # ตรวจไม่ duplicate
             existing = db.query(NailTimeSlot).filter_by(
-                slot_date=date, start_time=t["start"]
+                slot_date=date, start_time=t["start"], shop_id=shop_id
             ).first()
             if existing:
                 continue
             slot = NailTimeSlot(
+                shop_id=shop_id,
                 slot_date=date,
                 start_time=t["start"],
                 end_time=t["end"],
@@ -1504,8 +1510,8 @@ def admin_update_slot(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    slot = db.query(NailTimeSlot).filter_by(id=slot_id).first()
+    shop_id = _check_admin(authorization)
+    slot = db.query(NailTimeSlot).filter_by(id=slot_id, shop_id=shop_id).first()
     if not slot:
         raise HTTPException(status_code=404, detail="ไม่พบ slot")
     if "is_available" in body:
@@ -1522,8 +1528,8 @@ def admin_delete_slot(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    slot = db.query(NailTimeSlot).filter_by(id=slot_id).first()
+    shop_id = _check_admin(authorization)
+    slot = db.query(NailTimeSlot).filter_by(id=slot_id, shop_id=shop_id).first()
     if not slot:
         raise HTTPException(status_code=404, detail="ไม่พบ slot")
     db.delete(slot)
@@ -1541,8 +1547,8 @@ class GalleryBody(BaseModel):
 
 @router.get("/admin/gallery")
 def admin_list_gallery(db: Session = Depends(get_db), authorization: str = Header(None)):
-    _check_admin(authorization)
-    items = db.query(NailGallery).order_by(NailGallery.sort_order, NailGallery.id.desc()).all()
+    shop_id = _check_admin(authorization)
+    items = db.query(NailGallery).filter_by(shop_id=shop_id).order_by(NailGallery.sort_order, NailGallery.id.desc()).all()
     return [{"id": g.id, "image_url": g.image_url, "caption": g.caption,
              "sort_order": g.sort_order, "is_active": g.is_active} for g in items]
 
@@ -1553,8 +1559,8 @@ def admin_add_gallery(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    g = NailGallery(image_url=body.image_url, caption=body.caption, sort_order=body.sort_order or 0)
+    shop_id = _check_admin(authorization)
+    g = NailGallery(shop_id=shop_id, image_url=body.image_url, caption=body.caption, sort_order=body.sort_order or 0)
     db.add(g)
     db.commit()
     db.refresh(g)
@@ -1567,8 +1573,8 @@ def admin_delete_gallery(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    g = db.query(NailGallery).filter_by(id=gallery_id).first()
+    shop_id = _check_admin(authorization)
+    g = db.query(NailGallery).filter_by(id=gallery_id, shop_id=shop_id).first()
     if not g:
         raise HTTPException(status_code=404, detail="ไม่พบรูป")
     db.delete(g)
@@ -1590,8 +1596,8 @@ class ServiceBody(BaseModel):
 
 @router.get("/admin/services")
 def admin_list_services(db: Session = Depends(get_db), authorization: str = Header(None)):
-    _check_admin(authorization)
-    items = db.query(NailService).filter(NailService.is_active == True).order_by(NailService.sort_order, NailService.id).all()
+    shop_id = _check_admin(authorization)
+    items = db.query(NailService).filter(NailService.is_active == True, NailService.shop_id == shop_id).order_by(NailService.sort_order, NailService.id).all()
     return [{"id": s.id, "name": s.name, "description": s.description,
              "duration_minutes": s.duration_minutes, "price": float(s.price or 0),
              "deposit_amount": float(s.deposit_amount) if s.deposit_amount is not None else None,
@@ -1605,8 +1611,9 @@ def admin_create_service(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     s = NailService(
+        shop_id=shop_id,
         name=body.name, description=body.description,
         duration_minutes=body.duration_minutes or 60,
         price=body.price or 0,
@@ -1627,8 +1634,8 @@ def admin_update_service(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    s = db.query(NailService).filter_by(id=service_id).first()
+    shop_id = _check_admin(authorization)
+    s = db.query(NailService).filter_by(id=service_id, shop_id=shop_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="ไม่พบบริการ")
     s.name = body.name
@@ -1648,8 +1655,8 @@ def admin_delete_service(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    s = db.query(NailService).filter_by(id=service_id).first()
+    shop_id = _check_admin(authorization)
+    s = db.query(NailService).filter_by(id=service_id, shop_id=shop_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="ไม่พบบริการ")
     s.is_active = False
@@ -1666,8 +1673,8 @@ class StaffBody(BaseModel):
 
 @router.get("/admin/staff")
 def admin_list_staff(db: Session = Depends(get_db), authorization: str = Header(None)):
-    _check_admin(authorization)
-    items = db.query(NailStaff).order_by(NailStaff.id).all()
+    shop_id = _check_admin(authorization)
+    items = db.query(NailStaff).filter_by(shop_id=shop_id).order_by(NailStaff.id).all()
     return [{"id": s.id, "name": s.name, "color": s.color, "is_active": s.is_active}
             for s in items]
 
@@ -1678,8 +1685,8 @@ def admin_create_staff(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    s = NailStaff(name=body.name, color=body.color or "#FF6B9D")
+    shop_id = _check_admin(authorization)
+    s = NailStaff(shop_id=shop_id, name=body.name, color=body.color or "#FF6B9D")
     db.add(s)
     db.commit()
     db.refresh(s)
@@ -1692,8 +1699,8 @@ def admin_delete_staff(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    s = db.query(NailStaff).filter_by(id=staff_id).first()
+    shop_id = _check_admin(authorization)
+    s = db.query(NailStaff).filter_by(id=staff_id, shop_id=shop_id).first()
     if not s:
         raise HTTPException(status_code=404, detail="ไม่พบช่าง")
     s.is_active = False
@@ -1728,8 +1735,8 @@ class ShopSettingsBody(BaseModel):
 
 @router.get("/admin/settings")
 def admin_get_settings(db: Session = Depends(get_db), authorization: str = Header(None)):
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     return {
         "shop_name": shop.shop_name,
         "shop_logo_url": shop.shop_logo_url,
@@ -1760,8 +1767,8 @@ def admin_update_settings(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     for field, val in body.model_dump(exclude_none=True).items():
         if field == "expired_at" and val:
             setattr(shop, field, datetime.fromisoformat(val))
@@ -1785,20 +1792,35 @@ def _effective_renewal_plans(shop: "NailShopSettings") -> dict:
     }
 
 
+_SUPERADMIN_FAILS: list = []   # [timestamp, ...] — in-memory rate limiter สำหรับ key ผิด (global, ไม่แยกตาม IP)
+_SUPERADMIN_FAIL_WINDOW = 300  # 5 นาที
+_SUPERADMIN_FAIL_LIMIT = 10
+
+
 def _check_superadmin(x_super_admin_key: Optional[str] = Header(None)):
     cfg = get_settings()
     key = cfg.nail_super_admin_key
     if not key:
         raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
+
+    now_ts = time.time()
+    while _SUPERADMIN_FAILS and now_ts - _SUPERADMIN_FAILS[0] > _SUPERADMIN_FAIL_WINDOW:
+        _SUPERADMIN_FAILS.pop(0)
+    if len(_SUPERADMIN_FAILS) >= _SUPERADMIN_FAIL_LIMIT:
+        logging.warning(f"[superadmin] rate-limited: {len(_SUPERADMIN_FAILS)} failed attempts in last {_SUPERADMIN_FAIL_WINDOW}s")
+        raise HTTPException(status_code=429, detail="พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอสักครู่")
+
     if not secrets.compare_digest(x_super_admin_key or "", key):
+        _SUPERADMIN_FAILS.append(now_ts)
+        logging.warning("[superadmin] failed key attempt")
         raise HTTPException(status_code=403, detail="Key ไม่ถูกต้อง")
 
 
 @router.get("/admin/rental-status")
 def admin_rental_status(db: Session = Depends(get_db), authorization: str = Header(None)):
     """สถานะการเช่าระบบ + คำขอต่ออายุล่าสุด"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     now = _now()
     expired = bool(shop.expired_at and now > shop.expired_at)
     days_left: Optional[int] = None
@@ -1807,6 +1829,7 @@ def admin_rental_status(db: Session = Depends(get_db), authorization: str = Head
 
     last_req = (
         db.query(NailRenewalRequest)
+        .filter_by(shop_id=shop_id)
         .order_by(NailRenewalRequest.requested_at.desc())
         .first()
     )
@@ -1830,8 +1853,8 @@ def admin_rental_status(db: Session = Depends(get_db), authorization: str = Head
 @router.get("/admin/renewal-plans")
 def admin_get_renewal_plans(db: Session = Depends(get_db), authorization: str = Header(None)):
     """ราคาค่าเช่าที่ใช้จริงกับร้านนี้ (super-admin อาจตั้งราคาพิเศษเฉพาะร้านไว้)"""
-    _check_admin(authorization)
-    shop = _get_shop(db)
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
     plans = _effective_renewal_plans(shop)
     return [{"months": m, "price": plans[m]} for m in (1, 3, 6, 12)]
 
@@ -1850,7 +1873,7 @@ async def admin_submit_renewal(
     authorization: str = Header(None),
 ):
     """ส่งคำขอต่ออายุ — angpao ใช้ TrueMoney auto-redeem อัตโนมัติ, สลิปรอ super-admin ตรวจสอบ"""
-    _check_admin(authorization)
+    shop_id = _check_admin(authorization)
     if body.payment_channel not in ("bank_slip", "angpao"):
         raise HTTPException(status_code=400, detail="ช่องทางชำระเงินไม่ถูกต้อง")
     if body.payment_channel == "bank_slip" and not body.slip_image:
@@ -1858,7 +1881,7 @@ async def admin_submit_renewal(
     if body.payment_channel == "angpao" and not body.voucher_code:
         raise HTTPException(status_code=400, detail="กรุณาระบุลิงก์/รหัสซองอั่งเปา")
 
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_id)
     plan_price = _effective_renewal_plans(shop).get(body.duration_months)
     if not plan_price:
         raise HTTPException(status_code=400, detail="ระยะเวลาไม่ถูกต้อง (เลือก 1, 3, 6 หรือ 12 เดือน)")
@@ -1887,6 +1910,7 @@ async def admin_submit_renewal(
         image_or_voucher = body.slip_image
 
     req = NailRenewalRequest(
+        shop_id=shop_id,
         duration_months=body.duration_months,
         amount=plan_price,
         slip_image=image_or_voucher,
@@ -1983,14 +2007,26 @@ def _parse_tm_fail_reason(truemoney_result: str | None) -> str | None:
         return None
 
 
+def _require_platform_admin(authorization: str) -> int:
+    """
+    Wallet/customer credit (Customer, CreditTransaction, TopupRequest) เป็นทรัพยากรระดับ
+    แพลตฟอร์ม ไม่ผูกกับร้านทำเล็บร้านใดร้านหนึ่ง — จำกัดให้เฉพาะแอดมินของร้านหลัก (shop_id=1)
+    เท่านั้นที่จัดการได้ ป้องกันแอดมินร้านอื่น (ที่ superadmin สร้างเพิ่ม) เข้าถึงกระเป๋าเงินลูกค้าทั้งระบบ
+    """
+    shop_id = _check_admin(authorization)
+    if shop_id != 1:
+        raise HTTPException(status_code=403, detail="ฟีเจอร์นี้ใช้ได้เฉพาะแอดมินร้านหลักเท่านั้น")
+    return shop_id
+
+
 @router.get("/admin/topup-requests")
 def nail_admin_list_topups(
     status: str = "pending",
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """รายการขอเติมเครดิตของลูกค้า (nail admin auth)"""
-    _check_admin(authorization)
+    """รายการขอเติมเครดิตของลูกค้า (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     from backend.models import TopupRequest
     q = db.query(TopupRequest)
     if status != "all":
@@ -2024,8 +2060,8 @@ def nail_admin_approve_topup(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """อนุมัติคำขอเติมเครดิต (nail admin auth)"""
-    _check_admin(authorization)
+    """อนุมัติคำขอเติมเครดิต (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     from backend.models import TopupRequest
     topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
     if not topup:
@@ -2058,8 +2094,8 @@ def nail_admin_reject_topup(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """ปฏิเสธคำขอเติมเครดิต (nail admin auth)"""
-    _check_admin(authorization)
+    """ปฏิเสธคำขอเติมเครดิต (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     from backend.models import TopupRequest
     topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
     if not topup:
@@ -2076,8 +2112,8 @@ def nail_admin_list_customers(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """รายชื่อลูกค้าทั้งหมด (nail admin auth)"""
-    _check_admin(authorization)
+    """รายชื่อลูกค้าทั้งหมด (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     customers = db.query(Customer).order_by(Customer.id.desc()).limit(300).all()
     return [
         {
@@ -2099,8 +2135,8 @@ def nail_admin_add_credit(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """เพิ่ม/ลด เครดิตให้ลูกค้าใดก็ได้ (nail admin auth)"""
-    _check_admin(authorization)
+    """เพิ่ม/ลด เครดิตให้ลูกค้าใดก็ได้ (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="ไม่พบลูกค้า")
@@ -2129,8 +2165,8 @@ def nail_admin_list_transactions(
     authorization: str = Header(None),
     limit: int = 100,
 ):
-    """ประวัติธุรกรรมเครดิตทั้งหมด (nail admin auth)"""
-    _check_admin(authorization)
+    """ประวัติธุรกรรมเครดิตทั้งหมด (nail admin auth — เฉพาะร้านหลัก)"""
+    _require_platform_admin(authorization)
     txns = (
         db.query(CreditTransaction)
         .order_by(CreditTransaction.id.desc())
@@ -2155,13 +2191,117 @@ def nail_admin_list_transactions(
 
 # ── Super-Admin endpoints (NAIL_SUPER_ADMIN_KEY required) ────────────────────
 
+@router.get("/superadmin/shops")
+def superadmin_list_shops(db: Session = Depends(get_db), x_super_admin_key: Optional[str] = Header(None)):
+    """รายชื่อร้านทั้งหมดในระบบ — ใช้เลือกร้านที่จะจัดการต่อ"""
+    _check_superadmin(x_super_admin_key)
+    shops = db.query(Shop).order_by(Shop.id).all()
+    now = _now()
+    result = []
+    for sh in shops:
+        settings_row = db.query(NailShopSettings).filter_by(shop_id=sh.id).first()
+        expired_at = settings_row.expired_at if settings_row else None
+        expired = bool(expired_at and now > expired_at)
+        result.append({
+            "id": sh.id,
+            "slug": sh.slug,
+            "name": sh.name,
+            "is_active": sh.is_active,
+            "shop_name": settings_row.shop_name if settings_row else None,
+            "expired_at": expired_at.isoformat() if expired_at else None,
+            "is_expired": expired,
+            "days_left": (expired_at - now).days if expired_at and not expired else None,
+        })
+    return result
+
+
+class CreateShopBody(BaseModel):
+    slug: str
+    name: str
+    expiry_days: Optional[int] = 30  # อายุการเช่าเริ่มต้น (วัน) — null = ไม่มีกำหนด
+
+
+@router.post("/superadmin/shops")
+def superadmin_create_shop(
+    body: CreateShopBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """สร้างร้านใหม่ (clone ระบบ) — ข้อมูลของแต่ละร้านแยกกันโดยสมบูรณ์ผ่าน shop_id"""
+    _check_superadmin(x_super_admin_key)
+    slug = (body.slug or "").strip().lower()
+    if not slug or not re.match(r"^[a-z0-9-]+$", slug):
+        raise HTTPException(status_code=400, detail="slug ต้องเป็นตัวอักษรอังกฤษเล็ก ตัวเลข หรือ - เท่านั้น")
+    if db.query(Shop).filter_by(slug=slug).first():
+        raise HTTPException(status_code=409, detail="slug นี้มีร้านอื่นใช้อยู่แล้ว")
+
+    shop_row = Shop(slug=slug, name=body.name, is_active=True)
+    db.add(shop_row)
+    db.flush()  # ได้ shop_row.id
+
+    settings_row = NailShopSettings(shop_id=shop_row.id, shop_name=body.name)
+    if body.expiry_days is not None:
+        settings_row.expired_at = _now() + timedelta(days=max(0, body.expiry_days))
+    db.add(settings_row)
+    db.commit()
+    db.refresh(shop_row)
+
+    _ensure_templates_exist(db, shop_row.id)
+
+    return {"ok": True, "id": shop_row.id, "slug": shop_row.slug}
+
+
+class ShopActiveBody(BaseModel):
+    is_active: bool
+
+
+@router.put("/superadmin/shops/{shop_id}/active")
+def superadmin_set_shop_active(
+    shop_id: int,
+    body: ShopActiveBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """เปิด/ปิด (ระงับ) การใช้งานร้าน — ร้านที่ระงับจะเข้าระบบจองไม่ได้ทันที"""
+    _check_superadmin(x_super_admin_key)
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    shop_row.is_active = body.is_active
+    db.commit()
+    return {"ok": True, "is_active": shop_row.is_active}
+
+
+class ShopExpiryDaysBody(BaseModel):
+    days: int  # จำนวนวันที่จะ "เพิ่ม" (ค่าลบ = ลดอายุ) จากวันหมดอายุปัจจุบัน (หรือวันนี้ถ้ายังไม่มี/หมดแล้ว)
+
+
+@router.put("/superadmin/shops/{shop_id}/expiry-days")
+def superadmin_adjust_shop_expiry_days(
+    shop_id: int,
+    body: ShopExpiryDaysBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ปรับอายุการเช่าของร้าน โดยระบุจำนวนวันที่จะเพิ่ม/ลดจากวันหมดอายุปัจจุบัน"""
+    _check_superadmin(x_super_admin_key)
+    shop = _get_shop(db, shop_id)
+    now = _now()
+    base = shop.expired_at if (shop.expired_at and shop.expired_at > now) else now
+    shop.expired_at = base + timedelta(days=body.days)
+    db.commit()
+    return {"ok": True, "expired_at": shop.expired_at.isoformat() if shop.expired_at else None}
+
+
 @router.get("/superadmin/status")
 def superadmin_status(
+    shop_id: int = 1,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
     _check_superadmin(x_super_admin_key)
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_id)
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
     now = _now()
     expired = bool(shop.expired_at and now > shop.expired_at)
     return {
@@ -2169,13 +2309,16 @@ def superadmin_status(
         "expired_at": shop.expired_at.isoformat() if shop.expired_at else None,
         "is_expired": expired,
         "days_left": (shop.expired_at - now).days if shop.expired_at and not expired else None,
-        "is_active": shop.is_active,
+        # is_active สะท้อนสถานะระงับการใช้งานจริง (Shop.is_active) ที่ superadmin สั่งระงับ/เปิด
+        # ไม่ใช่ NailShopSettings.is_active ซึ่งเป็นคนละ flag
+        "is_active": shop_row.is_active if shop_row else shop.is_active,
     }
 
 
 @router.get("/superadmin/renewals")
 def superadmin_list_renewals(
     status: Optional[str] = None,
+    shop_id: Optional[int] = None,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
@@ -2183,10 +2326,13 @@ def superadmin_list_renewals(
     q = db.query(NailRenewalRequest)
     if status:
         q = q.filter_by(status=status)
+    if shop_id is not None:
+        q = q.filter_by(shop_id=shop_id)
     items = q.order_by(NailRenewalRequest.requested_at.desc()).limit(50).all()
     return [
         {
             "id": r.id,
+            "shop_id": r.shop_id,
             "duration_months": r.duration_months,
             "amount": float(r.amount),
             "status": r.status,
@@ -2209,10 +2355,10 @@ class ShopPricingBody(BaseModel):
 
 
 @router.get("/superadmin/pricing")
-def superadmin_get_pricing(db: Session = Depends(get_db), x_super_admin_key: Optional[str] = Header(None)):
+def superadmin_get_pricing(shop_id: int = 1, db: Session = Depends(get_db), x_super_admin_key: Optional[str] = Header(None)):
     """ราคาค่าเช่าที่ตั้งไว้เฉพาะร้านนี้ (null = ยังใช้ราคากลาง) + ราคากลางเริ่มต้น"""
     _check_superadmin(x_super_admin_key)
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_id)
     return {
         "custom": {
             "price_1m": float(shop.price_1m) if shop.price_1m is not None else None,
@@ -2228,12 +2374,13 @@ def superadmin_get_pricing(db: Session = Depends(get_db), x_super_admin_key: Opt
 @router.put("/superadmin/pricing")
 def superadmin_set_pricing(
     body: ShopPricingBody,
+    shop_id: int = 1,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
     """ตั้งราคาค่าเช่าพิเศษเฉพาะร้านนี้ — ส่ง null เพื่อกลับไปใช้ราคากลาง"""
     _check_superadmin(x_super_admin_key)
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_id)
     shop.price_1m = body.price_1m
     shop.price_3m = body.price_3m
     shop.price_6m = body.price_6m
@@ -2319,7 +2466,7 @@ def superadmin_approve_renewal(
         raise HTTPException(status_code=409, detail=f"สถานะปัจจุบัน: {req.status}")
 
     months = body.duration_months_override or req.duration_months
-    shop = _get_shop(db)
+    shop = _get_shop(db, req.shop_id)
     now = _now()
     base = shop.expired_at if (shop.expired_at and shop.expired_at > now) else now
     new_expiry = base + timedelta(days=months * 30)
@@ -2360,12 +2507,13 @@ class SetExpiryBody(BaseModel):
 @router.put("/superadmin/set-expiry")
 def superadmin_set_expiry(
     body: SetExpiryBody,
+    shop_id: int = 1,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
     """ตั้งวันหมดอายุตรงๆ (bypass renewal flow) — ใช้สำหรับ super-admin เปิด/ปิดได้ทันที"""
     _check_superadmin(x_super_admin_key)
-    shop = _get_shop(db)
+    shop = _get_shop(db, shop_id)
     shop.expired_at = datetime.fromisoformat(body.expired_at) if body.expired_at else None
     db.commit()
     return {"ok": True, "expired_at": shop.expired_at.isoformat() if shop.expired_at else None}
