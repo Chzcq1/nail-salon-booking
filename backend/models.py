@@ -262,6 +262,9 @@ class NailShopSettings(Base):
     accept_truemoney_angpao = Column(Boolean, server_default="true", default=True, nullable=False)
     brand_color = Column(String(20), nullable=True)   # hex สีหลักของร้าน เช่น "#B5174B"
     service_section_emoji = Column(String(20), nullable=True, server_default="💅")   # อีโมจิส่วนหัวบริการ — ใช้ server_default เท่านั้น ไม่ใส่ Python default เพื่อไม่ให้ ORM inject emoji ใน INSERT (ป้องกัน encoding error ถ้า column ยังไม่มีใน prod)
+    # "ทำไมต้องเลือกเรา" — บางร้านอยากตั้งกฎ/จุดเด่นเอง บางร้านไม่อยากให้มีเพราะรก จึงต้องเปิด/ปิด และแก้เนื้อหาได้เอง
+    show_why_choose_section = Column(Boolean, server_default="true", default=True, nullable=False)
+    why_choose_custom_text = Column(Text, nullable=True)  # ถ้าตั้งไว้ จะแสดงข้อความนี้แทนจุดเด่นเริ่มต้น 6 ข้อ
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

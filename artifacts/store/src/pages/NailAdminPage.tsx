@@ -578,6 +578,7 @@ function BookingsTab({ token }: { token: string }) {
   const [wName, setWName] = useState("");
   const [wPhone, setWPhone] = useState("");
   const [wTime, setWTime] = useState("09:00");
+  const [wServiceId, setWServiceId] = useState<string>("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmRefundId, setConfirmRefundId] = useState<number | null>(null);
   const [changeServiceFor, setChangeServiceFor] = useState<any | null>(null);
@@ -634,8 +635,14 @@ function BookingsTab({ token }: { token: string }) {
 
   const walkinMutation = useMutation({
     mutationFn: () =>
-      fetch("/api/nail/admin/bookings/walkin", { method: "POST", headers: authH(token), body: JSON.stringify({ customer_name: wName, customer_phone: wPhone, slot_date: filterDate, start_time: wTime }) }).then(r => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] }); setShowWalkin(false); setWName(""); setWPhone(""); },
+      fetch("/api/nail/admin/bookings/walkin", {
+        method: "POST", headers: authH(token),
+        body: JSON.stringify({
+          customer_name: wName, customer_phone: wPhone, slot_date: filterDate, start_time: wTime,
+          service_id: wServiceId ? Number(wServiceId) : undefined,
+        }),
+      }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] }); setShowWalkin(false); setWName(""); setWPhone(""); setWServiceId(""); },
   });
 
   const deleteMutation = useMutation({
@@ -850,7 +857,17 @@ function BookingsTab({ token }: { token: string }) {
                 style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }} />
             ))}
             <input type="time" value={wTime} onChange={e => setWTime(e.target.value)}
-              style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 16, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }} />
+              style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }} />
+            <select value={wServiceId} onChange={e => setWServiceId(e.target.value)}
+              style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg }}>
+              <option value="">ไม่ระบุบริการ (ใช้เวลาเริ่มต้นของร้าน)</option>
+              {services.map((s: any) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.duration_minutes} นาที)</option>
+              ))}
+            </select>
+            <p style={{ fontSize: 12, color: A.muted, marginBottom: 16 }}>
+              💡 สามารถตั้งเวลาทับกับคิวที่มีคนจองไว้แล้วในช่วงนั้นได้ ระบบจะไม่บล็อก — ใช้สำหรับลูกค้าวอคอิน
+            </p>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setShowWalkin(false)} style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>ยกเลิก</button>
               <button onClick={() => walkinMutation.mutate()} disabled={!wName || !wPhone}
@@ -2707,6 +2724,32 @@ function SettingsTab({ token }: { token: string }) {
           />
           <span style={{ fontSize: 13, color: A.muted }}>พิมพ์หรือวางอีโมจิที่ต้องการ เช่น 💅 ✨ 🌸 💖</span>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 14, background: A.pale, border: `1px solid ${A.border}`, borderRadius: 12, padding: 14 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: (form?.show_why_choose_section ?? true) ? 10 : 0 }}>
+          <input
+            type="checkbox"
+            checked={form?.show_why_choose_section ?? true}
+            onChange={e => setForm((p: any) => ({ ...p, show_why_choose_section: e.target.checked }))}
+            style={{ width: 18, height: 18, cursor: "pointer" }}
+          />
+          <span style={{ fontSize: 14, fontWeight: 700, color: A.text }}>แสดงส่วน "ทำไมต้องเลือกร้านเรา" ในหน้าจองคิว</span>
+        </label>
+        {(form?.show_why_choose_section ?? true) && (
+          <>
+            <label style={{ fontSize: 13, color: A.sub, fontWeight: 500, display: "block", marginBottom: 5 }}>
+              ข้อความที่จะแสดง (ปล่อยว่างไว้ = ใช้ข้อความมาตรฐาน)
+            </label>
+            <textarea
+              value={form?.why_choose_custom_text ?? ""}
+              onChange={e => setForm((p: any) => ({ ...p, why_choose_custom_text: e.target.value }))}
+              placeholder={"เขียนกฎ/จุดเด่นของร้านเองได้เลย เช่น\nงดคืนมัดจำหากยกเลิกก่อนถึงคิวไม่ถึง 24 ชม.\nกรุณามาก่อนเวลา 10 นาที"}
+              rows={4}
+              style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: A.bg, resize: "vertical" }}
+            />
+          </>
+        )}
       </div>
 
       <Section title="โซเชียลมีเดีย" />

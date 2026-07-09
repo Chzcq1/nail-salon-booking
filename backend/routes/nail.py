@@ -378,6 +378,8 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
         "brand_color": shop.brand_color or "#B5174B",
         "service_section_emoji": shop.service_section_emoji or "💅",
+        "show_why_choose_section": shop.show_why_choose_section if shop.show_why_choose_section is not None else True,
+        "why_choose_custom_text": shop.why_choose_custom_text,
     }
 
 
@@ -1133,16 +1135,35 @@ def admin_add_walkin(
 ):
     shop_id = _check_admin(authorization)
     service = db.query(NailService).filter_by(id=body.service_id, shop_id=shop_id).first() if body.service_id else None
+    # ตรวจสอบ slot_id ต้องเป็นของร้านนี้เท่านั้น — ป้องกัน cross-tenant linkage ถ้ามีคนส่ง slot_id ของร้านอื่นมา
+    slot = db.query(NailTimeSlot).filter_by(id=body.slot_id, shop_id=shop_id).first() if body.slot_id else None
+    if body.slot_id and not slot:
+        raise HTTPException(status_code=404, detail="ไม่พบสล็อตเวลานี้ในร้านของคุณ")
+    if body.service_id and not service:
+        raise HTTPException(status_code=404, detail="ไม่พบบริการนี้ในร้านของคุณ")
+    # เดา end_time ถ้าไม่ได้ระบุ — ใช้ระยะเวลาของบริการ ถ้าไม่มีก็ใช้ slot_duration_minutes ของร้าน
+    # หมายเหตุ: walk-in ไม่ตรวจสอบเวลาซ้ำ/ทับกับสล็อตอื่นโดยตั้งใจ — ร้านสามารถจองทับเวลาที่มีคนจองออนไลน์ไว้แล้วได้
+    # เพื่อความสะดวก (เช่น ลูกค้าวอคอินมาในช่วงเวลาที่ระบบออนไลน์ปิดรับจองไปแล้ว)
+    end_time = body.end_time
+    if not end_time:
+        try:
+            dur = getattr(service, "duration_minutes", None) if service else None
+            shop_row = _get_shop(db, shop_id)
+            dur = dur or shop_row.slot_duration_minutes or 60
+            start_dt = datetime.strptime(body.start_time, "%H:%M")
+            end_time = (start_dt + timedelta(minutes=dur)).strftime("%H:%M")
+        except Exception:
+            end_time = body.start_time
     booking = NailBooking(
         shop_id=shop_id,
         booking_ref="PENDING",
-        slot_id=body.slot_id,
-        service_id=body.service_id,
+        slot_id=slot.id if slot else None,
+        service_id=service.id if service else None,
         customer_name=body.customer_name,
         customer_phone=body.customer_phone,
         slot_date=body.slot_date,
         start_time=body.start_time,
-        end_time=body.end_time or "",
+        end_time=end_time,
         service_name=service.name if service else None,
         deposit_total=0,
         status="walkin",
@@ -1262,8 +1283,9 @@ def admin_update_slot_templates(
     db: Session = Depends(get_db),
     authorization: str = Header(None),
 ):
-    """บันทึกเทมเพลตประจำสัปดาห์ — จะมีผลกับสล็อตของวันที่ยัง 'ไม่เคยถูกสร้าง' เท่านั้น
-    วันที่แอดมินเคยแก้ไขสล็อตเองแล้วจะไม่ถูกสร้างทับ (ต้องแก้ผ่าน /admin/slots เอง)"""
+    """บันทึกเทมเพลตประจำสัปดาห์ แล้ว sync สล็อตล่วงหน้า 60 วันให้ตรงกับเทมเพลตใหม่ทันที —
+    ลบสล็อตเก่าที่ยังไม่มีคนจอง แล้วสร้างสล็อตใหม่ตามเทมเพลต (สล็อตที่มีคนจองแล้วจะไม่ถูกแก้/ลบ)
+    ป้องกันปัญหาสล็อตเก่าตกค้าง (เช่น 10:30, 14:30 ที่มาจากเทมเพลตเดิมก่อนแก้ไข) ค้างอยู่ในระบบ"""
     shop_id = _check_admin(authorization)
     for item in body.templates:
         if not (0 <= item.day_of_week <= 6):
@@ -1280,7 +1302,21 @@ def admin_update_slot_templates(
         row.max_bookings = max(1, item.max_bookings)
         row.staff_id = item.staff_id
     db.commit()
-    return {"ok": True}
+
+    # sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตใหม่ทันที (ไม่ต้องรอแอดมินกดปุ่มแยก)
+    shop = _get_shop(db, shop_id)
+    today = _now().date()
+    sync_result = {"total_deleted": 0, "total_created": 0}
+    for i in range(60):
+        date_str = (today + timedelta(days=i)).isoformat()
+        try:
+            r = _apply_template_for_date_core(db, shop, date_str)
+            sync_result["total_deleted"] += r["deleted"]
+            sync_result["total_created"] += r["created"]
+        except Exception as e:
+            logger.warning(f"[slot-templates] sync failed for {date_str} (shop {shop_id}): {e}")
+            db.rollback()
+    return {"ok": True, "synced": sync_result}
 
 
 class GenerateSlotsBody(BaseModel):
@@ -1758,6 +1794,8 @@ class ShopSettingsBody(BaseModel):
     accept_truemoney_angpao: Optional[bool] = None
     brand_color: Optional[str] = None
     service_section_emoji: Optional[str] = None  # อีโมจิส่วนหัวบริการ
+    show_why_choose_section: Optional[bool] = None
+    why_choose_custom_text: Optional[str] = None
 
 
 @router.get("/admin/settings")
@@ -1786,6 +1824,8 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "accept_truemoney_angpao": shop.accept_truemoney_angpao if shop.accept_truemoney_angpao is not None else True,
         "brand_color": shop.brand_color or "#B5174B",
         "service_section_emoji": shop.service_section_emoji or "💅",
+        "show_why_choose_section": shop.show_why_choose_section if shop.show_why_choose_section is not None else True,
+        "why_choose_custom_text": shop.why_choose_custom_text,
     }
 
 

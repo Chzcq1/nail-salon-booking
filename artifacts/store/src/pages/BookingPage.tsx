@@ -449,28 +449,36 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         </div>
       )}
 
-      {/* ── จุดเด่นของเรา ── */}
-      <div style={{ padding: "28px 20px 0" }}>
-        <h2 style={{ fontSize: 16, fontWeight: 800, color: P.text, textAlign: "center", marginBottom: 16, letterSpacing: 0.2 }}>
-          ✨ ทำไมต้องเลือก {settings?.shop_name || "ร้านของเรา"}?
-        </h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          {([
-            { icon: "💅", title: "ช่างมือดี มีประสบการณ์", desc: "ทุกชิ้นงานเต็มที่ ใส่ใจทุกรายละเอียด ไม่รีบ ไม่มักง่าย" },
-            { icon: "📱", title: "จองออนไลน์ได้ตลอด 24 ชม.", desc: "เลือกวัน เลือกเวลา ได้เอง ไม่ต้องรอทัก ไม่ต้องโทร" },
-            { icon: "🎨", title: "หลากหลายสไตล์", desc: "เจล ต่อเล็บ เพ้นท์ลาย มีให้เลือกเยอะ ตามสไตล์คุณ" },
-            { icon: "🔒", title: "มัดจำปลอดภัย", desc: "ระบบกระเป๋าเงินออนไลน์ โปร่งใส ตรวจสอบได้ทุกรายการ" },
-            { icon: "⏰", title: "ตรงเวลา ไม่ให้รอนาน", desc: "จัดคิวแม่นยำ เห็นสถานะจองได้ทันทีหลังชำระมัดจำ" },
-            { icon: "📸", title: "แกลเลอรีผลงานจริง", desc: "ดูตัวอย่างผลงานจริงจากร้าน เลือกลายได้ก่อนมาถึง" },
-          ] as { icon: string; title: string; desc: string }[]).map(f => (
-            <div key={f.title} style={{ background: "#fff", border: `1px solid ${P.pinkBorder}`, borderRadius: 14, padding: "14px 12px" }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>{f.icon}</div>
-              <div style={{ fontWeight: 700, fontSize: 13, color: P.text, marginBottom: 4, lineHeight: 1.3 }}>{f.title}</div>
-              <div style={{ fontSize: 11.5, color: P.muted, lineHeight: 1.5 }}>{f.desc}</div>
+      {/* ── จุดเด่นของเรา — ร้านเปิด/ปิด และแก้เนื้อหาเองได้ผ่านหน้าตั้งค่า ── */}
+      {(settings?.show_why_choose_section ?? true) && (
+        <div style={{ padding: "28px 20px 0" }}>
+          <h2 style={{ fontSize: 16, fontWeight: 800, color: P.text, textAlign: "center", marginBottom: 16, letterSpacing: 0.2 }}>
+            ✨ ทำไมต้องเลือก {settings?.shop_name || "ร้านของเรา"}?
+          </h2>
+          {settings?.why_choose_custom_text ? (
+            <div style={{ background: "#fff", border: `1px solid ${P.pinkBorder}`, borderRadius: 14, padding: "16px 16px", whiteSpace: "pre-wrap", fontSize: 13.5, color: P.text, lineHeight: 1.7 }}>
+              {settings.why_choose_custom_text}
             </div>
-          ))}
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {([
+                { icon: "💅", title: "ช่างมือดี มีประสบการณ์", desc: "ทุกชิ้นงานเต็มที่ ใส่ใจทุกรายละเอียด ไม่รีบ ไม่มักง่าย" },
+                { icon: "📱", title: "จองออนไลน์ได้ตลอด 24 ชม.", desc: "เลือกวัน เลือกเวลา ได้เอง ไม่ต้องรอทัก ไม่ต้องโทร" },
+                { icon: "🎨", title: "หลากหลายสไตล์", desc: "เจล ต่อเล็บ เพ้นท์ลาย มีให้เลือกเยอะ ตามสไตล์คุณ" },
+                { icon: "🔒", title: "มัดจำปลอดภัย", desc: "ระบบกระเป๋าเงินออนไลน์ โปร่งใส ตรวจสอบได้ทุกรายการ" },
+                { icon: "⏰", title: "ตรงเวลา ไม่ให้รอนาน", desc: "จัดคิวแม่นยำ เห็นสถานะจองได้ทันทีหลังชำระมัดจำ" },
+                { icon: "📸", title: "แกลเลอรีผลงานจริง", desc: "ดูตัวอย่างผลงานจริงจากร้าน เลือกลายได้ก่อนมาถึง" },
+              ] as { icon: string; title: string; desc: string }[]).map(f => (
+                <div key={f.title} style={{ background: "#fff", border: `1px solid ${P.pinkBorder}`, borderRadius: 14, padding: "14px 12px" }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{f.icon}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: P.text, marginBottom: 4, lineHeight: 1.3 }}>{f.title}</div>
+                  <div style={{ fontSize: 11.5, color: P.muted, lineHeight: 1.5 }}>{f.desc}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Gallery */}
       {gallery.length > 0 && (

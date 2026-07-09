@@ -436,6 +436,8 @@ def _run_migrations(engine):
 
         # ── service_section_emoji — อีโมจิส่วนหัวบริการ (เจ้าของร้านแก้ได้เอง) ───────
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS service_section_emoji VARCHAR(20) DEFAULT '💅'",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS show_why_choose_section BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS why_choose_custom_text TEXT",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
