@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     gafiwshop_key_api: Optional[str] = Field(default=None)
     nail_super_admin_key: Optional[str] = Field(default=None)  # key สำหรับ super-admin ระบบเช่า
+    nail_super_admin_email: Optional[str] = Field(default=None)  # email รับ OTP ยืนยันลบร้าน
 
     class Config:
         env_file = ".env"

@@ -176,7 +176,16 @@ function playBookingAlert() {
 export default function NailAdminPage() {
   const slug = useShopSlug();
   const [tab, setTab] = useState<Tab>("dashboard");
-  const [token, setToken] = useState(() => localStorage.getItem("nail_admin_token") || "");
+  // Key แยกตาม slug เพื่อไม่ให้ร้าน A กับ B ใช้ token เดียวกัน
+  const storageKey = `nail_admin_token${slug ? `_${slug}` : ""}`;
+  const [token, setToken] = useState(() => localStorage.getItem(storageKey) || "");
+
+  // ซิงก์ token เมื่อ slug เปลี่ยน (SPA navigation ระหว่างร้าน)
+  useEffect(() => {
+    const stored = localStorage.getItem(storageKey) || "";
+    setToken(stored);
+  }, [storageKey]);
+
   const [newBookingAlert, setNewBookingAlert] = useState(false);
   const knownBookingIds = useRef<Set<number>>(new Set());
   const isFirstPoll = useRef(true);
@@ -267,7 +276,7 @@ export default function NailAdminPage() {
       });
       const data = await res.json();
       if (res.ok && data.access_token) {
-        localStorage.setItem("nail_admin_token", data.access_token);
+        localStorage.setItem(storageKey, data.access_token);
         setToken(data.access_token);
         setAuthError("");
       } else {
@@ -416,7 +425,7 @@ export default function NailAdminPage() {
             <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, margin: 0 }}>Nail Salon Admin</p>
           </div>
         </div>
-        <button onClick={() => { localStorage.removeItem("nail_admin_token"); setToken(""); }}
+        <button onClick={() => { localStorage.removeItem(storageKey); setToken(""); }}
           style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 100, padding: "6px 14px", color: "#fff", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
           ออกจากระบบ
         </button>

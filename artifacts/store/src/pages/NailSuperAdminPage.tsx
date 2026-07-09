@@ -15,7 +15,7 @@ import {
   Shield, CheckCircle, XCircle, Clock, Loader2, RefreshCw,
   Calendar, AlertTriangle, Crown, LogOut, Eye, EyeOff, ExternalLink,
   Tag, Activity, Database, Save, Store, Plus, Ban, PlayCircle, PlusCircle, MinusCircle,
-  Copy, Key, Link,
+  Copy, Key, Link, Trash2, Pencil, X,
 } from "lucide-react";
 
 // ── Design tokens (distinct dark-blue theme) ─────────────────────────────────
@@ -457,6 +457,100 @@ function UsageSection({ sKey }: { sKey: string }) {
 }
 
 // ── Shops Management ─────────────────────────────────────────────────────────
+// ── Delete Shop Modal ─────────────────────────────────────────────────────────
+function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: string; onClose: () => void; onDone: () => void }) {
+  const [step, setStep] = useState<"confirm" | "otp">("confirm");
+  const [confirmSlug, setConfirmSlug] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [msg, setMsg] = useState("");
+  const [emailSent, setEmailSent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const requestOtp = async () => {
+    if (confirmSlug.trim() !== shop.slug) { setMsg("slug ไม่ตรง"); return; }
+    setLoading(true); setMsg("");
+    try {
+      const d = await saFetch(`${API}/superadmin/shops/${shop.id}/delete-otp`, sKey, { method: "POST" });
+      setEmailSent(d.email ?? null);
+      setStep("otp");
+    } catch (e: any) { setMsg(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const confirmDelete = async () => {
+    setLoading(true); setMsg("");
+    try {
+      await saFetch(`${API}/superadmin/shops/${shop.id}`, sKey, {
+        method: "DELETE",
+        body: JSON.stringify({ otp_code: otpCode.trim(), confirm_slug: confirmSlug.trim() }),
+      });
+      onDone();
+    } catch (e: any) { setMsg(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <motion.div initial={{ scale: 0.94, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        style={{ background: S.surface, border: `1.5px solid ${S.error}66`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 420 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <Trash2 size={18} color={S.error} />
+          <span style={{ fontWeight: 700, fontSize: 16, color: S.error, flex: 1 }}>ลบร้าน — {shop.name}</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.muted }}><X size={18} /></button>
+        </div>
+
+        {step === "confirm" && (
+          <>
+            <div style={{ background: `${S.error}18`, border: `1px solid ${S.error}44`, borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              <p style={{ color: S.error, fontSize: 13, margin: 0, lineHeight: 1.6 }}>
+                ⚠️ การลบร้านจะ<strong>ลบข้อมูลทั้งหมดถาวร</strong>รวมถึงการจอง บริการ พนักงาน และสถิติทั้งหมด ไม่สามารถกู้คืนได้
+              </p>
+            </div>
+            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>
+              พิมพ์ slug ร้าน <strong style={{ color: S.text }}>{shop.slug}</strong> เพื่อยืนยัน
+            </label>
+            <input value={confirmSlug} onChange={e => { setConfirmSlug(e.target.value); setMsg(""); }}
+              placeholder={shop.slug} autoFocus
+              style={{ width: "100%", background: S.card, border: `1.5px solid ${confirmSlug === shop.slug ? S.error : S.border}`, borderRadius: 8, padding: "10px 12px", color: S.text, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box", marginBottom: 12 }} />
+            {msg && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{msg}</p>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onClose} style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", cursor: "pointer", color: S.sub, fontFamily: "inherit", fontSize: 13 }}>ยกเลิก</button>
+              <button onClick={requestOtp} disabled={confirmSlug !== shop.slug || loading}
+                style={{ flex: 1, background: confirmSlug === shop.slug ? S.error : S.card, border: "none", borderRadius: 8, padding: "10px", cursor: confirmSlug === shop.slug ? "pointer" : "not-allowed", color: confirmSlug === shop.slug ? "#fff" : S.muted, fontFamily: "inherit", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {loading ? <Loader2 size={13} className="animate-spin" /> : null} ขอ OTP
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === "otp" && (
+          <>
+            <div style={{ background: S.card, borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              {emailSent
+                ? <p style={{ color: S.success, fontSize: 13, margin: 0 }}>✓ ส่ง OTP ไปที่ <strong>{emailSent}</strong> แล้ว</p>
+                : <p style={{ color: S.warning, fontSize: 13, margin: 0 }}>ยังไม่ได้ตั้ง NAIL_SUPER_ADMIN_EMAIL — ดู OTP ได้จาก Render server logs</p>
+              }
+            </div>
+            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>กรอก OTP 6 หลัก</label>
+            <input value={otpCode} onChange={e => { setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setMsg(""); }}
+              placeholder="000000" maxLength={6} autoFocus inputMode="numeric"
+              style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px 12px", color: S.text, fontFamily: "'Courier New', monospace", fontSize: 20, letterSpacing: 6, textAlign: "center", boxSizing: "border-box", marginBottom: 12 }} />
+            {msg && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{msg}</p>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setStep("confirm"); setOtpCode(""); setMsg(""); }} style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", cursor: "pointer", color: S.sub, fontFamily: "inherit", fontSize: 13 }}>ย้อนกลับ</button>
+              <button onClick={confirmDelete} disabled={otpCode.length !== 6 || loading}
+                style={{ flex: 2, background: otpCode.length === 6 ? S.error : S.card, border: "none", borderRadius: 8, padding: "10px", cursor: otpCode.length === 6 ? "pointer" : "not-allowed", color: otpCode.length === 6 ? "#fff" : S.muted, fontFamily: "inherit", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                {loading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} ยืนยันลบร้านถาวร
+              </button>
+            </div>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; selectedShopId: number; onSelectShop: (id: number) => void }) {
   const qc = useQueryClient();
   const { data: shops = [], isLoading } = useQuery<any[]>({
@@ -471,6 +565,9 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
   const [newDays, setNewDays] = useState("30");
   const [err, setErr] = useState("");
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [deleteShop, setDeleteShop] = useState<any | null>(null);
 
   const copyLink = (e: React.MouseEvent, slug: string, id: number, isAdmin = false) => {
     e.stopPropagation();
@@ -507,90 +604,155 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sa-shops"] }),
   });
 
-  return (
-    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <Store size={18} color={S.accent} />
-        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>ร้านทั้งหมด ({shops.length})</span>
-        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
-        <button onClick={() => setShowCreate(v => !v)}
-          style={{ background: S.accent, border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-          <Plus size={13} /> สร้างร้านใหม่
-        </button>
-      </div>
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      saFetch(`${API}/superadmin/shops/${id}/name`, sKey, { method: "PUT", body: JSON.stringify({ name }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sa-shops"] }); setEditingId(null); },
+  });
 
-      {showCreate && (
-        <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>Slug (สำหรับ URL)</label>
-              <input value={newSlug} onChange={e => setNewSlug(e.target.value)} placeholder="my-nail-shop"
-                style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
-            </div>
-            <div>
-              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>ชื่อร้าน</label>
-              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ร้านทำเล็บ ABC"
-                style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
-            </div>
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>อายุการเช่าเริ่มต้น (วัน, เว้นว่าง = ไม่มีกำหนด)</label>
-            <input value={newDays} onChange={e => setNewDays(e.target.value)} type="number" min={0}
-              style={{ width: "100%", background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "8px 10px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box" }} />
-          </div>
-          {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{err}</p>}
-          <button onClick={() => createMutation.mutate()} disabled={!newSlug.trim() || !newName.trim() || createMutation.isPending}
-            style={{ background: S.success, border: "none", borderRadius: 8, padding: "9px 16px", cursor: "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-            {createMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} สร้างร้าน
+  const inputStyle: React.CSSProperties = {
+    background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8,
+    padding: "7px 10px", color: S.text, fontFamily: "inherit", fontSize: 13,
+  };
+
+  return (
+    <>
+      {/* Delete confirmation modal */}
+      <AnimatePresence>
+        {deleteShop && (
+          <DeleteShopModal
+            shop={deleteShop}
+            sKey={sKey}
+            onClose={() => setDeleteShop(null)}
+            onDone={() => {
+              qc.invalidateQueries({ queryKey: ["sa-shops"] });
+              setDeleteShop(null);
+              if (selectedShopId === deleteShop.id) onSelectShop(1);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <Store size={18} color={S.accent} />
+          <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>ร้านทั้งหมด ({shops.length})</span>
+          {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+          <button onClick={() => setShowCreate(v => !v)}
+            style={{ background: S.accent, border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <Plus size={13} /> สร้างร้านใหม่
           </button>
         </div>
-      )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {shops.map((sh: any) => (
-          <div key={sh.id}
-            onClick={() => onSelectShop(sh.id)}
-            style={{
-              background: selectedShopId === sh.id ? `${S.accent}18` : S.card,
-              border: `1.5px solid ${selectedShopId === sh.id ? S.accent : S.border}`,
-              borderRadius: 12, padding: 14, cursor: "pointer",
-              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-            }}>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{sh.name} <span style={{ color: S.muted, fontSize: 12, fontWeight: 400 }}>/{sh.slug}</span></div>
-              <div style={{ color: sh.is_expired ? S.error : S.muted, fontSize: 12, marginTop: 2 }}>
-                {sh.is_active ? "" : "🚫 ระงับการใช้งาน · "}
-                {sh.expired_at ? (sh.is_expired ? "หมดอายุแล้ว" : `เหลือ ${sh.days_left} วัน`) : "ไม่มีกำหนดหมดอายุ"}
+        {showCreate && (
+          <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <div>
+                <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>Slug (สำหรับ URL)</label>
+                <input value={newSlug} onChange={e => setNewSlug(e.target.value)} placeholder="my-nail-shop"
+                  style={{ width: "100%", ...inputStyle, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>ชื่อร้าน</label>
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ร้านทำเล็บ ABC"
+                  style={{ width: "100%", ...inputStyle, boxSizing: "border-box" }} />
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
-              {/* Copy shop & admin links */}
-              <button onClick={e => copyLink(e, sh.slug, sh.id)} title="คัดลอกลิงก์ร้าน"
-                style={{ background: copiedId === sh.id ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id ? S.success : S.accent, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                <Copy size={12} /> {copiedId === sh.id ? "✓" : "ลิงก์ร้าน"}
-              </button>
-              <button onClick={e => copyLink(e, sh.slug, sh.id, true)} title="คัดลอกลิงก์แอดมิน"
-                style={{ background: copiedId === sh.id + 100000 ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id + 100000 ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id + 100000 ? S.success : S.muted, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                <Key size={12} /> {copiedId === sh.id + 100000 ? "✓" : "ลิงก์ Admin"}
-              </button>
-              <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: 30 })} title="เพิ่ม 30 วัน"
-                style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                <PlusCircle size={12} /> 30วัน
-              </button>
-              <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: -30 })} title="ลด 30 วัน"
-                style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.warning, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                <MinusCircle size={12} /> 30วัน
-              </button>
-              <button onClick={() => toggleActiveMutation.mutate({ id: sh.id, is_active: !sh.is_active })}
-                title={sh.is_active ? "ระงับการใช้งาน" : "เปิดใช้งาน"}
-                style={{ background: sh.is_active ? `${S.error}22` : `${S.success}22`, border: `1px solid ${sh.is_active ? S.error : S.success}55`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: sh.is_active ? S.error : S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                {sh.is_active ? <Ban size={12} /> : <PlayCircle size={12} />} {sh.is_active ? "ระงับ" : "เปิด"}
-              </button>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>อายุการเช่าเริ่มต้น (วัน, เว้นว่าง = ไม่มีกำหนด)</label>
+              <input value={newDays} onChange={e => setNewDays(e.target.value)} type="number" min={0}
+                style={{ width: "100%", ...inputStyle, boxSizing: "border-box" }} />
             </div>
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{err}</p>}
+            <button onClick={() => createMutation.mutate()} disabled={!newSlug.trim() || !newName.trim() || createMutation.isPending}
+              style={{ background: S.success, border: "none", borderRadius: 8, padding: "9px 16px", cursor: "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+              {createMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} สร้างร้าน
+            </button>
           </div>
-        ))}
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {shops.map((sh: any) => (
+            <div key={sh.id}
+              onClick={() => editingId !== sh.id && onSelectShop(sh.id)}
+              style={{
+                background: selectedShopId === sh.id ? `${S.accent}18` : S.card,
+                border: `1.5px solid ${selectedShopId === sh.id ? S.accent : S.border}`,
+                borderRadius: 12, padding: 14, cursor: editingId === sh.id ? "default" : "pointer",
+              }}>
+              {/* Name row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                {editingId === sh.id ? (
+                  <>
+                    <input value={editName} onChange={e => setEditName(e.target.value)}
+                      onClick={e => e.stopPropagation()} autoFocus
+                      style={{ flex: 1, ...inputStyle }} />
+                    <button onClick={e => { e.stopPropagation(); renameMutation.mutate({ id: sh.id, name: editName }); }}
+                      disabled={!editName.trim() || renameMutation.isPending}
+                      style={{ background: S.success, border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                      {renameMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />} บันทึก
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); setEditingId(null); }}
+                      style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: S.muted }}>
+                      <X size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>{sh.name}</span>
+                      <span style={{ color: S.muted, fontSize: 12, fontWeight: 400, marginLeft: 6 }}>/{sh.slug}</span>
+                    </div>
+                    <div style={{ color: sh.is_expired ? S.error : S.muted, fontSize: 12 }}>
+                      {sh.is_active ? "" : "🚫 "}
+                      {sh.expired_at ? (sh.is_expired ? "หมดอายุ" : `${sh.days_left}วัน`) : "∞"}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Action buttons */}
+              {editingId !== sh.id && (
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
+                  <button onClick={e => copyLink(e, sh.slug, sh.id)} title="ลิงก์ร้าน"
+                    style={{ background: copiedId === sh.id ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id ? S.success : S.accent, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    <Copy size={12} /> {copiedId === sh.id ? "✓" : "ร้าน"}
+                  </button>
+                  <button onClick={e => copyLink(e, sh.slug, sh.id, true)} title="ลิงก์แอดมิน"
+                    style={{ background: copiedId === sh.id + 100000 ? `${S.success}22` : S.surface, border: `1px solid ${copiedId === sh.id + 100000 ? S.success : S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: copiedId === sh.id + 100000 ? S.success : S.muted, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    <Key size={12} /> {copiedId === sh.id + 100000 ? "✓" : "Admin"}
+                  </button>
+                  <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: 30 })} title="+30วัน"
+                    style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    <PlusCircle size={12} /> 30วัน
+                  </button>
+                  <button onClick={() => adjustDaysMutation.mutate({ id: sh.id, days: -30 })} title="-30วัน"
+                    style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.warning, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    <MinusCircle size={12} /> 30วัน
+                  </button>
+                  <button onClick={() => toggleActiveMutation.mutate({ id: sh.id, is_active: !sh.is_active })}
+                    style={{ background: sh.is_active ? `${S.error}22` : `${S.success}22`, border: `1px solid ${sh.is_active ? S.error : S.success}55`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: sh.is_active ? S.error : S.success, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    {sh.is_active ? <Ban size={12} /> : <PlayCircle size={12} />} {sh.is_active ? "ระงับ" : "เปิด"}
+                  </button>
+                  {/* Rename */}
+                  <button onClick={() => { setEditingId(sh.id); setEditName(sh.name); }}
+                    style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.sub, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                    <Pencil size={12} /> แก้ชื่อ
+                  </button>
+                  {/* Delete — ไม่ให้ลบร้านหลัก */}
+                  {sh.id !== 1 && (
+                    <button onClick={() => setDeleteShop(sh)}
+                      style={{ background: `${S.error}18`, border: `1px solid ${S.error}44`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: S.error, display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                      <Trash2 size={12} /> ลบ
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

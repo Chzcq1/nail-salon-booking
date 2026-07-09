@@ -25,7 +25,7 @@ from backend.database import get_db
 from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot, NailSlotTemplate,
     NailBooking, NailGallery, NailRenewalRequest, NailApiStats, OTPSession,
-    Customer, CreditTransaction, NailShopApiKeys,
+    Customer, CreditTransaction, NailShopApiKeys, TopupRequest, EmailOTPSession,
 )
 from backend.auth import generate_otp, create_admin_token, verify_admin_token, hash_passcode, verify_passcode
 from backend.models import Shop
@@ -2380,6 +2380,175 @@ def superadmin_adjust_shop_expiry_days(
     shop.expired_at = base + timedelta(days=body.days)
     db.commit()
     return {"ok": True, "expired_at": shop.expired_at.isoformat() if shop.expired_at else None}
+
+
+class RenameShopBody(BaseModel):
+    name: str
+
+
+@router.put("/superadmin/shops/{shop_id}/name")
+def superadmin_rename_shop(
+    shop_id: int,
+    body: RenameShopBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """เปลี่ยนชื่อร้าน (Shop.name และ NailShopSettings.shop_name พร้อมกัน)"""
+    _check_superadmin(x_super_admin_key)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="ชื่อร้านต้องไม่ว่าง")
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    shop_row.name = name
+    settings_row = db.query(NailShopSettings).filter_by(shop_id=shop_id).first()
+    if settings_row:
+        settings_row.shop_name = name
+    db.commit()
+    return {"ok": True, "name": name}
+
+
+# Sentinel email prefix ที่ใช้ใน EmailOTPSession สำหรับ delete-shop OTPs
+_DELETE_OTP_EMAIL_PREFIX = "superadmin:delete-shop:"
+
+
+@router.post("/superadmin/shops/{shop_id}/delete-otp")
+async def superadmin_request_delete_otp(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ขอ OTP 6 หลักเพื่อยืนยันการลบร้าน
+    - OTP เก็บใน DB (email_otp_sessions) จึงทำงานถูกต้องในทุก deployment scenario
+    - ถ้าตั้ง NAIL_SUPER_ADMIN_EMAIL → ส่ง email; ถ้าไม่ตั้ง → log ที่ server (ตรวจสอบได้จาก Render logs)
+    """
+    _check_superadmin(x_super_admin_key)
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    if shop_id == 1:
+        raise HTTPException(status_code=400, detail="ไม่สามารถลบร้านหลัก (id=1) ได้")
+
+    sentinel_email = f"{_DELETE_OTP_EMAIL_PREFIX}{shop_id}"
+    now = _now()
+
+    # ลบ OTP เก่าของร้านนี้ก่อน (ป้องกัน spam)
+    db.query(EmailOTPSession).filter(
+        EmailOTPSession.email == sentinel_email
+    ).delete()
+
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    session_token = secrets.token_urlsafe(32)
+    session = EmailOTPSession(
+        session_token=session_token,
+        email=sentinel_email,
+        otp_code=otp_code,
+        is_used=False,
+        expires_at=now + timedelta(minutes=5),
+    )
+    db.add(session)
+    db.commit()
+
+    cfg = get_settings()
+    email_sent = False
+    if cfg.nail_super_admin_email:
+        try:
+            from backend import email_service
+            await email_service.send_otp_email(cfg.nail_super_admin_email, otp_code)
+            email_sent = True
+        except Exception as e:
+            logging.error(f"[superadmin] delete OTP email failed: {e}")
+
+    if not email_sent:
+        # Log OTP ฝั่ง server เพื่อให้ดูได้จาก Render logs (ไม่คืนค่าใน response)
+        logging.warning(
+            f"[superadmin] delete-shop OTP for shop_id={shop_id} slug={shop_row.slug!r}: {otp_code} "
+            f"(email not configured — check server logs)"
+        )
+
+    return {
+        "ok": True,
+        "email_sent": email_sent,
+        "email": cfg.nail_super_admin_email if email_sent else None,
+        "expires_in_seconds": 300,
+        # ไม่คืน OTP ใน response ไม่ว่ากรณีใด → ดูจาก email หรือ server log
+    }
+
+
+class DeleteShopBody(BaseModel):
+    otp_code: str
+    confirm_slug: str
+
+
+@router.delete("/superadmin/shops/{shop_id}")
+def superadmin_delete_shop(
+    shop_id: int,
+    body: DeleteShopBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ลบร้านและข้อมูลทั้งหมดแบบถาวร — ต้องยืนยันด้วย OTP + พิมพ์ slug ร้าน"""
+    _check_superadmin(x_super_admin_key)
+    if shop_id == 1:
+        raise HTTPException(status_code=400, detail="ไม่สามารถลบร้านหลัก (id=1) ได้")
+
+    shop_row = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+
+    if body.confirm_slug.strip() != shop_row.slug:
+        raise HTTPException(status_code=400, detail="slug ไม่ตรงกับร้านที่ต้องการลบ")
+
+    # ตรวจสอบ OTP จาก DB
+    sentinel_email = f"{_DELETE_OTP_EMAIL_PREFIX}{shop_id}"
+    now = _now()
+    otp_session = (
+        db.query(EmailOTPSession)
+        .filter(
+            EmailOTPSession.email == sentinel_email,
+            EmailOTPSession.is_used == False,
+            EmailOTPSession.expires_at > now,
+        )
+        .order_by(EmailOTPSession.created_at.desc())
+        .first()
+    )
+    if not otp_session:
+        raise HTTPException(status_code=400, detail="ยังไม่ได้ขอ OTP หรือ OTP หมดอายุแล้ว กรุณาขอใหม่")
+    if not secrets.compare_digest(body.otp_code.strip(), otp_session.otp_code or ""):
+        raise HTTPException(status_code=400, detail="OTP ไม่ถูกต้อง")
+
+    # ทำเครื่องหมาย OTP ว่าใช้แล้ว (ก่อน delete เพื่อป้องกัน double-submit)
+    otp_session.is_used = True
+    db.commit()
+
+    slug_deleted = shop_row.slug
+    try:
+        # ลบตามลำดับ FK dependency (child → parent)
+        db.query(NailApiStats).filter(NailApiStats.shop_id == shop_id).delete()
+        db.query(NailRenewalRequest).filter(NailRenewalRequest.shop_id == shop_id).delete()
+        db.query(NailGallery).filter(NailGallery.shop_id == shop_id).delete()
+        db.query(NailBooking).filter(NailBooking.shop_id == shop_id).delete()
+        db.query(NailTimeSlot).filter(NailTimeSlot.shop_id == shop_id).delete()
+        db.query(NailSlotTemplate).filter(NailSlotTemplate.shop_id == shop_id).delete()
+        db.query(NailStaff).filter(NailStaff.shop_id == shop_id).delete()
+        db.query(NailService).filter(NailService.shop_id == shop_id).delete()
+        db.query(NailShopApiKeys).filter(NailShopApiKeys.shop_id == shop_id).delete()
+        db.query(NailShopSettings).filter(NailShopSettings.shop_id == shop_id).delete()
+        # wallet references เป็น nullable FK → null ออกแทนลบ
+        db.query(TopupRequest).filter(TopupRequest.shop_id == shop_id).update({"shop_id": None})
+        db.query(CreditTransaction).filter(CreditTransaction.shop_id == shop_id).update({"shop_id": None})
+        # ลบ OTP sessions ที่เกี่ยวข้อง
+        db.query(EmailOTPSession).filter(EmailOTPSession.email == sentinel_email).delete()
+        db.delete(shop_row)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logging.error(f"[superadmin] delete_shop failed shop_id={shop_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="ลบร้านไม่สำเร็จ กรุณาดู server log")
+
+    logging.warning(f"[superadmin] DELETED shop id={shop_id} slug={slug_deleted!r}")
+    return {"ok": True, "deleted_shop_id": shop_id, "slug": slug_deleted}
 
 
 @router.get("/superadmin/status")
