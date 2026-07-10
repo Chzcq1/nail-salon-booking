@@ -17,14 +17,10 @@ import {
 import { BRAND_THEMES, getTheme, injectThemeCss } from "@/theme";
 import { useShopSlug } from "@/lib/shopSlugContext";
 
-// ── Rose Gold Admin Theme (แตกต่างจาก Candy Pink หน้าร้าน) ──────────────
-const A = {
-  primary:   "#B5174B",
-  light:     "#D81B60",
-  pale:      "#FCE4EC",
-  border:    "#F8BBD9",
-  deep:      "#880E4F",
-  bg:        "#FFF5F8",
+// ── Admin theme — derives from the shop's brand_color so the backend
+// office matches the customer-facing storefront (e.g. a car wash shouldn't
+// be stuck with candy pink). Non-brand colors (text/status) stay fixed. ──
+const STATIC_A = {
   card:      "#FFFFFF",
   text:      "#1A1A2E",
   sub:       "#45455F",    // เพิ่มความเข้มจาก #5A5A7A — ผ่าน WCAG AA
@@ -39,6 +35,25 @@ const A = {
   warningBg: "#FFF3E0",
   info:      "#1565C0",
   infoBg:    "#E3F2FD",
+} as const;
+
+// Brand-dependent colors reference the CSS custom properties injected by
+// injectThemeCss() (see theme.ts) — this makes EVERY tab component in this
+// file (Dashboard, Bookings, Services, Settings, ...) follow the shop's
+// brand_color automatically, with no prop drilling. injectThemeCss() is
+// called as early as possible (see NailAdminPage below) using the shop's
+// brand_color, fetched from the public /api/nail/settings endpoint so it
+// applies even before login. index.css defines fallback --b-* values
+// (candy pink) so the very first paint — before that fetch resolves — is
+// never unstyled.
+const A = {
+  ...STATIC_A,
+  primary: "var(--b-primary)",
+  light:   "var(--b-light)",
+  pale:    "var(--b-pale)",
+  border:  "var(--b-border)",
+  deep:    "var(--b-deep)",
+  bg:      "var(--b-bg)",
 } as const;
 
 type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal" | "accounts";
@@ -189,6 +204,17 @@ export default function NailAdminPage() {
   // ── Subscription expiry gate — blocks all admin tabs if shop has expired ──
   const shopKeyForGate = slug ?? "default";
   const qcGate = useQueryClient();
+
+  // ── Brand theme — fetch via the PUBLIC settings endpoint (no auth needed) so the
+  // admin backend (including the login screen) matches the shop's brand_color from
+  // the very first paint, not just after visiting the Settings tab. ──
+  const { data: publicSettings } = useQuery<any>({
+    queryKey: ["nail-admin-public-theme", shopKeyForGate],
+    queryFn: () => fetch(`/api/nail/settings${slug ? `?shop_slug=${encodeURIComponent(slug)}` : ""}`).then(r => r.ok ? r.json() : null),
+    staleTime: 60000,
+    retry: 1,
+  });
+  useEffect(() => { injectThemeCss(getTheme(publicSettings?.brand_color)); }, [publicSettings?.brand_color]);
   const {
     data: rentalGate,
     isLoading: rentalGateLoading,

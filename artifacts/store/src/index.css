@@ -90,6 +90,20 @@
   --shadow-sm: 0 1px 3px 0 rgba(232, 90, 140, 0.12);
   --shadow: 0 2px 8px 0 rgba(232, 90, 140, 0.12), 0 1px 3px -1px rgba(232, 90, 140, 0.08);
   --shadow-md: 0 4px 16px -1px rgba(232, 90, 140, 0.15), 0 2px 6px -2px rgba(232, 90, 140, 0.1);
+
+  /* Fallback brand-theme vars (candy pink) — overwritten at runtime by injectThemeCss()
+     (see theme.ts) once the shop's brand_color loads. Keeps first paint from being unstyled. */
+  --b-primary: #B5174B;
+  --b-deep: #880E4F;
+  --b-light: #D81B60;
+  --b-pale: #FCE4EC;
+  --b-bg: #FFF5F8;
+  --b-border: #F8BBD9;
+  --b-primary-15: rgba(181, 23, 75, 0.08);
+  --b-primary-22: rgba(181, 23, 75, 0.13);
+  --b-primary-44: rgba(181, 23, 75, 0.27);
+  --b-primary-55: rgba(181, 23, 75, 0.33);
+  --b-primary-66: rgba(181, 23, 75, 0.40);
 }
 
 .dark {
