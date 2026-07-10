@@ -265,6 +265,9 @@ class NailShopSettings(Base):
     # "ทำไมต้องเลือกเรา" — บางร้านอยากตั้งกฎ/จุดเด่นเอง บางร้านไม่อยากให้มีเพราะรก จึงต้องเปิด/ปิด และแก้เนื้อหาได้เอง
     show_why_choose_section = Column(Boolean, server_default="true", default=True, nullable=False)
     why_choose_custom_text = Column(Text, nullable=True)  # ถ้าตั้งไว้ จะแสดงข้อความนี้แทนจุดเด่นเริ่มต้น 6 ข้อ
+    # ประเภทธุรกิจ — ขับเคลื่อน default คำศัพท์/emoji/บริการตอนสร้างร้าน (ดู BUSINESS_TYPE_TEMPLATES ใน routes/nail.py)
+    # ไม่ล็อกพฤติกรรมใดๆ ของระบบ ร้านยังแก้ไขทุกอย่างเองได้ปกติ — ใช้เพื่อ personalize ตอนเริ่มต้นเท่านั้น
+    business_type = Column(String(30), nullable=False, server_default="nail", default="nail")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

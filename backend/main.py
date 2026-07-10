@@ -408,6 +408,10 @@ def _run_migrations(engine):
         # index สำหรับ query ตาม shop (ทุกตารางธุรกิจต้องกรองด้วย shop_id เสมอในโค้ดที่รองรับ multi-shop)
         "CREATE INDEX IF NOT EXISTS ix_nail_shop_settings_shop_id ON nail_shop_settings (shop_id)",
         "CREATE INDEX IF NOT EXISTS ix_nail_services_shop_id ON nail_services (shop_id)",
+        # เดิม uix_nail_services_name เป็น unique แบบ global (ชื่อบริการห้ามซ้ำข้ามร้าน) — ผิดตอนนี้เป็น multi-tenant แล้ว
+        # แต่ละร้านต้องตั้งชื่อบริการซ้ำกับร้านอื่นได้ (เช่น ทุกร้านทำเล็บมี "เพนท์เจล") จึงเปลี่ยนเป็น unique ต่อ (shop_id, name)
+        "DROP INDEX IF EXISTS uix_nail_services_name",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uix_nail_services_shop_id_name ON nail_services (shop_id, name)",
         "CREATE INDEX IF NOT EXISTS ix_nail_staff_shop_id ON nail_staff (shop_id)",
         "CREATE INDEX IF NOT EXISTS ix_nail_time_slots_shop_id ON nail_time_slots (shop_id)",
         "CREATE INDEX IF NOT EXISTS ix_nail_bookings_shop_id ON nail_bookings (shop_id)",
@@ -438,6 +442,8 @@ def _run_migrations(engine):
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS service_section_emoji VARCHAR(20) DEFAULT '💅'",
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS show_why_choose_section BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS why_choose_custom_text TEXT",
+        # ประเภทธุรกิจ (นวด/ตัดผม/สปา/ล้างรถ/ทำเล็บ ฯลฯ) — ใช้ personalize ตอนสร้างร้านเท่านั้น ไม่ล็อกฟีเจอร์
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS business_type VARCHAR(30) NOT NULL DEFAULT 'nail'",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

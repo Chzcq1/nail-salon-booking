@@ -610,6 +610,36 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
             </div>
           </div>
 
+          {/* ── เงินที่ระบบช่วยหามาให้ — พิสูจน์คุณค่าของระบบให้เจ้าของร้านเห็นเป็นตัวเลข ── */}
+          {data?.value_stats && (
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, margin: "0 0 10px" }}>💰 เงินที่ระบบช่วยหามาให้ร้าน</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: A.text }}>฿{data.value_stats.month_revenue.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>มัดจำที่ได้รับเดือนนี้</div>
+                </div>
+                <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: A.text }}>฿{data.value_stats.all_time_revenue.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>รวมทั้งหมดตั้งแต่เริ่มใช้ระบบ</div>
+                </div>
+                <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: A.text }}>{data.value_stats.repeat_rate}%</div>
+                  <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>ลูกค้ากลับมาจองซ้ำ ({data.value_stats.repeat_customers}/{data.value_stats.unique_customers} คน)</div>
+                </div>
+                <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 14, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: A.text }}>฿{data.value_stats.no_show_prevented_this_month.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
+                  <div style={{ fontSize: 12, color: A.sub, marginTop: 2 }}>มัดจำจากคิวที่ยกเลิกเดือนนี้ (กันร้านเสียรายได้เปล่า)</div>
+                </div>
+              </div>
+              {data.value_stats.busiest_day?.date && (
+                <div style={{ background: A.pale, borderRadius: 12, padding: "10px 14px", fontSize: 13, color: A.text }}>
+                  📈 วันที่คิวแน่นที่สุดใน 90 วันล่าสุด: <strong>{fmtDate(data.value_stats.busiest_day.date)}</strong> ({data.value_stats.busiest_day.count} คิว) — ใช้วางแผนกำลังคนล่วงหน้าได้
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Recent Bookings */}
           {data?.recent_bookings?.length > 0 && (
             <div>

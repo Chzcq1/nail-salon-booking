@@ -36,6 +36,66 @@ import backend.bot as bot_module
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/nail", tags=["nail"])
 
+# ─── ประเภทธุรกิจ ───────────────────────────────────────────────────────────
+# ใช้ personalize ค่าเริ่มต้นตอนสร้างร้านใหม่เท่านั้น (tagline, emoji, บริการตัวอย่าง)
+# ร้านแก้ไขทุกอย่างเองได้ปกติทีหลัง ไม่มีผลต่อ logic การจองใดๆ — เพิ่ม type ใหม่ได้ที่นี่จุดเดียว
+BUSINESS_TYPE_TEMPLATES: dict[str, dict] = {
+    "nail": {
+        "label": "ร้านทำเล็บ",
+        "tagline": "ทำเล็บสวย สไตล์คุณ",
+        "emoji": "💅",
+        "services": [
+            {"name": "เพนท์เจล", "duration_minutes": 90, "price": 350, "color": "#FF6B9D"},
+            {"name": "อะคริลิค", "duration_minutes": 120, "price": 550, "color": "#C084FC"},
+            {"name": "เพนท์ธรรมดา", "duration_minutes": 45, "price": 150, "color": "#FB7185"},
+        ],
+    },
+    "hair": {
+        "label": "ร้านตัดผม/ทำผม",
+        "tagline": "ตัดผม สไตล์คุณ นัดง่าย ไม่ต้องรอ",
+        "emoji": "💇",
+        "services": [
+            {"name": "ตัดผม", "duration_minutes": 45, "price": 250, "color": "#60A5FA"},
+            {"name": "สีผม", "duration_minutes": 120, "price": 1200, "color": "#F472B6"},
+            {"name": "ดัด/ยืดผม", "duration_minutes": 150, "price": 1500, "color": "#A78BFA"},
+        ],
+    },
+    "massage": {
+        "label": "ร้านนวด",
+        "tagline": "ผ่อนคลาย คลายเมื่อย นัดคิวล่วงหน้าได้",
+        "emoji": "💆",
+        "services": [
+            {"name": "นวดแผนไทย 60 นาที", "duration_minutes": 60, "price": 350, "color": "#34D399"},
+            {"name": "นวดน้ำมัน 90 นาที", "duration_minutes": 90, "price": 600, "color": "#FBBF24"},
+            {"name": "นวดเท้า 30 นาที", "duration_minutes": 30, "price": 200, "color": "#38BDF8"},
+        ],
+    },
+    "spa": {
+        "label": "สปา",
+        "tagline": "ดูแลผิวและร่างกายแบบครบวงจร",
+        "emoji": "🧖",
+        "services": [
+            {"name": "แพ็กเกจหน้า 60 นาที", "duration_minutes": 60, "price": 800, "color": "#F9A8D4"},
+            {"name": "สครับผิวกาย", "duration_minutes": 60, "price": 700, "color": "#FCD34D"},
+        ],
+    },
+    "carwash": {
+        "label": "ร้านล้างรถ",
+        "tagline": "จองล้างรถล่วงหน้า ไม่ต้องรอคิว",
+        "emoji": "🚗",
+        "services": [
+            {"name": "ล้างรถภายนอก", "duration_minutes": 30, "price": 150, "color": "#60A5FA"},
+            {"name": "ล้างรถ + ดูดฝุ่น", "duration_minutes": 60, "price": 300, "color": "#34D399"},
+        ],
+    },
+    "other": {
+        "label": "อื่นๆ / จองคิวทั่วไป",
+        "tagline": "จองคิวออนไลน์ง่ายๆ ไม่ต้องรอสาย",
+        "emoji": "🗓️",
+        "services": [],
+    },
+}
+
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 def _now() -> datetime:
@@ -921,6 +981,49 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
         .all()
     )
 
+    # ── "เงินที่ระบบช่วยหามาให้" — ตัวเลขพิสูจน์คุณค่าของระบบให้เจ้าของร้านเห็นชัดๆ ──
+    month_start = _now().date().replace(day=1).isoformat()
+    LOCKED_STATUSES = ["confirmed", "completed", "walkin"]  # นับเฉพาะที่ยืนยัน/มัดจำแล้วจริง
+
+    month_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.shop_id == shop_id,
+        NailBooking.slot_date >= month_start,
+        NailBooking.status.in_(LOCKED_STATUSES),
+    ).scalar() or 0
+
+    all_time_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.shop_id == shop_id,
+        NailBooking.status.in_(LOCKED_STATUSES),
+    ).scalar() or 0
+
+    # ลูกค้าที่กลับมาจองซ้ำ (นับเบอร์โทรที่มี booking สำเร็จมากกว่า 1 ครั้ง) — วัด "ความรัก" ที่ลูกค้ามีต่อร้าน
+    phone_counts = (
+        db.query(NailBooking.customer_phone, sqlfunc.count(NailBooking.id).label("cnt"))
+        .filter(NailBooking.shop_id == shop_id, NailBooking.status.in_(LOCKED_STATUSES), NailBooking.customer_phone.isnot(None))
+        .group_by(NailBooking.customer_phone)
+        .all()
+    )
+    unique_customers = len(phone_counts)
+    repeat_customers = sum(1 for _, cnt in phone_counts if cnt > 1)
+    repeat_rate = round((repeat_customers / unique_customers) * 100, 1) if unique_customers else 0.0
+
+    # กันคิวเบี้ยว/ไม่โผล่ — ประเมินยอดที่ "อาจเสียไป" ถ้าไม่มีมัดจำ (deposit_total ของ booking ที่ยกเลิกเดือนนี้)
+    no_show_prevented = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.shop_id == shop_id,
+        NailBooking.slot_date >= month_start,
+        NailBooking.status == "cancelled",
+    ).scalar() or 0
+
+    # วันที่คิวแน่นที่สุดในช่วง 90 วันล่าสุด — ช่วยร้านวางแผนกำลังคน
+    ninety_days_ago = (_now().date() - timedelta(days=90)).isoformat()
+    busiest_day_row = (
+        db.query(NailBooking.slot_date, sqlfunc.count(NailBooking.id).label("cnt"))
+        .filter(NailBooking.shop_id == shop_id, NailBooking.status.in_(LOCKED_STATUSES), NailBooking.slot_date >= ninety_days_ago)
+        .group_by(NailBooking.slot_date)
+        .order_by(sqlfunc.count(NailBooking.id).desc())
+        .first()
+    )
+
     return {
         "today": {
             "confirmed": today_confirmed,
@@ -943,6 +1046,16 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
             }
             for b in recent
         ],
+        # ── สรุปคุณค่าที่ระบบสร้างให้ร้าน (สำหรับการ์ด "เงินที่ระบบช่วยหามาให้") ──
+        "value_stats": {
+            "month_revenue": float(month_revenue),
+            "all_time_revenue": float(all_time_revenue),
+            "unique_customers": unique_customers,
+            "repeat_customers": repeat_customers,
+            "repeat_rate": repeat_rate,
+            "no_show_prevented_this_month": float(no_show_prevented),
+            "busiest_day": {"date": busiest_day_row[0], "count": busiest_day_row[1]} if busiest_day_row else None,
+        },
     }
 
 
@@ -2554,6 +2667,14 @@ class CreateShopBody(BaseModel):
     slug: str
     name: str
     expiry_days: Optional[int] = 30  # อายุการเช่าเริ่มต้น (วัน) — null = ไม่มีกำหนด
+    business_type: Optional[str] = "nail"  # นวด/ตัดผม/สปา/ล้างรถ/ทำเล็บ/อื่นๆ — ดู BUSINESS_TYPE_TEMPLATES
+
+
+@router.get("/superadmin/business-types")
+def superadmin_list_business_types(x_super_admin_key: Optional[str] = Header(None)):
+    """รายชื่อประเภทธุรกิจที่เลือกได้ตอนสร้างร้าน — ใช้ populate dropdown ฝั่ง superadmin UI"""
+    _check_superadmin(x_super_admin_key)
+    return [{"value": k, "label": v["label"], "emoji": v["emoji"]} for k, v in BUSINESS_TYPE_TEMPLATES.items()]
 
 
 @router.post("/superadmin/shops")
@@ -2570,6 +2691,11 @@ def superadmin_create_shop(
     if db.query(Shop).filter_by(slug=slug).first():
         raise HTTPException(status_code=409, detail="slug นี้มีร้านอื่นใช้อยู่แล้ว")
 
+    business_type = (body.business_type or "nail").strip().lower()
+    tmpl = BUSINESS_TYPE_TEMPLATES.get(business_type) or BUSINESS_TYPE_TEMPLATES["nail"]
+    if business_type not in BUSINESS_TYPE_TEMPLATES:
+        business_type = "nail"
+
     try:
         shop_row = Shop(slug=slug, name=body.name, is_active=True)
         db.add(shop_row)
@@ -2580,6 +2706,8 @@ def superadmin_create_shop(
         settings_row = NailShopSettings(
             shop_id=shop_row.id,
             shop_name=body.name,
+            shop_tagline=tmpl["tagline"],
+            business_type=business_type,
             deposit_amount=200,
             is_active=True,
             max_advance_days=14,
@@ -2590,6 +2718,20 @@ def superadmin_create_shop(
         if body.expiry_days is not None:
             settings_row.expired_at = _now() + timedelta(days=max(0, body.expiry_days))
         db.add(settings_row)
+        db.flush()
+
+        # seed บริการตัวอย่างตามประเภทธุรกิจ — ร้านแก้ไข/ลบ/เพิ่มเองได้ทันทีในหน้า Admin > บริการ
+        for i, svc in enumerate(tmpl["services"]):
+            db.add(NailService(
+                shop_id=shop_row.id,
+                name=svc["name"],
+                duration_minutes=svc["duration_minutes"],
+                price=svc["price"],
+                color=svc["color"],
+                is_active=True,
+                sort_order=i,
+            ))
+
         db.commit()
         db.refresh(shop_row)
     except Exception as e:

@@ -632,6 +632,7 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
   const [newSlug, setNewSlug] = useState("");
   const [newName, setNewName] = useState("");
   const [newDays, setNewDays] = useState("30");
+  const [newBusinessType, setNewBusinessType] = useState("nail");
   const [err, setErr] = useState("");
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -651,11 +652,11 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
     mutationFn: () =>
       saFetch(`${API}/superadmin/shops`, sKey, {
         method: "POST",
-        body: JSON.stringify({ slug: newSlug.trim(), name: newName.trim(), expiry_days: newDays ? Number(newDays) : null }),
+        body: JSON.stringify({ slug: newSlug.trim(), name: newName.trim(), expiry_days: newDays ? Number(newDays) : null, business_type: newBusinessType }),
       }),
     onSuccess: (d: any) => {
       qc.invalidateQueries({ queryKey: ["sa-shops"] });
-      setShowCreate(false); setNewSlug(""); setNewName(""); setNewDays("30"); setErr("");
+      setShowCreate(false); setNewSlug(""); setNewName(""); setNewDays("30"); setNewBusinessType("nail"); setErr("");
       onSelectShop(d.id);
     },
     onError: (e: any) => setErr(e.message),
@@ -726,6 +727,18 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
                 <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ร้านทำเล็บ ABC"
                   style={{ width: "100%", ...inputStyle, boxSizing: "border-box" }} />
               </div>
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>ประเภทธุรกิจ (กำหนดคำเริ่มต้น/บริการตัวอย่าง ปรับแก้ได้ทีหลัง)</label>
+              <select value={newBusinessType} onChange={e => setNewBusinessType(e.target.value)}
+                style={{ width: "100%", ...inputStyle, boxSizing: "border-box" }}>
+                <option value="nail">💅 ร้านทำเล็บ</option>
+                <option value="hair">💇 ร้านตัดผม/ทำผม</option>
+                <option value="massage">💆 ร้านนวด</option>
+                <option value="spa">🧖 สปา</option>
+                <option value="carwash">🚗 ร้านล้างรถ</option>
+                <option value="other">🗓️ อื่นๆ / จองคิวทั่วไป</option>
+              </select>
             </div>
             <div style={{ marginBottom: 10 }}>
               <label style={{ color: S.sub, fontSize: 12, display: "block", marginBottom: 4 }}>อายุการเช่าเริ่มต้น (วัน, เว้นว่าง = ไม่มีกำหนด)</label>
