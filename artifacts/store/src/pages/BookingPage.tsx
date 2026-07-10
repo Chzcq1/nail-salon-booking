@@ -594,6 +594,8 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
     retry: 1,
   });
 
+  const activeSlots = slots.filter((sl: any) => sl.is_past !== true);
+
   return (
     <PageWrap>
       <BackBtn onClick={onBack} />
@@ -608,14 +610,16 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
             <p style={{ color: P.sub, fontSize: 15 }}>โหลดข้อมูลไม่สำเร็จ</p>
             <button onClick={() => refetch()} style={{ marginTop: 12, background: P.pinkPale, color: P.pink, border: "none", borderRadius: 100, padding: "8px 20px", cursor: "pointer", fontWeight: 600, fontSize: 14, fontFamily: "inherit" }}>ลองใหม่</button>
           </div>
-        ) : slots.length === 0 ? (
+        ) : activeSlots.length === 0 ? (
           <div style={{ textAlign: "center", padding: 40, background: "#fff", borderRadius: 16, border: `1px solid ${P.pinkBorder}` }}>
-            <p style={{ color: P.sub, fontSize: 15 }}>ไม่มีช่วงเวลาว่างในวันนี้</p>
+            <p style={{ color: P.sub, fontSize: 15 }}>
+              {slots.length > 0 ? "ช่วงเวลาของวันนี้ผ่านไปหมดแล้ว" : "ไม่มีช่วงเวลาว่างในวันนี้"}
+            </p>
             <p style={{ color: P.muted, fontSize: 13, marginTop: 4 }}>กรุณาเลือกวันอื่น</p>
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {slots.filter((sl: any) => !sl.is_past).map((sl: any) => {
+            {activeSlots.map((sl: any) => {
               const avail = sl.available;
               const isPast = false; // past slots are now hidden entirely
               const isSelected = selected?.id === sl.id;
