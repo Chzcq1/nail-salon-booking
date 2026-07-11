@@ -233,6 +233,16 @@ def _run_migrations(engine):
         # display_name / phone_number for customer wallet profile
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30)",
+        # ── Per-shop wallet isolation ─────────────────────────────────────────
+        # แต่ละร้านมี customer registry แยกกัน — (email, shop_id) composite unique
+        # ลูกค้าคนเดียวกันสมัครได้หลายร้าน แต่ละร้านมี PIN + balance เป็นของตัวเอง
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS shop_id INTEGER REFERENCES shops(id)",
+        # กำหนดให้ลูกค้าเดิมทั้งหมดสังกัดร้าน 1 (default/original shop)
+        "UPDATE customers SET shop_id = 1 WHERE shop_id IS NULL",
+        # ลบ unique index เดิมบน email เพียงอย่างเดียว (ถูกแทนที่ด้วย composite index ด้านล่าง)
+        "DROP INDEX IF EXISTS ix_customers_email",
+        # composite unique: email+shop_id — ป้องกันอีเมลซ้ำในร้านเดียวกัน แต่ข้ามร้านได้
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_customers_email_shop ON customers (email, shop_id) WHERE email IS NOT NULL AND shop_id IS NOT NULL",
         # brand_color — สีหลักประจำร้าน (hex เช่น #B5174B) เพื่อ white-label UI
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS brand_color VARCHAR(20)",
 

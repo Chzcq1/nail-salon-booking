@@ -1,5 +1,6 @@
 - [Multi-tenant slug routing & wallet isolation](multi-tenant-slug-routing.md) — /r/:slug routing, wallet shop_id scoping (fail-closed slug resolution), traffic stats endpoint
 - [Email wallet auth](email-wallet-auth.md) — replaced Telegram OTP with email OTP + PIN for customer wallet; key decisions and env vars documented
+- [Wallet per-shop isolation](wallet-per-shop-isolation.md) — Customer.email was globally unique; fixed with composite (email, shop_id) unique + shop_id in JWT; sessionStorage key is now per-slug
 - [Nail Salon Booking System](nail-salon-system.md) — booking system built on existing stack; slot locking (SELECT FOR UPDATE), deposit random cents, rental expiry, admin auth guard
 - [Project deployment and Replit role](project-deployment.md) — deployed on Render, secrets already there, DB is Neon.tech; Replit writes code only, never ask for keys unless brand-new service
 - [React Query shared queryKey pitfall](react-query-shared-querykey-pitfall.md) — never put setState in queryFn .then(); use useEffect on returned data to handle cached-data case

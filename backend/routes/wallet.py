@@ -62,17 +62,32 @@ def _normalize_email(raw: str) -> str:
     return email
 
 
-def _create_token(email: str) -> str:
+def _create_token(email: str, shop_id: int = 1) -> str:
     payload = {
         "sub": email,
+        "shop_id": shop_id,
         "exp": datetime.utcnow() + timedelta(days=_TOKEN_EXPIRE_DAYS),
     }
     return _jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALG)
 
 
-def _decode_token(token: str) -> str:
+def _decode_token(token: str):
+    """คืนค่า (email, shop_id) — token เดิมที่ไม่มี shop_id จะ default เป็น 1"""
     payload = _jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALG])
-    return payload.get("sub", "")
+    email = payload.get("sub", "")
+    shop_id = int(payload.get("shop_id", 1))
+    return email, shop_id
+
+
+def _resolve_wallet_shop_id(slug: Optional[str], db: Session) -> int:
+    """แปลง shop_slug เป็น shop_id — slug ว่าง/default → shop_id=1"""
+    if not slug or slug == "default":
+        return 1
+    from backend.models import Shop as _Shop
+    shop = db.query(_Shop).filter_by(slug=slug, is_active=True).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail=f"ไม่พบร้านค้า: {slug}")
+    return shop.id
 
 
 def get_wallet_customer(
@@ -83,10 +98,13 @@ def get_wallet_customer(
         raise HTTPException(status_code=401, detail="กรุณาเข้าสู่ระบบ")
     token = authorization[7:]
     try:
-        email = _decode_token(token)
+        email, shop_id = _decode_token(token)
     except JWTError:
         raise HTTPException(status_code=401, detail="Session หมดอายุ กรุณาเข้าสู่ระบบใหม่")
-    customer = db.query(Customer).filter(Customer.email == email).first()
+    customer = db.query(Customer).filter(
+        Customer.email == email,
+        Customer.shop_id == shop_id,
+    ).first()
     if not customer:
         raise HTTPException(status_code=401, detail="ไม่พบบัญชี กรุณาเข้าสู่ระบบใหม่")
     return customer
@@ -106,12 +124,17 @@ def _verify_pin(pin: str, hashed: str) -> bool:
 # ── Check account ─────────────────────────────────────────────────────────────
 
 @router.get("/wallet/check")
-def wallet_check(email: str = Query(...), db: Session = Depends(get_db)):
-    try:
-        normalized = _normalize_email(email)
-    except HTTPException:
-        raise
-    customer = db.query(Customer).filter(Customer.email == normalized).first()
+def wallet_check(
+    email: str = Query(...),
+    shop_slug: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    normalized = _normalize_email(email)
+    shop_id = _resolve_wallet_shop_id(shop_slug, db)
+    customer = db.query(Customer).filter(
+        Customer.email == normalized,
+        Customer.shop_id == shop_id,
+    ).first()
     if not customer:
         return {"exists": False, "has_pin": False}
     return {"exists": True, "has_pin": bool(customer.pin_hash)}
@@ -123,13 +146,18 @@ def wallet_check(email: str = Query(...), db: Session = Depends(get_db)):
 async def wallet_send_otp(body: dict, db: Session = Depends(get_db)):
     raw_email = body.get("email", "")
     mode = body.get("mode", "login")
+    shop_slug = body.get("shop_slug", None)
 
     email = _normalize_email(raw_email)
+    shop_id = _resolve_wallet_shop_id(shop_slug, db)
 
     if mode == "reset":
-        customer = db.query(Customer).filter(Customer.email == email).first()
+        customer = db.query(Customer).filter(
+            Customer.email == email,
+            Customer.shop_id == shop_id,
+        ).first()
         if not customer:
-            raise HTTPException(status_code=404, detail="ไม่พบบัญชีอีเมลนี้")
+            raise HTTPException(status_code=404, detail="ไม่พบบัญชีอีเมลนี้ในร้านนี้")
 
     now = datetime.utcnow()
     cooldown_since = now - timedelta(seconds=OTP_SEND_COOLDOWN_SECONDS)
@@ -215,10 +243,21 @@ def wallet_verify_otp(body: dict, db: Session = Depends(get_db)):
     if result.rowcount != 1:
         raise HTTPException(status_code=400, detail="OTP นี้ถูกใช้ไปแล้ว")
 
+    # ดึง shop_slug จาก body เพื่อ embed shop_id ลงใน verified_token
+    # ทำให้ wallet_auth / wallet_reset_pin รู้ว่า token นี้สำหรับร้านไหน
+    _shop_id_for_vt: int = 1
+    try:
+        _slug_for_vt = body.get("shop_slug", None)
+        if _slug_for_vt:
+            _shop_id_for_vt = _resolve_wallet_shop_id(_slug_for_vt, db)
+    except Exception:
+        pass
+
     verified_token = _jwt.encode(
         {
             "purpose": "otp_verified",
             "email": email_for_token,
+            "shop_id": _shop_id_for_vt,
             "exp": datetime.utcnow() + timedelta(minutes=15),
         },
         _JWT_SECRET,
@@ -241,6 +280,7 @@ def wallet_reset_pin(body: dict, db: Session = Depends(get_db)):
         if payload.get("purpose") != "otp_verified":
             raise ValueError("wrong purpose")
         email = payload.get("email", "")
+        shop_id = int(payload.get("shop_id", 1))  # legacy verified_tokens default to shop 1
     except Exception:
         raise HTTPException(status_code=400, detail="Token ไม่ถูกต้องหรือหมดอายุ")
 
@@ -249,14 +289,17 @@ def wallet_reset_pin(body: dict, db: Session = Depends(get_db)):
     if new_pin != confirm_pin:
         raise HTTPException(status_code=400, detail="PIN ไม่ตรงกัน")
 
-    customer = db.query(Customer).filter(Customer.email == email).first()
+    customer = db.query(Customer).filter(
+        Customer.email == email,
+        Customer.shop_id == shop_id,
+    ).first()
     if not customer:
-        raise HTTPException(status_code=404, detail="ไม่พบบัญชี")
+        raise HTTPException(status_code=404, detail="ไม่พบบัญชีในร้านนี้")
 
     customer.pin_hash = _hash_pin(new_pin)
     db.commit()
 
-    return {"ok": True, "token": _create_token(email)}
+    return {"ok": True, "token": _create_token(email, shop_id)}
 
 
 # ── Auth (login / register) ───────────────────────────────────────────────────
@@ -266,10 +309,24 @@ def wallet_auth(body: dict, db: Session = Depends(get_db)):
     raw_email = body.get("email", "")
     pin = body.get("pin", "")
     verified_token = body.get("verified_token", None)
+    shop_slug = body.get("shop_slug", None)
 
     email = _normalize_email(raw_email)
 
-    customer = db.query(Customer).filter(Customer.email == email).first()
+    # ── Resolve shop_id: ใช้จาก verified_token ก่อน ถ้าไม่มีค่อยใช้จาก slug ──
+    shop_id = _resolve_wallet_shop_id(shop_slug, db)
+    if verified_token:
+        try:
+            vt_payload = _jwt.decode(verified_token, _JWT_SECRET, algorithms=[_JWT_ALG])
+            if vt_payload.get("purpose") == "otp_verified":
+                shop_id = int(vt_payload.get("shop_id", shop_id))
+        except Exception:
+            pass  # ใช้ shop_id จาก slug ต่อไป
+
+    customer = db.query(Customer).filter(
+        Customer.email == email,
+        Customer.shop_id == shop_id,
+    ).first()
 
     # ── New account: requires OTP verified_token ──────────────────────────────
     if not customer or not customer.pin_hash:
@@ -286,13 +343,13 @@ def wallet_auth(body: dict, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="PIN ต้องมีอย่างน้อย 4 หลัก")
 
         if not customer:
-            customer = Customer(email=email, balance=Decimal("0"))
+            customer = Customer(email=email, balance=Decimal("0"), shop_id=shop_id)
             db.add(customer)
 
         customer.pin_hash = _hash_pin(pin)
         db.commit()
         db.refresh(customer)
-        return {"ok": True, "token": _create_token(email)}
+        return {"ok": True, "token": _create_token(email, shop_id)}
 
     # ── Existing account: verify PIN ──────────────────────────────────────────
     if not pin:
@@ -300,7 +357,7 @@ def wallet_auth(body: dict, db: Session = Depends(get_db)):
     if not _verify_pin(pin, customer.pin_hash):
         raise HTTPException(status_code=401, detail="PIN ไม่ถูกต้อง")
 
-    return {"ok": True, "token": _create_token(email)}
+    return {"ok": True, "token": _create_token(email, shop_id)}
 
 
 # ── Wallet info ───────────────────────────────────────────────────────────────

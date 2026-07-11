@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, Boolean, BigInteger, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, Boolean, BigInteger, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
 from backend.database import Base
 
@@ -106,9 +106,15 @@ class AdminLog(Base):
 
 class Customer(Base):
     __tablename__ = "customers"
+    __table_args__ = (
+        # (email, shop_id) composite unique — แต่ละร้านมี customer registry แยกกัน
+        # email เดียวกันสมัครได้หลายร้าน แต่ละร้านมี PIN และ balance เป็นของตัวเอง
+        UniqueConstraint("email", "shop_id", name="uq_customer_email_shop"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(255), unique=True, nullable=True, index=True)
+    email = Column(String(255), nullable=True, index=True)  # unique ถูกย้ายไปเป็น composite กับ shop_id
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True, index=True)  # ร้านที่ลูกค้าสังกัด
     telegram_username = Column(String(255), unique=True, nullable=True, index=True)
     telegram_user_id = Column(BigInteger, unique=True, nullable=True, index=True)
     balance = Column(Numeric(12, 2), nullable=False, default=0)

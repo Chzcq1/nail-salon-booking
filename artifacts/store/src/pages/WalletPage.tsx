@@ -27,11 +27,12 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-// ── Session helpers ───────────────────────────────────────────────────────────
-const SESSION_KEY = "wallet_token";
-function getStoredToken(): string { return sessionStorage.getItem(SESSION_KEY) || ""; }
-function setStoredToken(t: string) { sessionStorage.setItem(SESSION_KEY, t); }
-function clearStoredToken() { sessionStorage.removeItem(SESSION_KEY); }
+// ── Session helpers (per-shop scoped) ────────────────────────────────────────
+// แต่ละร้านเก็บ token แยกกันใน sessionStorage — ป้องกัน token ร้าน A ถูกใช้ที่ร้าน B
+function sessionKey(slug: string | null | undefined) { return `wallet_token_${slug || "default"}`; }
+function getStoredToken(slug: string | null | undefined): string { return sessionStorage.getItem(sessionKey(slug)) || ""; }
+function setStoredToken(slug: string | null | undefined, t: string) { sessionStorage.setItem(sessionKey(slug), t); }
+function clearStoredToken(slug: string | null | undefined) { sessionStorage.removeItem(sessionKey(slug)); }
 
 // ── Image compress → upload → return URL ─────────────────────────────────────
 async function compressImage(file: File): Promise<string> {
@@ -159,6 +160,7 @@ interface MyOrder {
 type LoginStep = "email" | "otp_entry" | "pin" | "create_pin" | "confirm_pin";
 
 function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string) => void }) {
+  const slug = useShopSlug();   // ใช้ scope wallet ต่อร้าน
   const [step, setStep] = useState<LoginStep>("email");
   const [email, setEmail] = useState("");
   const [inputEmail, setInputEmail] = useState("");
@@ -193,7 +195,9 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) { setError("รูปแบบอีเมลไม่ถูกต้อง"); return; }
     setLoading(true); setError("");
     try {
-      const res = await fetch(`/api/wallet/check?email=${encodeURIComponent(trimmed)}`);
+      const params = new URLSearchParams({ email: trimmed });
+      if (slug) params.set("shop_slug", slug);
+      const res = await fetch(`/api/wallet/check?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
       setEmail(trimmed);
@@ -218,7 +222,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string
       const res = await fetch("/api/wallet/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: toEmail, mode }),
+        body: JSON.stringify({ email: toEmail, mode, shop_slug: slug || null }),
         signal: controller.signal,
       });
       const data = await res.json();
@@ -250,7 +254,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string
       const res = await fetch("/api/wallet/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_token: sessionToken, otp: otpInput }),
+        body: JSON.stringify({ session_token: sessionToken, otp: otpInput, shop_slug: slug || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "OTP ไม่ถูกต้อง");
@@ -277,11 +281,11 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string
         const res = await fetch("/api/wallet/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, pin }),
+          body: JSON.stringify({ email, pin, shop_slug: slug || null }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "PIN ไม่ถูกต้อง");
-        setStoredToken(data.token);
+        setStoredToken(slug, data.token);
         onLoggedIn(data.token, email);
 
       } else if (step === "create_pin") {
@@ -299,17 +303,17 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (token: string, email: string
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
-          setStoredToken(data.token);
+          setStoredToken(slug, data.token);
           onLoggedIn(data.token, email);
         } else {
           const res = await fetch("/api/wallet/auth", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, pin, verified_token: verifiedToken }),
+            body: JSON.stringify({ email, pin, verified_token: verifiedToken, shop_slug: slug || null }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
-          setStoredToken(data.token);
+          setStoredToken(slug, data.token);
           onLoggedIn(data.token, email);
         }
       }
@@ -644,7 +648,10 @@ interface NailShopPublicSettings {
 export default function WalletPage() {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
-  const [token, setToken] = useState(getStoredToken);
+  // slug ต้องมาก่อน useState(token) เพราะ getStoredToken ต้องการ slug
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const slugForInit = useShopSlug();
+  const [token, setToken] = useState(() => getStoredToken(slugForInit));
   const [email, setEmail] = useState("");
   const [logoutMsg, setLogoutMsg] = useState(false);
   const [topupModal, setTopupModal] = useState(false);
@@ -670,8 +677,8 @@ export default function WalletPage() {
     gcTime: 10 * 60_000,
   });
 
-  // slug ของร้านจาก URL path /r/:slug/...
-  const slug = useShopSlug();
+  // slug ของร้านจาก URL path /r/:slug/... (slugForInit ถูกเรียกก่อน useState แล้ว ใช้ตัวเดียวกัน)
+  const slug = slugForInit;
 
   // ข้อมูลจาก nail shop settings — ใช้ toggling และ bank info สำหรับ nail wallet
   const { data: nailSettings } = useQuery<NailShopPublicSettings>({
@@ -693,7 +700,7 @@ export default function WalletPage() {
     queryKey: ["wallet-me", token],
     queryFn: async () => {
       const res = await fetch("/api/wallet/me", { headers: { Authorization: `Bearer ${token}` } });
-      if (res.status === 401) { clearStoredToken(); setToken(""); throw new Error("session หมดอายุ"); }
+      if (res.status === 401) { clearStoredToken(slug); setToken(""); throw new Error("session หมดอายุ"); }
       return res.json();
     },
     enabled: !!token,
@@ -781,7 +788,7 @@ export default function WalletPage() {
     onError: (e: Error) => setTopupError(e.message),
   });
 
-  const handleLogout = () => { clearStoredToken(); setToken(""); setEmail(""); qc.clear(); setLogoutMsg(true); };
+  const handleLogout = () => { clearStoredToken(slug); setToken(""); setEmail(""); qc.clear(); setLogoutMsg(true); };
   const handleTopupClose = () => {
     setTopupModal(false); setSlipFile(null); setSlipPreview(null);
     setVoucherLink(""); setTopupResult(null); setTopupError("");
