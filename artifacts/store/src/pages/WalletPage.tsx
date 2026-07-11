@@ -806,7 +806,7 @@ export default function WalletPage() {
             ออกจากระบบแล้ว
           </div>
         )}
-        <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); setLogoutMsg(false); setLocation("/"); }} />
+        <LoginScreen onLoggedIn={(tok, em) => { setToken(tok); setEmail(em); setLogoutMsg(false); setLocation(slug ? `/r/${slug}` : "/"); }} />
       </>
     );
   }
@@ -818,7 +818,7 @@ export default function WalletPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur sticky top-0 z-30">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
-          <button onClick={() => setLocation("/")} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+          <button onClick={() => setLocation(slug ? `/r/${slug}` : "/")} className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
             <ChevronRight size={14} className="rotate-180" /> หน้าร้าน
           </button>
           <span className="text-sm font-semibold text-foreground truncate max-w-[180px]">{email || "..."}</span>

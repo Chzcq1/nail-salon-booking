@@ -9,7 +9,7 @@ import {
   Instagram, Facebook, Clock, ChevronLeft, ChevronRight,
   Phone, User, StickyNote, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
-  MessageCircle, Video, HelpCircle, Wallet,
+  MessageCircle, Video, HelpCircle, Wallet, Upload,
 } from "lucide-react";
 import { getTheme, injectThemeCss, DEFAULT_THEME } from "@/theme";
 import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
@@ -56,6 +56,35 @@ function toISO(d: Date) {
 // ── Wallet session (แชร์ token เดียวกับ /wallet) ────────────────────────
 const WALLET_SESSION_KEY = "wallet_token";
 function getWalletToken(): string { return sessionStorage.getItem(WALLET_SESSION_KEY) || ""; }
+
+// ── Image helpers ────────────────────────────────────────────────────
+/** บีบอัดรูปภาพก่อนอัปโหลด — คืน base64 data URI */
+async function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        const MAX = 1600;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round((height * MAX) / width); width = MAX; }
+          else { width = Math.round((width * MAX) / height); height = MAX; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("canvas ctx null")); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 // ── API calls ────────────────────────────────────────────────────────
 /** แปลง detail จาก FastAPI/Pydantic เป็นข้อความที่อ่านได้ */
@@ -813,9 +842,29 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const [copied, setCopied] = useState(false);
   const [timer, setTimer] = useState(600);
   const [payError, setPayError] = useState("");
-  const [slipUrl, setSlipUrl] = useState("");
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreview, setSlipPreview] = useState<string | null>(null);
   const [slipError, setSlipError] = useState("");
   const [slipSubmitted, setSlipSubmitted] = useState(false);
+  const slipFileRef = useRef<HTMLInputElement>(null);
+
+  // ใช้ ref ติดตาม hold_token และ payment status เพื่อ release hold เมื่อออกจากหน้า
+  const holdTokenRef = useRef<string | null>(null);
+  const paymentDoneRef = useRef(false);
+
+  /** ปล่อย hold กลับคืนถ้ายังไม่ได้ชำระเงิน — fire-and-forget */
+  const releaseHold = () => {
+    if (!holdTokenRef.current || paymentDoneRef.current) return;
+    const token = holdTokenRef.current;
+    holdTokenRef.current = null;
+    fetch("/api/nail/booking/hold", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hold_token: token }),
+    }).catch(() => {});
+  };
+
+  const handleBack = () => { releaseHold(); onBack(); };
 
   const holdMutation = useMutation({
     mutationFn: () => api.hold({
@@ -826,11 +875,15 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
       customer_line: booking.line || undefined,
       customer_note: booking.note,
     }),
-    onSuccess: data => setHoldData(data),
+    onSuccess: data => { setHoldData(data); holdTokenRef.current = data.hold_token; },
     onError: (e: any) => setPayError(e.message),
   });
 
-  useEffect(() => { holdMutation.mutate(); }, []); // eslint-disable-line
+  // เรียก hold ทันทีที่ mount + ปล่อย hold เมื่อ unmount (เช่น ปิดแท็บ / navigate ออก)
+  useEffect(() => {
+    holdMutation.mutate();
+    return () => { releaseHold(); }; // eslint-disable-line
+  }, []); // eslint-disable-line
 
   // คำนวณเวลาที่เหลือจาก held_until จริง
   useEffect(() => {
@@ -862,22 +915,26 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
 
   const payWalletMutation = useMutation({
     mutationFn: () => api.payWallet(holdData.hold_token),
-    onSuccess: () => onSuccess(holdData),
+    onSuccess: () => { paymentDoneRef.current = true; onSuccess(holdData); },
     onError: (e: any) => setPayError(e.message),
   });
 
   const submitSlipMutation = useMutation({
     mutationFn: async () => {
-      if (!slipUrl.trim().startsWith("http")) throw new Error("กรุณาวางลิงก์ภาพที่ขึ้นต้นด้วย https://");
+      if (!slipFile) throw new Error("กรุณาเลือกรูปสลิป");
+      // บีบอัดรูปแล้วอัปโหลด
+      const base64 = await compressImage(slipFile);
+      const uploadRes = await api.uploadSlip(base64);
+      if (!uploadRes?.url) throw new Error("อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่");
       const r = await fetch("/api/nail/booking/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hold_token: holdData.hold_token, payment_proof: slipUrl.trim() }),
+        body: JSON.stringify({ hold_token: holdData.hold_token, payment_proof: uploadRes.url }),
       });
       if (!r.ok) { const e = await r.json(); throw new Error(e?.detail || `HTTP ${r.status}`); }
       return r.json();
     },
-    onSuccess: () => setSlipSubmitted(true),
+    onSuccess: () => { paymentDoneRef.current = true; setSlipSubmitted(true); },
     onError: (e: any) => setSlipError(e.message),
   });
 
@@ -923,7 +980,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
 
   return (
     <PageWrap>
-      <BackBtn onClick={onBack} />
+      <BackBtn onClick={handleBack} />
       <div style={{ padding: "0 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
@@ -1036,7 +1093,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
           </div>
         )}
 
-        {/* Bank Transfer + Slip URL option — แสดงเมื่อร้านตั้งค่าบัญชีธนาคารไว้ */}
+        {/* Bank Transfer + Slip Image Upload — แสดงเมื่อร้านตั้งค่าบัญชีธนาคารไว้ */}
         {(holdData?.bank_account_name || holdData?.bank_qr_url) && !slipSubmitted && (
           <div style={{ marginTop: 20, background: "#F8FAFF", border: `1.5px solid #C7D6F5`, borderRadius: 16, padding: 16 }}>
             <p style={{ fontSize: 14, fontWeight: 700, color: P.text, marginBottom: 10 }}>💳 หรือโอนผ่านบัญชีธนาคาร</p>
@@ -1047,24 +1104,56 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
             )}
             {holdData.bank_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 2 }}>ธนาคาร: <strong>{holdData.bank_name}</strong></p>}
             {holdData.bank_account_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 12 }}>ชื่อบัญชี: <strong>{holdData.bank_account_name}</strong></p>}
-            <p style={{ fontSize: 12, color: P.muted, marginBottom: 8, lineHeight: 1.6 }}>
-              หลังโอนแล้ว อัปโหลดสลิปที่{" "}
-              <a href="https://imgbb.com" target="_blank" rel="noreferrer" style={{ color: P.pink, fontWeight: 600 }}>imgbb.com</a>
-              {" "}แล้ววาง Direct Link ด้านล่าง
-            </p>
+
+            {/* File picker (ซ่อน) */}
             <input
-              value={slipUrl}
-              onChange={e => { setSlipUrl(e.target.value); setSlipError(""); }}
-              placeholder="https://i.ibb.co/xxxx/slip.jpg"
-              style={{ width: "100%", border: `1.5px solid ${slipError ? P.error : P.pinkBorder}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }}
+              ref={slipFileRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setSlipFile(file);
+                setSlipError("");
+                setSlipPreview(URL.createObjectURL(file));
+              }}
             />
+
+            {/* Preview หรือ placeholder */}
+            {slipPreview ? (
+              <div style={{ textAlign: "center", marginBottom: 10, position: "relative", display: "inline-block", width: "100%" }}>
+                <img src={slipPreview} alt="slip preview" style={{ maxWidth: "100%", maxHeight: 220, borderRadius: 12, border: `1px solid ${P.pinkBorder}`, display: "block", margin: "0 auto" }} />
+                <button
+                  onClick={() => { setSlipFile(null); setSlipPreview(null); if (slipFileRef.current) slipFileRef.current.value = ""; }}
+                  style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.55)", border: "none", borderRadius: "50%", width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                >
+                  <X size={14} color="#fff" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => slipFileRef.current?.click()}
+                style={{ width: "100%", background: P.pinkPale, border: `2px dashed ${P.pinkBorder}`, borderRadius: 12, padding: "22px 16px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit", marginBottom: 4 }}
+              >
+                <Upload size={26} color={P.pink} />
+                <span style={{ color: P.pink, fontWeight: 600, fontSize: 14 }}>แตะเพื่อเลือกรูปสลิป</span>
+                <span style={{ color: P.muted, fontSize: 12 }}>รองรับ JPG, PNG — ไม่เกิน 5MB</span>
+              </button>
+            )}
+            {slipPreview && (
+              <button onClick={() => slipFileRef.current?.click()} style={{ background: "none", border: "none", color: P.pink, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 6 }}>
+                เปลี่ยนรูป
+              </button>
+            )}
+
             {slipError && <p style={{ color: P.error, fontSize: 12, marginTop: 4 }}>{slipError}</p>}
             <button
-              onClick={() => { if (!slipUrl.trim()) { setSlipError("กรุณาวางลิงก์สลิปก่อน"); return; } submitSlipMutation.mutate(); }}
+              onClick={() => { if (!slipFile) { setSlipError("กรุณาเลือกรูปสลิปก่อน"); return; } submitSlipMutation.mutate(); }}
               disabled={submitSlipMutation.isPending}
               style={{ width: "100%", marginTop: 10, background: `linear-gradient(135deg, #3B82F6, #1D4ED8)`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, cursor: submitSlipMutation.isPending ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}
             >
-              {submitSlipMutation.isPending ? <><Loader2 size={16} className="animate-spin" /> กำลังส่ง...</> : "📎 ส่งสลิปให้แอดมินตรวจสอบ"}
+              {submitSlipMutation.isPending ? <><Loader2 size={16} className="animate-spin" /> กำลังอัปโหลดและส่ง...</> : "📎 ส่งสลิปให้แอดมินตรวจสอบ"}
             </button>
           </div>
         )}

@@ -12,3 +12,6 @@
 - [SQLAlchemy server_default vs default for NOT NULL columns](sqlalchemy-server-default.md) — use server_default= (not just default=) for NOT NULL columns so create_all() adds a DB-level DEFAULT; also include new NOT NULL fields in seed INSERTs
 - [Nail booking multi-tenant shop scoping](nail-multi-tenant-scoping.md) — shop_id must be threaded explicitly everywhere; wallet is platform-wide not per-shop; two different is_active flags exist (Shop vs NailShopSettings)
 - [Nail admin theme linking](nail-admin-theme-linking.md) — admin backend colors now follow shop brand_color via CSS vars (--b-*), not hardcoded hex; new hardcoded colors must go through A.* or they reintroduce the pink-only bug
+- [Slot hold release on back](slot-hold-release.md) — PaymentScreen must release hold (DELETE /api/nail/booking/hold) on back/unmount; cloned shops hit max_bookings=1 so one unreleased hold blocks the whole slot for 10 min
+- [Wallet login redirect slug](wallet-login-redirect.md) — after login setLocation must use slug ? /r/${slug} : "/" not bare "/" or cloned-shop users land on /default
+- [Slip upload image not URL](slip-upload-image.md) — booking slip and topup slip both use file upload (compressImage → /api/upload/slip); URL text input removed; slips auto-deleted after 7 days by _cleanup_old_slips() in upload.py

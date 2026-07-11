@@ -1,6 +1,7 @@
 import base64
 import logging
 import os
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -18,6 +19,23 @@ except Exception:
     pass  # directory creation may fail silently on read-only filesystems
 
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+SLIP_MAX_AGE_DAYS = 7
+
+
+def _cleanup_old_slips():
+    """ลบไฟล์สลิปที่เก่ากว่า SLIP_MAX_AGE_DAYS วัน — เรียกทุกครั้งที่มีการอัปโหลดใหม่"""
+    try:
+        cutoff = time.time() - SLIP_MAX_AGE_DAYS * 86400
+        removed = 0
+        for fname in os.listdir(SLIPS_DIR):
+            fpath = os.path.join(SLIPS_DIR, fname)
+            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                os.remove(fpath)
+                removed += 1
+        if removed:
+            logger.info(f"Slip cleanup: ลบ {removed} ไฟล์ที่เก่ากว่า {SLIP_MAX_AGE_DAYS} วัน")
+    except Exception as e:
+        logger.warning(f"Slip cleanup error: {e}")
 
 
 @router.post("/upload/slip")
@@ -60,4 +78,8 @@ async def upload_slip(body: dict):
 
     url = f"/uploads/slips/{filename}"
     logger.info(f"Slip saved: {url} ({len(img_bytes):,} bytes)")
+
+    # ลบไฟล์เก่ากว่า 7 วันออกทุกครั้งที่มีการอัปโหลดใหม่
+    _cleanup_old_slips()
+
     return {"url": url, "size": len(img_bytes)}

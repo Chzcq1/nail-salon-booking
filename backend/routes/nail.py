@@ -747,6 +747,24 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     }
 
 
+class ReleaseHoldRequest(BaseModel):
+    hold_token: str
+
+
+@router.delete("/booking/hold")
+def release_hold(req: ReleaseHoldRequest, db: Session = Depends(get_db)):
+    """
+    ยกเลิก hold ที่ลูกค้ากด Back ออกจากหน้าชำระเงินก่อนจ่าย
+    คืน slot ให้คนอื่นจองได้ทันที แทนที่จะรอหมดอายุ 10 นาที
+    """
+    booking = db.query(NailBooking).filter_by(hold_token=req.hold_token, status="held").first()
+    if not booking:
+        return {"ok": True}  # already released / not found — not an error
+    booking.status = "cancelled"
+    db.commit()
+    return {"ok": True}
+
+
 class WalletPayRequest(BaseModel):
     hold_token: str
 
