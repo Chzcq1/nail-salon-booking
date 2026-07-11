@@ -242,6 +242,7 @@ export default function BookingPage() {
         {step === "info" && (
           <InfoScreen
             key="info"
+            slot={booking.slot}
             services={services}
             service={booking.service}
             name={booking.name}
@@ -482,7 +483,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
       {(settings?.show_why_choose_section ?? true) && (
         <div style={{ padding: "28px 20px 0" }}>
           <h2 style={{ fontSize: 16, fontWeight: 800, color: P.text, textAlign: "center", marginBottom: 16, letterSpacing: 0.2 }}>
-            ✨ ทำไมต้องเลือก {settings?.shop_name || "ร้านของเรา"}?
+            {settings?.why_choose_heading || `✨ ทำไมต้องเลือก ${settings?.shop_name || "ร้านของเรา"}?`}
           </h2>
           {settings?.why_choose_custom_text ? (
             <div style={{ background: "#fff", border: `1px solid ${P.pinkBorder}`, borderRadius: 14, padding: "16px 16px", whiteSpace: "pre-wrap", fontSize: 13.5, color: P.text, lineHeight: 1.7 }}>
@@ -689,7 +690,7 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
 }
 
 // ── Info Screen ──────────────────────────────────────────────────────
-function InfoScreen({ services, service, name, phone, line, note, defaultDeposit, serviceEmoji, onBack, onNext }: any) {
+function InfoScreen({ slot, services, service, name, phone, line, note, defaultDeposit, serviceEmoji, onBack, onNext }: any) {
   const svcIcon = serviceEmoji || "💅";
   const slug = useShopSlug();
   const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
@@ -716,6 +717,16 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
   }, []); // eslint-disable-line
 
   const valid = n.trim() && p.trim().replace(/\D/g, "").length >= 9;
+
+  // ตรวจสอบว่าระยะเวลาบริการที่เลือกไม่เกินความยาวของสล็อต
+  const slotDuration = slot ? (() => {
+    try {
+      const [sh, sm] = (slot.start_time as string).split(':').map(Number);
+      const [eh, em] = (slot.end_time as string).split(':').map(Number);
+      return (eh * 60 + em) - (sh * 60 + sm);
+    } catch { return null; }
+  })() : null;
+  const slotTooShort = !!(sel && slotDuration !== null && (sel.duration_minutes ?? 0) > slotDuration);
 
   return (
     <PageWrap>
@@ -797,15 +808,24 @@ function InfoScreen({ services, service, name, phone, line, note, defaultDeposit
           </div>
         )}
 
+        {slotTooShort && (
+          <div style={{ background: "#FFF8E1", border: "1.5px solid #FFAB00", borderRadius: 12, padding: "10px 14px", marginBottom: 8, fontSize: 13, color: "#6D4C00", display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+            <div>
+              <strong>สล็อตเวลานี้สั้นเกินไป</strong><br />
+              บริการ "{sel?.name}" ต้องใช้เวลา <strong>{sel?.duration_minutes} นาที</strong> แต่สล็อตที่เลือกมีเพียง {slotDuration} นาที — กรุณากลับไปเลือกสล็อตเวลาที่ยาวกว่า
+            </div>
+          </div>
+        )}
         <button
-          onClick={() => valid && onNext(sel, n.trim(), p.trim(), ln.trim(), nt.trim())}
-          disabled={!valid}
+          onClick={() => valid && !slotTooShort && onNext(sel, n.trim(), p.trim(), ln.trim(), nt.trim())}
+          disabled={!valid || slotTooShort}
           style={{
-            width: "100%", marginTop: 28,
-            background: valid ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : P.gray,
-            color: valid ? "#fff" : P.muted, border: "none", borderRadius: 16, padding: "16px",
-            fontSize: 17, fontWeight: 700, cursor: valid ? "pointer" : "not-allowed",
-            boxShadow: valid ? `0 4px 20px var(--b-primary-55)` : "none",
+            width: "100%", marginTop: 12,
+            background: (!valid || slotTooShort) ? P.gray : `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
+            color: (!valid || slotTooShort) ? P.muted : "#fff", border: "none", borderRadius: 16, padding: "16px",
+            fontSize: 17, fontWeight: 700, cursor: (!valid || slotTooShort) ? "not-allowed" : "pointer",
+            boxShadow: (!valid || slotTooShort) ? "none" : `0 4px 20px var(--b-primary-55)`,
           }}
         >
           ถัดไป — ชำระมัดจำ <ArrowRight size={18} style={{ display: "inline" }} />

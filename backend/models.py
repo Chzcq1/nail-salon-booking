@@ -265,6 +265,8 @@ class NailShopSettings(Base):
     # "ทำไมต้องเลือกเรา" — บางร้านอยากตั้งกฎ/จุดเด่นเอง บางร้านไม่อยากให้มีเพราะรก จึงต้องเปิด/ปิด และแก้เนื้อหาได้เอง
     show_why_choose_section = Column(Boolean, server_default="true", default=True, nullable=False)
     why_choose_custom_text = Column(Text, nullable=True)  # ถ้าตั้งไว้ จะแสดงข้อความนี้แทนจุดเด่นเริ่มต้น 6 ข้อ
+    why_choose_heading = Column(String(500), nullable=True)  # ชื่อหัวข้อแถบ "ทำไมต้องเลือกร้านเรา" — ถ้าไม่ตั้งจะใช้ค่า default
+    stats_reset_at = Column(DateTime(timezone=True), nullable=True)  # รีเซ็ตนับยอดสรุป ณ เวลานี้ (NULL = นับจากวันแรก)
     # ประเภทธุรกิจ — ขับเคลื่อน default คำศัพท์/emoji/บริการตอนสร้างร้าน (ดู BUSINESS_TYPE_TEMPLATES ใน routes/nail.py)
     # ไม่ล็อกพฤติกรรมใดๆ ของระบบ ร้านยังแก้ไขทุกอย่างเองได้ปกติ — ใช้เพื่อ personalize ตอนเริ่มต้นเท่านั้น
     business_type = Column(String(30), nullable=False, server_default="nail", default="nail")
@@ -330,6 +332,7 @@ class NailSlotTemplate(Base):
     gap_minutes = Column(Integer, nullable=False, default=0)         # เว้นระหว่างรอบกี่นาที
     max_bookings = Column(Integer, nullable=False, default=1)        # รับกี่คิวต่อรอบ
     staff_id = Column(Integer, ForeignKey("nail_staff.id"), nullable=True)
+    extra_blocks = Column(Text, nullable=True)  # JSON array of {start_time, rounds_count, round_minutes, gap_minutes, max_bookings} — บล็อกเวลาเพิ่มเติมนอกจากบล็อกแรก
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

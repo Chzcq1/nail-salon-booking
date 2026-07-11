@@ -444,6 +444,13 @@ def _run_migrations(engine):
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS why_choose_custom_text TEXT",
         # ประเภทธุรกิจ (นวด/ตัดผม/สปา/ล้างรถ/ทำเล็บ ฯลฯ) — ใช้ personalize ตอนสร้างร้านเท่านั้น ไม่ล็อกฟีเจอร์
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS business_type VARCHAR(30) NOT NULL DEFAULT 'nail'",
+        # ── ฟีเจอร์ใหม่ ──────────────────────────────────────────────────────────
+        # why_choose_heading: ชื่อหัวข้อแถบ "ทำไมต้องเลือกร้านเรา" (แก้ได้เอง)
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS why_choose_heading VARCHAR(500)",
+        # stats_reset_at: จุดเริ่มต้นนับยอดสรุป (รีเซ็ตได้จากหน้าภาพรวม)
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS stats_reset_at TIMESTAMPTZ",
+        # extra_blocks: บล็อกเวลาเพิ่มเติมต่อวัน JSON [{start_time,rounds_count,round_minutes,gap_minutes,max_bookings}]
+        "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS extra_blocks TEXT",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:

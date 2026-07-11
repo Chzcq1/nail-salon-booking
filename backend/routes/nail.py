@@ -277,18 +277,41 @@ def _ensure_slots_for_date(db: Session, shop: NailShopSettings, date_str: str):
     except ValueError:
         return
 
-    for i in range(tmpl.rounds_count):
-        start = cursor + timedelta(minutes=i * (tmpl.round_minutes + tmpl.gap_minutes))
-        end = start + timedelta(minutes=tmpl.round_minutes)
-        db.add(NailTimeSlot(
-            shop_id=shop_id,
-            slot_date=date_str,
-            start_time=start.strftime("%H:%M"),
-            end_time=end.strftime("%H:%M"),
-            max_bookings=tmpl.max_bookings or 1,
-            staff_id=tmpl.staff_id,
-            is_available=True,
-        ))
+    def _add_block_slots(start_time_str: str, rounds: int, round_min: int, gap_min: int, max_b: int, staff_id_: Any):
+        try:
+            cur = datetime.strptime(start_time_str, "%H:%M")
+        except ValueError:
+            return
+        for i in range(rounds):
+            s = cur + timedelta(minutes=i * (round_min + gap_min))
+            e = s + timedelta(minutes=round_min)
+            db.add(NailTimeSlot(
+                shop_id=shop_id,
+                slot_date=date_str,
+                start_time=s.strftime("%H:%M"),
+                end_time=e.strftime("%H:%M"),
+                max_bookings=max(1, max_b or 1),
+                staff_id=staff_id_,
+                is_available=True,
+            ))
+
+    _add_block_slots(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes or 0, tmpl.max_bookings or 1, tmpl.staff_id)
+
+    # process extra_blocks — บล็อกเวลาเพิ่มเติมต่อวัน
+    if tmpl.extra_blocks:
+        try:
+            for blk in json.loads(tmpl.extra_blocks):
+                _add_block_slots(
+                    blk.get("start_time", ""),
+                    int(blk.get("rounds_count", 0)),
+                    int(blk.get("round_minutes", 60)),
+                    int(blk.get("gap_minutes", 0)),
+                    int(blk.get("max_bookings", 1)),
+                    tmpl.staff_id,
+                )
+        except Exception:
+            pass
+
     db.commit()
 
 # ─── Admin Auth (2-step: passcode → OTP → JWT) ──────────────────────────────
@@ -442,6 +465,7 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "service_section_emoji": shop.service_section_emoji or "💅",
         "show_why_choose_section": shop.show_why_choose_section if shop.show_why_choose_section is not None else True,
         "why_choose_custom_text": shop.why_choose_custom_text,
+        "why_choose_heading": shop.why_choose_heading,
     }
 
 
@@ -602,6 +626,22 @@ def hold_slot(
     if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
         raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
     service = db.query(NailService).filter_by(id=req.service_id, shop_id=slot.shop_id).first() if req.service_id else None
+
+    # ตรวจว่าระยะเวลาบริการไม่เกินระยะเวลาสล็อต — กันลูกค้าจองบริการ 90 นาทีเข้าสล็อต 60 นาที
+    if service and service.duration_minutes:
+        try:
+            sh, sm = map(int, slot.start_time.split(":"))
+            eh, em = map(int, slot.end_time.split(":"))
+            slot_duration = (eh * 60 + em) - (sh * 60 + sm)
+            if slot_duration > 0 and service.duration_minutes > slot_duration:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"บริการนี้ใช้เวลา {service.duration_minutes} นาที แต่สล็อตที่เลือกมีเวลาเพียง {slot_duration} นาที กรุณาเลือกสล็อตที่ยาวกว่า"
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     # ค่ามัดจำ: ใช้ของบริการถ้าตั้งไว้ ไม่งั้น fallback เป็นค่าเริ่มต้นของร้าน
     if service is not None and service.deposit_amount is not None:
@@ -966,6 +1006,8 @@ def admin_list_bookings(
 @router.get("/admin/dashboard")
 def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(None)):
     shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
+    reset_since = shop.stats_reset_at  # None = count from the very beginning
     today = _now().date().isoformat()
     week_start = (_now().date() - timedelta(days=_now().weekday())).isoformat()
 
@@ -986,10 +1028,13 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
         NailBooking.status.in_(["confirmed", "completed", "walkin"]),
     ).scalar() or 0
 
-    total_bookings = db.query(NailBooking).filter(
+    total_bookings_q = db.query(NailBooking).filter(
         NailBooking.shop_id == shop_id,
         NailBooking.status.in_(["confirmed", "completed", "walkin"])
-    ).count()
+    )
+    if reset_since:
+        total_bookings_q = total_bookings_q.filter(NailBooking.created_at >= reset_since)
+    total_bookings = total_bookings_q.count()
 
     recent = (
         db.query(NailBooking)
@@ -1009,10 +1054,13 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
         NailBooking.status.in_(LOCKED_STATUSES),
     ).scalar() or 0
 
-    all_time_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+    all_time_q = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
         NailBooking.shop_id == shop_id,
         NailBooking.status.in_(LOCKED_STATUSES),
-    ).scalar() or 0
+    )
+    if reset_since:
+        all_time_q = all_time_q.filter(NailBooking.created_at >= reset_since)
+    all_time_revenue = all_time_q.scalar() or 0
 
     # ลูกค้าที่กลับมาจองซ้ำ (นับเบอร์โทรที่มี booking สำเร็จมากกว่า 1 ครั้ง) — วัด "ความรัก" ที่ลูกค้ามีต่อร้าน
     phone_counts = (
@@ -1074,6 +1122,7 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
             "no_show_prevented_this_month": float(no_show_prevented),
             "busiest_day": {"date": busiest_day_row[0], "count": busiest_day_row[1]} if busiest_day_row else None,
         },
+        "stats_reset_at": shop.stats_reset_at.isoformat() if shop.stats_reset_at else None,
     }
 
 
@@ -1208,6 +1257,10 @@ class UpdateBookingBody(BaseModel):
     status: Optional[str] = None
     admin_note: Optional[str] = None
     service_id: Optional[int] = None  # ใช้ตอนลูกค้าขอเปลี่ยนบริการหน้าร้าน
+    slot_id: Optional[int] = None      # ย้ายไปสล็อตใหม่ (admin reschedule)
+    new_slot_date: Optional[str] = None
+    new_start_time: Optional[str] = None
+    new_end_time: Optional[str] = None
 
 
 @router.put("/admin/bookings/{booking_id}")
@@ -1225,6 +1278,21 @@ def admin_update_booking(
         booking.status = body.status
     if body.admin_note is not None:
         booking.admin_note = body.admin_note
+
+    # ── ย้ายคิวไปสล็อตใหม่ (admin reschedule) ────────────────────────────────
+    if body.slot_id is not None:
+        slot = db.query(NailTimeSlot).filter_by(id=body.slot_id, shop_id=shop_id).first()
+        if not slot:
+            raise HTTPException(status_code=404, detail="ไม่พบสล็อตเวลาที่ต้องการย้าย")
+        old_date = booking.slot_date or ""
+        old_time = booking.start_time or ""
+        booking.slot_id = slot.id
+        booking.slot_date = slot.slot_date
+        booking.start_time = slot.start_time
+        booking.end_time = slot.end_time
+        booking.admin_note = (
+            (booking.admin_note or "").rstrip() + f" [ย้ายคิว: {old_date} {old_time} → {slot.slot_date} {slot.start_time}]"
+        ).strip()
 
     deposit_diff = None
     if body.service_id is not None and body.service_id != booking.service_id:
@@ -1377,6 +1445,7 @@ class SlotTemplateItem(BaseModel):
     gap_minutes: int = 0
     max_bookings: int = 1
     staff_id: Optional[int] = None
+    extra_blocks: Optional[str] = None  # JSON string of [{start_time,rounds_count,round_minutes,gap_minutes,max_bookings}]
 
 
 class SlotTemplateBulkBody(BaseModel):
@@ -1405,6 +1474,7 @@ def admin_get_slot_templates(db: Session = Depends(get_db), authorization: str =
             "gap_minutes": t.gap_minutes,
             "max_bookings": t.max_bookings,
             "staff_id": t.staff_id,
+            "extra_blocks": t.extra_blocks or "[]",
         }
         for t in rows
     ]
@@ -1434,6 +1504,7 @@ def admin_update_slot_templates(
         row.gap_minutes = max(0, item.gap_minutes)
         row.max_bookings = max(1, item.max_bookings)
         row.staff_id = item.staff_id
+        row.extra_blocks = item.extra_blocks or "[]"
     db.commit()
 
     # sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตใหม่ทันที (ไม่ต้องรอแอดมินกดปุ่มแยก)
@@ -1671,6 +1742,39 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
                         is_available=True,
                     ))
                     created += 1
+
+    # process extra_blocks — บล็อกเวลาเพิ่มเติมต่อวัน
+    if tmpl and tmpl.extra_blocks:
+        try:
+            for blk in json.loads(tmpl.extra_blocks):
+                blk_start = blk.get("start_time", "")
+                blk_count = int(blk.get("rounds_count", 0))
+                blk_min = int(blk.get("round_minutes", 60))
+                blk_gap = int(blk.get("gap_minutes", 0))
+                blk_max = int(blk.get("max_bookings", 1))
+                if not blk_start or blk_count <= 0 or blk_min <= 0:
+                    continue
+                try:
+                    blk_cursor = datetime.strptime(blk_start, "%H:%M")
+                except ValueError:
+                    continue
+                for i in range(blk_count):
+                    s = blk_cursor + timedelta(minutes=i * (blk_min + blk_gap))
+                    e = s + timedelta(minutes=blk_min)
+                    s_str = s.strftime("%H:%M")
+                    if s_str not in surviving_start_times:
+                        db.add(NailTimeSlot(
+                            shop_id=shop_id,
+                            slot_date=date_str,
+                            start_time=s_str,
+                            end_time=e.strftime("%H:%M"),
+                            max_bookings=max(1, blk_max),
+                            staff_id=tmpl.staff_id,
+                            is_available=True,
+                        ))
+                        created += 1
+        except Exception:
+            pass
 
     db.commit()
     return {"deleted": deleted, "created": created, "has_booked_slots_preserved": has_booked}
@@ -1992,6 +2096,7 @@ class ShopSettingsBody(BaseModel):
     service_section_emoji: Optional[str] = None  # อีโมจิส่วนหัวบริการ
     show_why_choose_section: Optional[bool] = None
     why_choose_custom_text: Optional[str] = None
+    why_choose_heading: Optional[str] = None
 
 
 @router.get("/admin/settings")
@@ -2022,7 +2127,19 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "service_section_emoji": shop.service_section_emoji or "💅",
         "show_why_choose_section": shop.show_why_choose_section if shop.show_why_choose_section is not None else True,
         "why_choose_custom_text": shop.why_choose_custom_text,
+        "why_choose_heading": shop.why_choose_heading,
+        "stats_reset_at": shop.stats_reset_at.isoformat() if shop.stats_reset_at else None,
     }
+
+
+@router.post("/admin/settings/reset-stats")
+def admin_reset_stats(db: Session = Depends(get_db), authorization: str = Header(None)):
+    """รีเซ็ตการนับยอดสะสม (total_bookings + all_time_revenue) ให้เริ่มใหม่จากตอนนี้"""
+    shop_id = _check_admin(authorization)
+    shop = _get_shop(db, shop_id)
+    shop.stats_reset_at = _now()
+    db.commit()
+    return {"ok": True, "reset_at": shop.stats_reset_at.isoformat()}
 
 
 @router.put("/admin/settings")
