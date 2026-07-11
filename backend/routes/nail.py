@@ -6,7 +6,6 @@ Admin   : /api/nail/admin/* (requires admin bearer token)
 """
 import json
 import logging
-import random
 import re
 import secrets
 import string
@@ -648,8 +647,8 @@ def hold_slot(
         base_deposit = float(service.deposit_amount)
     else:
         base_deposit = float(shop.deposit_amount or 200)
-    rand_cents = random.randint(1, 99)  # สุ่มเศษสตางค์ 01–99 เพื่อระบุตัวตน
-    deposit_total = round(base_deposit + rand_cents / 100, 2)
+    # ไม่สุ่มเศษสตางค์แล้ว — ยอดมัดจำเป็นเลขกลมๆ ให้ร้านค้าตรวจสอบยอดโอนเอง
+    deposit_total = round(base_deposit, 2)
 
     hold_token = secrets.token_urlsafe(32)
     held_until = _now() + timedelta(minutes=10)
@@ -670,7 +669,7 @@ def hold_slot(
         end_time=slot.end_time,
         service_name=service.name if service else None,
         deposit_amount=base_deposit,
-        deposit_cents=rand_cents,
+        deposit_cents=0,
         deposit_total=deposit_total,
         status="held",
         held_until=held_until,
@@ -687,7 +686,7 @@ def hold_slot(
         "booking_ref": booking.booking_ref,
         "deposit_total": deposit_total,
         "deposit_amount": base_deposit,
-        "deposit_cents": rand_cents,
+        "deposit_cents": 0,
         "bank_account_number": shop.bank_account_number,
         "bank_name": shop.bank_name,
         "bank_account_name": shop.bank_account_name,

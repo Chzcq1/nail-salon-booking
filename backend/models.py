@@ -379,8 +379,8 @@ class NailBooking(Base):
     end_time = Column(String(5), nullable=True)      # snapshot
     service_name = Column(String(255), nullable=True)  # snapshot
     deposit_amount = Column(Numeric(10, 2), nullable=True)
-    deposit_cents = Column(Integer, nullable=True)    # random 1–99 สตางค์
-    deposit_total = Column(Numeric(10, 2), nullable=True)  # deposit_amount + cents/100
+    deposit_cents = Column(Integer, nullable=True)    # legacy: เดิมสุ่ม 1–99 สตางค์ ตอนนี้ไม่ใช้แล้ว เก็บไว้เป็น 0
+    deposit_total = Column(Numeric(10, 2), nullable=True)  # ยอดมัดจำเลขกลมๆ (ไม่มีเศษสตางค์) — ร้านค้าตรวจยอดโอนเอง
     payment_proof = Column(Text, nullable=True)       # URL หรือ base64
     slip_verify_status = Column(String(30), nullable=True)
     slip_verify_result = Column(Text, nullable=True)
