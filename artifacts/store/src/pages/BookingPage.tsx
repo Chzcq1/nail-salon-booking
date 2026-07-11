@@ -227,7 +227,7 @@ export default function BookingPage() {
             closedDates={(() => { try { return JSON.parse(shopSettings?.closed_dates || "[]"); } catch { return []; } })()}
             selected={booking.date}
             onBack={() => go("landing")}
-            onSelect={d => { setBooking(b => ({ ...b, date: d, slot: null })); go("slot"); }}
+            onSelect={(d: any) => { setBooking(b => ({ ...b, date: d, slot: null })); go("slot"); }}
           />
         )}
         {step === "slot" && (
@@ -235,8 +235,10 @@ export default function BookingPage() {
             key="slot"
             date={booking.date!}
             selected={booking.slot}
+            services={services}
+            preService={booking.service}
             onBack={() => go("date")}
-            onSelect={sl => { setBooking(b => ({ ...b, slot: sl })); go("info"); }}
+            onSelect={(sl: any, svc: any) => { setBooking(b => ({ ...b, slot: sl, service: svc ?? b.service })); go("info"); }}
           />
         )}
         {step === "info" && (
@@ -252,7 +254,7 @@ export default function BookingPage() {
             defaultDeposit={shopSettings?.deposit_amount}
             serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onBack={() => go("slot")}
-            onNext={(service, name, phone, line, note) => {
+            onNext={(service: any, name: any, phone: any, line: any, note: any) => {
               setBooking(b => ({ ...b, service, name, phone, line, note }));
               go("payment");
             }}
@@ -264,7 +266,7 @@ export default function BookingPage() {
             booking={booking}
             serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onBack={() => go("info")}
-            onSuccess={holdData => { setBooking(b => ({ ...b, holdData })); go("success"); }}
+            onSuccess={(holdData: any) => { setBooking(b => ({ ...b, holdData })); go("success"); }}
           />
         )}
         {step === "success" && (
@@ -612,7 +614,7 @@ function DateScreen({ maxDays, closedDates = [], selected, onBack, onSelect }: a
 }
 
 // ── Slot Screen ──────────────────────────────────────────────────────
-function SlotScreen({ date, selected, onBack, onSelect }: any) {
+function SlotScreen({ date, selected, services = [], preService, onBack, onSelect }: any) {
   const slug = useShopSlug();
   const api = makeApi(slug);
   const { data: slots = [], isLoading, isError, refetch } = useQuery({
@@ -624,14 +626,68 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
     retry: 1,
   });
 
+  // บริการที่เลือกล่วงหน้า (ใช้สำหรับกรองสล็อตที่สั้นเกินไป)
+  const [selService, setSelService] = useState<any>(preService || null);
+
   const activeSlots = slots.filter((sl: any) => sl.is_past !== true);
+
+  // คำนวณระยะเวลาสล็อต (นาที) จาก start_time และ end_time
+  function slotDurMin(sl: any): number | null {
+    try {
+      const [sh, sm] = (sl.start_time as string).split(":").map(Number);
+      const [eh, em] = (sl.end_time as string).split(":").map(Number);
+      return (eh * 60 + em) - (sh * 60 + sm);
+    } catch { return null; }
+  }
 
   return (
     <PageWrap>
       <BackBtn onClick={onBack} />
       <div style={{ padding: "0 20px" }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>เลือกเวลา</h2>
-        <p style={{ color: P.sub, marginBottom: 20, fontSize: 14 }}>{fmtDate(date)}</p>
+        <p style={{ color: P.sub, marginBottom: 14, fontSize: 14 }}>{fmtDate(date)}</p>
+
+        {/* ── Service pre-filter — กรองสล็อตตามระยะเวลาบริการที่เลือก ── */}
+        {services.length > 0 && (
+          <div style={{ marginBottom: 16, background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "12px 14px" }}>
+            <label style={{ fontSize: 12, color: P.sub, fontWeight: 600, display: "block", marginBottom: 8 }}>
+              💅 เลือกบริการก่อน (เพื่อดูเฉพาะสล็อตที่เวลาเพียงพอ)
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <button
+                onClick={() => setSelService(null)}
+                style={{
+                  background: !selService ? P.pinkPale : "#f5f5f5",
+                  border: `1.5px solid ${!selService ? P.pink : "#ddd"}`,
+                  borderRadius: 100, padding: "5px 14px", cursor: "pointer",
+                  fontSize: 12, fontWeight: !selService ? 700 : 400,
+                  color: !selService ? P.pinkDeep : P.sub, fontFamily: "inherit",
+                }}>
+                ทั้งหมด
+              </button>
+              {services.map((s: any) => {
+                const isSel = selService?.id === s.id;
+                return (
+                  <button key={s.id} onClick={() => setSelService(isSel ? null : s)}
+                    style={{
+                      background: isSel ? P.pinkPale : "#f5f5f5",
+                      border: `1.5px solid ${isSel ? P.pink : "#ddd"}`,
+                      borderRadius: 100, padding: "5px 14px", cursor: "pointer",
+                      fontSize: 12, fontWeight: isSel ? 700 : 400,
+                      color: isSel ? P.pinkDeep : P.sub, fontFamily: "inherit",
+                    }}>
+                    {s.name} <span style={{ opacity: 0.7 }}>({s.duration_minutes}น.)</span>
+                  </button>
+                );
+              })}
+            </div>
+            {selService && (
+              <p style={{ fontSize: 11, color: P.muted, marginTop: 8, marginBottom: 0 }}>
+                ⏱ บริการ "{selService.name}" ใช้เวลา {selService.duration_minutes} นาที — สล็อตที่สั้นเกินไปจะแสดงสีเทา
+              </p>
+            )}
+          </div>
+        )}
 
         {isLoading ? (
           <div style={{ textAlign: "center", padding: 40 }}><Loader2 size={28} color={P.pink} className="animate-spin" /></div>
@@ -651,27 +707,30 @@ function SlotScreen({ date, selected, onBack, onSelect }: any) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {activeSlots.map((sl: any) => {
               const avail = sl.available;
-              const isPast = false; // past slots are now hidden entirely
               const isSelected = selected?.id === sl.id;
               const remaining = sl.max_bookings > 1 ? Math.max(0, sl.max_bookings - sl.booked_count) : null;
+              // ตรวจสอบว่าสล็อตนี้สั้นเกินไปสำหรับบริการที่เลือก
+              const dur = slotDurMin(sl);
+              const tooShort = !!(selService && dur !== null && selService.duration_minutes > dur);
+              const clickable = avail && !tooShort;
               return (
                 <motion.button
                   key={sl.id}
-                  whileTap={avail ? { scale: 0.96 } : {}}
-                  onClick={() => avail && onSelect(sl)}
+                  whileTap={clickable ? { scale: 0.96 } : {}}
+                  onClick={() => clickable && onSelect(sl, selService)}
                   style={{
-                    background: !avail ? P.gray : isSelected ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : "#fff",
-                    border: `2px solid ${isSelected ? P.pink : avail ? P.pinkBorder : P.grayDark}`,
-                    borderRadius: 14, padding: "16px 12px", cursor: avail ? "pointer" : "not-allowed",
-                    textAlign: "center", color: !avail ? P.muted : isSelected ? "#fff" : P.text,
-                    opacity: !avail ? 0.55 : 1,
+                    background: tooShort ? "#F5F5F5" : !avail ? P.gray : isSelected ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : "#fff",
+                    border: `2px solid ${isSelected ? P.pink : tooShort ? "#E0E0E0" : avail ? P.pinkBorder : P.grayDark}`,
+                    borderRadius: 14, padding: "16px 12px", cursor: clickable ? "pointer" : "not-allowed",
+                    textAlign: "center", color: tooShort ? P.muted : !avail ? P.muted : isSelected ? "#fff" : P.text,
+                    opacity: tooShort ? 0.5 : !avail ? 0.55 : 1,
                     boxShadow: isSelected ? `0 4px 16px var(--b-primary-44)` : "none",
                   }}
                 >
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{sl.start_time}</div>
                   <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>ถึง {sl.end_time}</div>
-                  {isPast
-                    ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>⏱️ ผ่านไปแล้ว</div>
+                  {tooShort
+                    ? <div style={{ fontSize: 10, marginTop: 4, color: "#B0B0B0", fontWeight: 600 }}>⚠️ เวลาไม่พอ ({dur}น.)</div>
                     : !avail
                       ? <div style={{ fontSize: 11, marginTop: 4, color: P.muted, fontWeight: 600 }}>🔴 เต็มแล้ว</div>
                       : remaining !== null

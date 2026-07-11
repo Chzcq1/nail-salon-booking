@@ -2890,6 +2890,12 @@ function ScheduleTab({ token }: { token: string }) {
   const [closedDates, setClosedDates] = useState<string[]>([]);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
+  // ── Daily template (เทมเพลตเฉพาะวัน) ──
+  const [showDailyTpl, setShowDailyTpl] = useState(false);
+  const [dailyTplBlocks, setDailyTplBlocks] = useState<any[]>([
+    { start_time: "09:00", rounds_count: 4, round_minutes: 60, gap_minutes: 0, max_bookings: 1 },
+  ]);
+
   // Load settings for closed_dates — use useEffect to handle cached data correctly
   const { data: settingsData } = useQuery<any>({
     queryKey: ["nail-admin-settings", shopKey],
@@ -2962,6 +2968,24 @@ function ScheduleTab({ token }: { token: string }) {
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] }); setShowAdd(false); },
     onError: (e: any) => alert(`เพิ่ม slot ไม่สำเร็จ: ${e.message}`),
+  });
+
+  const dailyTplMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/nail/admin/slots/apply-custom-daily", {
+        method: "POST", headers: authH(token),
+        body: JSON.stringify({ date: selDate, blocks: dailyTplBlocks }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: (d: any) => {
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
+      setShowDailyTpl(false);
+      alert(`✅ สร้างสล็อตแล้ว ${d.created} ช่วงเวลา${d.deleted > 0 ? ` (ลบเก่าที่ว่าง ${d.deleted})` : ""}`);
+    },
+    onError: (e: any) => alert(`เกิดข้อผิดพลาด: ${e.message}`),
   });
 
   const toggleMutation = useMutation({
@@ -3115,6 +3139,11 @@ function ScheduleTab({ token }: { token: string }) {
           title="วันถัดไป">
           <ChevronRight size={16} />
         </button>
+        <button onClick={() => setShowDailyTpl(true)}
+          title="เพิ่มสล็อตหลายช่วงเวลาพร้อมกัน โดยกำหนดบล็อกเวลา"
+          style={{ background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>
+          📋 หลายสล็อต
+        </button>
         <button onClick={() => setShowAdd(true)}
           style={{ background: A.primary, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>
           <Plus size={15} /> เพิ่ม
@@ -3240,6 +3269,91 @@ function ScheduleTab({ token }: { token: string }) {
               <button onClick={() => createMutation.mutate()}
                 style={{ flex: 1, background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>
                 {createMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "เพิ่ม Slot"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Daily Template Modal — เพิ่มหลายสล็อตพร้อมกันด้วยการกำหนดบล็อกเวลา */}
+      {showDailyTpl && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 9999 }}>
+          <motion.div initial={{ y: 120 }} animate={{ y: 0 }} style={{ background: A.card, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto" }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, color: A.text }}>📋 เทมเพลตเฉพาะวัน</h3>
+            <p style={{ fontSize: 12, color: A.sub, marginBottom: 14 }}>
+              {fmtDateLong(selDate)} — กำหนดหลายบล็อกเวลาแล้วสร้างพร้อมกัน<br />
+              <span style={{ color: A.warning, fontWeight: 600 }}>⚠️ สล็อตที่ว่างของวันนี้จะถูกลบแล้วสร้างใหม่ตามที่กำหนด (สล็อตที่มีการจองอยู่แล้วจะถูกเก็บไว้)</span>
+            </p>
+
+            {dailyTplBlocks.map((blk: any, idx: number) => (
+              <div key={idx} style={{ background: A.bg, border: `1.5px solid ${A.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: A.text }}>บล็อก {idx + 1}</span>
+                  {dailyTplBlocks.length > 1 && (
+                    <button onClick={() => setDailyTplBlocks(prev => prev.filter((_, i) => i !== idx))}
+                      style={{ background: A.errorBg, color: A.error, border: "none", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                      ลบ
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เวลาเริ่มต้น</label>
+                    <input type="time" value={blk.start_time}
+                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, start_time: e.target.value } : b))}
+                      style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card, fontSize: 14 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนรอบ</label>
+                    <input type="number" min={1} max={24} value={blk.rounds_count}
+                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, rounds_count: Math.max(1, parseInt(e.target.value) || 1) } : b))}
+                      style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ระยะเวลา/รอบ (นาที)</label>
+                    <input type="number" min={15} max={480} step={15} value={blk.round_minutes}
+                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, round_minutes: Math.max(15, parseInt(e.target.value) || 60) } : b))}
+                      style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ช่วงพักระหว่างรอบ (นาที)</label>
+                    <input type="number" min={0} max={120} step={5} value={blk.gap_minutes}
+                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, gap_minutes: Math.max(0, parseInt(e.target.value) || 0) } : b))}
+                      style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับคิวต่อรอบ</label>
+                    <input type="number" min={1} max={20} value={blk.max_bookings}
+                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, max_bookings: Math.max(1, parseInt(e.target.value) || 1) } : b))}
+                      style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "flex-end" }}>
+                    <div style={{ background: A.pale, borderRadius: 8, padding: "8px 10px", fontSize: 12, color: A.primary, fontWeight: 600, width: "100%", boxSizing: "border-box" }}>
+                      {(() => {
+                        try {
+                          const [h, m] = blk.start_time.split(":").map(Number);
+                          const endMin = h * 60 + m + blk.rounds_count * (blk.round_minutes + (blk.gap_minutes || 0)) - (blk.gap_minutes || 0);
+                          return `${String(Math.floor(endMin / 60)).padStart(2,"0")}:${String(endMin % 60).padStart(2,"0")} (${blk.rounds_count} รอบ)`;
+                        } catch { return "—"; }
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={() => setDailyTplBlocks(prev => [...prev, { start_time: "13:00", rounds_count: 3, round_minutes: 60, gap_minutes: 0, max_bookings: 1 }])}
+              style={{ width: "100%", background: A.pale, color: A.primary, border: `1.5px dashed ${A.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 14 }}>
+              + เพิ่มบล็อกเวลา
+            </button>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowDailyTpl(false)}
+                style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>ยกเลิก</button>
+              <button onClick={() => dailyTplMutation.mutate()} disabled={dailyTplMutation.isPending}
+                style={{ flex: 2, background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: dailyTplMutation.isPending ? 0.7 : 1 }}>
+                {dailyTplMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <><Calendar size={15} /> สร้างสล็อต</>}
               </button>
             </div>
           </motion.div>

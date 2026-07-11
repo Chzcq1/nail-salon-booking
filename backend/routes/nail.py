@@ -1804,6 +1804,89 @@ def admin_apply_template_for_day(
     return {"ok": True, **result}
 
 
+class CustomDailyBlock(BaseModel):
+    start_time: str
+    rounds_count: int
+    round_minutes: int
+    gap_minutes: int = 0
+    max_bookings: int = 1
+
+
+class ApplyCustomDailyBody(BaseModel):
+    date: str
+    blocks: List[CustomDailyBlock]
+
+
+@router.post("/admin/slots/apply-custom-daily")
+def admin_apply_custom_daily(
+    body: ApplyCustomDailyBody,
+    db: Session = Depends(get_db),
+    authorization: str = Header(None),
+):
+    """สร้างสล็อตจากเทมเพลตเฉพาะวัน (กำหนดเอง) — ลบสล็อตที่ว่างก่อน แล้วสร้างใหม่จากหลายบล็อก
+    สล็อตที่มีการจองอยู่แล้วจะถูกเก็บไว้เสมอ (ไม่ถูกลบ ไม่ถูกแตะต้อง)"""
+    shop_id = _check_admin(authorization)
+    try:
+        datetime.strptime(body.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="รูปแบบวันที่ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)")
+
+    # ดึงสล็อตที่มีอยู่แล้วของวันนี้
+    existing = db.query(NailTimeSlot).filter_by(slot_date=body.date, shop_id=shop_id).all()
+    slot_ids = [s.id for s in existing]
+
+    # นับ booking ของทุกสล็อตทีเดียว (กัน N+1)
+    any_counts: dict = {}
+    if slot_ids:
+        from sqlalchemy import func as sqlfunc2
+        rows = (
+            db.query(NailBooking.slot_id, sqlfunc2.count(NailBooking.id).label("total"))
+            .filter(NailBooking.slot_id.in_(slot_ids))
+            .group_by(NailBooking.slot_id)
+            .all()
+        )
+        any_counts = {r.slot_id: r.total for r in rows}
+
+    # ลบสล็อตที่ไม่มี booking อ้างอิง (FK safe)
+    deleted = 0
+    surviving_times: set = set()
+    for sl in existing:
+        if any_counts.get(sl.id, 0) == 0:
+            db.delete(sl)
+            deleted += 1
+        else:
+            surviving_times.add(sl.start_time)
+    db.flush()
+
+    # สร้างสล็อตใหม่จาก blocks ที่กำหนด
+    created = 0
+    for blk in body.blocks:
+        if blk.rounds_count <= 0:
+            continue
+        try:
+            cur = datetime.strptime(blk.start_time, "%H:%M")
+        except ValueError:
+            continue
+        for i in range(blk.rounds_count):
+            s_time = cur + timedelta(minutes=i * (blk.round_minutes + (blk.gap_minutes or 0)))
+            e_time = s_time + timedelta(minutes=blk.round_minutes)
+            start_str = s_time.strftime("%H:%M")
+            if start_str in surviving_times:
+                continue  # ข้ามเวลาที่มีคนจองอยู่แล้ว (ไม่เขียนทับ)
+            db.add(NailTimeSlot(
+                shop_id=shop_id,
+                slot_date=body.date,
+                start_time=start_str,
+                end_time=e_time.strftime("%H:%M"),
+                max_bookings=max(1, blk.max_bookings or 1),
+                is_available=True,
+            ))
+            created += 1
+
+    db.commit()
+    return {"ok": True, "deleted": deleted, "created": created}
+
+
 @router.post("/admin/slots")
 def admin_create_slot(
     body: SlotBody,
