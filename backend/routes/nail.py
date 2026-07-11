@@ -624,6 +624,14 @@ def hold_slot(
     # ป้องกันการจองใหม่ถ้าร้านถูกปิด/หมดอายุการเช่าระบบ (บังคับที่ฝั่งเซิร์ฟเวอร์ ไม่พึ่งแค่ frontend gate)
     if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
         raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
+
+    # ── กันบัญชีกระเป๋าเงินข้ามร้าน ────────────────────────────────────────────
+    # customer มาจาก token ซึ่งผูกกับร้านหนึ่งร้านเท่านั้น (shop_id ฝังอยู่ใน JWT)
+    # ถ้า token เป็นของร้านอื่น (ไม่ตรงกับร้านของ slot ที่กำลังจอง) ต้องไม่ผูกบัญชี/ยอดเงินข้ามร้านเด็ดขาด
+    # ถือว่าเหมือนยังไม่ได้ล็อกอิน (สำหรับร้านนี้) แทนที่จะปล่อยให้ balance ร้านอื่นรั่วมาแสดง
+    if customer is not None and customer.shop_id != slot.shop_id:
+        customer = None
+
     service = db.query(NailService).filter_by(id=req.service_id, shop_id=slot.shop_id).first() if req.service_id else None
 
     # ตรวจว่าระยะเวลาบริการไม่เกินระยะเวลาสล็อต — กันลูกค้าจองบริการ 90 นาทีเข้าสล็อต 60 นาที
@@ -825,6 +833,13 @@ async def submit_payment_wallet(
     )
     if not booking:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง")
+
+    # ── กันบัญชีกระเป๋าเงินข้ามร้าน ────────────────────────────────────────────
+    # ต้องเช็คว่าบัญชีที่ล็อกอินอยู่ (จาก token) เป็นของร้านเดียวกับที่จองไว้เท่านั้น
+    # ไม่งั้นจะเกิดกรณีล็อกอินร้าน A แล้วเอาเครดิตร้าน A ไปจ่ายจองคิวร้าน B ได้ (ห้ามเด็ดขาด)
+    if customer.shop_id != booking.shop_id:
+        raise HTTPException(status_code=403, detail="บัญชีนี้ไม่ได้อยู่ร้านนี้ กรุณาเข้าสู่ระบบกระเป๋าเงินของร้านนี้ก่อนชำระเงิน")
+
     shop = _get_shop(db, booking.shop_id)
     if not shop.is_active or (shop.expired_at and _now() > shop.expired_at):
         raise HTTPException(status_code=403, detail="ระบบจองคิวปิดใช้งานชั่วคราว กรุณาติดต่อร้านโดยตรง")
