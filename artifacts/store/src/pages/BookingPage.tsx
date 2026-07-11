@@ -801,7 +801,7 @@ function InfoScreen({ slot, services, service, name, phone, line, note, defaultD
             <div>
               <p style={{ fontSize: 13, fontWeight: 700, color: P.text, margin: "0 0 3px" }}>💳 มีกระเป๋าเงินแล้ว?</p>
               <p style={{ fontSize: 12, color: P.sub, margin: "0 0 6px" }}>เข้าสู่ระบบก่อนเพื่อจ่ายมัดจำจากเครดิตทันที และระบบจะกรอกชื่อ-เบอร์ให้อัตโนมัติ</p>
-              <a href={walletHref} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: P.pink, fontWeight: 700, textDecoration: "none" }}>สร้างบัญชี / เข้าสู่ระบบ →</a>
+              <a href={walletHref} style={{ fontSize: 12, color: P.pink, fontWeight: 700, textDecoration: "none" }}>สร้างบัญชี / เข้าสู่ระบบ →</a>
             </div>
           </div>
         )}

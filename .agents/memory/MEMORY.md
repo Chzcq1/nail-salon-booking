@@ -16,3 +16,4 @@
 - [Slot hold release on back](slot-hold-release.md) — PaymentScreen must release hold (DELETE /api/nail/booking/hold) on back/unmount; cloned shops hit max_bookings=1 so one unreleased hold blocks the whole slot for 10 min
 - [Wallet login redirect slug](wallet-login-redirect.md) — after login setLocation must use slug ? /r/${slug} : "/" not bare "/" or cloned-shop users land on /default
 - [Slip upload image not URL](slip-upload-image.md) — booking slip and topup slip both use file upload (compressImage → /api/upload/slip); URL text input removed; slips auto-deleted after 7 days by _cleanup_old_slips() in upload.py
+- [Wallet login tab isolation](wallet-login-tab-isolation.md) — never open a wallet login link with target="_blank"; sessionStorage isn't shared across tabs so the caller page won't see the new token
