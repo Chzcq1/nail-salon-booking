@@ -4,6 +4,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Calendar, Clock, Loader2, Lock, ArrowLeft, Scissors, Banknote } from "lucide-react";
+import { useShopSlug } from "@/lib/shopSlugContext";
 
 const P = {
   pink: "#FF6B9D",
@@ -17,9 +18,9 @@ const P = {
   warning: "#B45309",
 } as const;
 
-const WALLET_SESSION_KEY = "wallet_token";
-function getWalletToken(): string {
-  return sessionStorage.getItem(WALLET_SESSION_KEY) || "";
+// ต้องตรงกับ WalletPage.tsx/StoreFront.tsx/BookingPage.tsx — key ต้อง scope ต่อร้าน (slug)
+function getWalletToken(slug: string | null): string {
+  return sessionStorage.getItem(`wallet_token_${slug || "default"}`) || "";
 }
 
 const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
@@ -38,7 +39,10 @@ function fmtDate(s: string) {
 }
 
 export default function MyBookingsPage() {
-  const token = getWalletToken();
+  const slug = useShopSlug();
+  const token = getWalletToken(slug);
+  const homeHref = slug ? `/r/${slug}` : "/";
+  const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
 
   const { data: bookings, isLoading, isError } = useQuery<any[]>({
     queryKey: ["my-nail-bookings"],
@@ -54,7 +58,7 @@ export default function MyBookingsPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#FFF8FC", fontFamily: "'Prompt', sans-serif" }}>
       <div style={{ background: `linear-gradient(135deg, ${P.pink} 0%, #FF85B3 100%)`, padding: "28px 20px 24px", borderRadius: "0 0 24px 24px" }}>
-        <a href="/" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "rgba(255,255,255,0.9)", textDecoration: "none", fontSize: 13, marginBottom: 10 }}>
+        <a href={homeHref} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "rgba(255,255,255,0.9)", textDecoration: "none", fontSize: 13, marginBottom: 10 }}>
           <ArrowLeft size={16} /> กลับหน้าหลัก
         </a>
         <h1 style={{ color: "#fff", fontSize: 22, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
@@ -69,7 +73,7 @@ export default function MyBookingsPage() {
             <p style={{ color: P.sub, fontSize: 14, marginBottom: 16 }}>
               กรุณาเข้าสู่ระบบกระเป๋าเงินก่อน เพื่อดูประวัติการจองของคุณ
             </p>
-            <a href="/wallet" style={{ display: "inline-block", background: P.pink, color: "#fff", borderRadius: 100, padding: "10px 24px", textDecoration: "none", fontWeight: 700, fontSize: 14 }}>
+            <a href={walletHref} style={{ display: "inline-block", background: P.pink, color: "#fff", borderRadius: 100, padding: "10px 24px", textDecoration: "none", fontWeight: 700, fontSize: 14 }}>
               เข้าสู่ระบบ
             </a>
           </div>

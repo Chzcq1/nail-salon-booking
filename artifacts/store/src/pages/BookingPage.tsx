@@ -53,9 +53,9 @@ function toISO(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-// ── Wallet session (แชร์ token เดียวกับ /wallet) ────────────────────────
-const WALLET_SESSION_KEY = "wallet_token";
-function getWalletToken(): string { return sessionStorage.getItem(WALLET_SESSION_KEY) || ""; }
+// ── Wallet session (แชร์ token เดียวกับ /wallet) — ต้องตรงกับ WalletPage.tsx/StoreFront.tsx
+// key ต้อง scope ต่อร้าน (slug) ไม่งั้น token ร้านหนึ่งจะไปปนกับอีกร้าน
+function getWalletToken(slug: string | null): string { return sessionStorage.getItem(`wallet_token_${slug || "default"}`) || ""; }
 
 // ── Image helpers ────────────────────────────────────────────────────
 /** บีบอัดรูปภาพก่อนอัปโหลด — คืน base64 data URI */
@@ -107,7 +107,7 @@ function makeApi(slug: string | null) {
     services:  () => fetch(`/api/nail/services${sq()}`).then(r => r.json()),
     slots:     (date: string) => fetch(`/api/nail/slots${sq(`date=${date}`)}`).then(r => r.json()),
     hold: async (body: object) => {
-      const token = getWalletToken();
+      const token = getWalletToken(slug);
       const r = await fetch(`/api/nail/booking/hold${sq()}`, {
         method: "POST",
         headers: {
@@ -129,7 +129,7 @@ function makeApi(slug: string | null) {
       return r.json();
     },
     payWallet: async (hold_token: string) => {
-      const token = getWalletToken();
+      const token = getWalletToken(slug);
       const r = await fetch(`/api/nail/booking/pay-wallet${sq()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -396,13 +396,13 @@ function LandingScreen({ settings, gallery, onBook }: any) {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   useEffect(() => {
-    const token = getWalletToken();
+    const token = getWalletToken(slug);
     if (!token) return;
     fetch("/api/wallet/me", { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.balance != null) setWalletBalance(parseFloat(d.balance)); })
       .catch(() => {});
-  }, []);
+  }, [slug]);
 
   const socials = [
     { url: settings?.ig_url, icon: <Instagram size={20} />, label: "Instagram", color: "#E1306C" },
@@ -759,11 +759,11 @@ function InfoScreen({ slot, services, service, name, phone, line, note, defaultD
   const [p, setP] = useState(phone);
   const [ln, setLn] = useState(line || "");
   const [nt, setNt] = useState(note);
-  const isLoggedIn = !!getWalletToken();
+  const isLoggedIn = !!getWalletToken(slug);
 
   // Pre-fill from wallet profile if logged in and fields are still empty
   useEffect(() => {
-    const token = getWalletToken();
+    const token = getWalletToken(slug);
     if (!token) return;
     fetch("/api/wallet/me", { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
@@ -988,7 +988,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isLoggedIn = !!getWalletToken();
+  const isLoggedIn = !!getWalletToken(slug);
   const walletBalance: number | null = holdData?.wallet_balance ?? null;
   const walletSufficient: boolean = !!holdData?.wallet_sufficient;
 

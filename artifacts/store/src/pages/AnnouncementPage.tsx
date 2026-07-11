@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Megaphone, ArrowLeft, ChevronLeft, ChevronRight, ImageOff, Calendar } from "lucide-react";
 import { useLocation } from "wouter";
+import { useShopSlug } from "@/lib/shopSlugContext";
 
 interface Announcement {
   id: number;
@@ -123,6 +124,7 @@ function AnnouncementCard({ ann, index }: { ann: Announcement; index: number }) 
 
 export default function AnnouncementPage() {
   const [, setLocation] = useLocation();
+  const slug = useShopSlug();
 
   const { data: announcements = [], isLoading } = useQuery<Announcement[]>({
     queryKey: ["announcements"],
@@ -134,7 +136,7 @@ export default function AnnouncementPage() {
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
           <button
-            onClick={() => setLocation("/")}
+            onClick={() => setLocation(slug ? `/r/${slug}/shop` : "/")}
             className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft size={18} />

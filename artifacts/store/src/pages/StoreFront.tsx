@@ -7,6 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useLocation } from "wouter";
+import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
+
+/** ต้องตรงกับ WalletPage.tsx — ห้ามใช้ key "wallet_token" เดี่ยวๆ เพราะจะปนกันข้ามร้าน */
+function sessionKey(slug: string | null | undefined) { return `wallet_token_${slug || "default"}`; }
+/** เส้นทางไปหน้ากระเป๋าเงินของร้านนี้ */
+function walletPath(slug: string | null | undefined) { return slug ? `/r/${slug}/wallet` : "/wallet"; }
 
 const C = {
   bg:       "#0f1311",
@@ -359,9 +365,10 @@ function BuyModal({
 }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const slug = useShopSlug();
 
-  // Read token from sessionStorage (set by WalletPage after PIN login)
-  const [token, setToken] = useState(() => sessionStorage.getItem("wallet_token") || "");
+  // Read token from sessionStorage (set by WalletPage after PIN login) — scoped per-shop
+  const [token, setToken] = useState(() => sessionStorage.getItem(sessionKey(slug)) || "");
   const [result, setResult] = useState<{ order_id: number; invite_links: string[]; balance: number } | null>(null);
   const [error, setError] = useState("");
 
@@ -419,12 +426,12 @@ function BuyModal({
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { setMiniError("รูปแบบอีเมลไม่ถูกต้อง"); return; }
     setMiniLoading(true); setMiniError("");
     try {
-      const res = await fetch(`/api/wallet/check?email=${encodeURIComponent(em)}`);
+      const res = await fetch(`/api/wallet/check?email=${encodeURIComponent(em)}${shopQs(slug).replace("?", "&")}`);
       const data = await res.json();
       if (!data.has_pin) {
         // No PIN yet → redirect to wallet page to set up
         handleClose();
-        setLocation("/wallet");
+        setLocation(walletPath(slug));
         return;
       }
       setMiniStep("pin");
@@ -442,11 +449,11 @@ function BuyModal({
       const res = await fetch("/api/wallet/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: em, pin }),
+        body: JSON.stringify({ email: em, pin, shop_slug: slug || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
-      sessionStorage.setItem("wallet_token", data.token);
+      sessionStorage.setItem(sessionKey(slug), data.token);
       window.dispatchEvent(new CustomEvent("wallet-token-updated"));
       setToken(data.token);
       setPin(""); setMiniStep("email");
@@ -525,7 +532,7 @@ function BuyModal({
                     <Button className="w-full" onClick={handleMiniCheckUser} disabled={!inputEmail.trim() || miniLoading}>
                       {miniLoading ? <Loader size={14} className="animate-spin" /> : "ต่อไป"}
                     </Button>
-                    <button onClick={() => { handleClose(); setLocation("/wallet"); }}
+                    <button onClick={() => { handleClose(); setLocation(walletPath(slug)); }}
                       className="w-full text-xs text-muted-foreground hover:text-primary text-center transition-colors">
                       ยังไม่มีบัญชี? สมัครที่กระเป๋าเครดิต →
                     </button>
@@ -596,7 +603,7 @@ function BuyModal({
                 {!hasEnough && !walletQuery.isLoading && (
                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400 flex items-center justify-between">
                     <span>เครดิตไม่พอ (ขาด {(price - balance).toLocaleString("th-TH")} เครดิต)</span>
-                    <button onClick={() => { handleClose(); setLocation("/wallet"); }} className="text-xs underline whitespace-nowrap ml-2">
+                    <button onClick={() => { handleClose(); setLocation(walletPath(slug)); }} className="text-xs underline whitespace-nowrap ml-2">
                       เติมเงิน
                     </button>
                   </div>
@@ -608,7 +615,7 @@ function BuyModal({
 
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="text-xs"
-                    onClick={() => { sessionStorage.removeItem("wallet_token"); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
+                    onClick={() => { sessionStorage.removeItem(sessionKey(slug)); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
                     เปลี่ยนบัญชี
                   </Button>
                   <Button className="flex-1 font-bold"
@@ -619,7 +626,7 @@ function BuyModal({
                   </Button>
                 </div>
 
-                <button onClick={() => { handleClose(); setLocation("/wallet"); }}
+                <button onClick={() => { handleClose(); setLocation(walletPath(slug)); }}
                   className="w-full text-xs text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5 transition-colors">
                   <Wallet size={12} /> ดูกระเป๋าเครดิต / เติมเงิน
                 </button>
@@ -818,8 +825,9 @@ function GafiwProductCard({ product, onBuy }: { product: GafiwProduct; onBuy: (p
 function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onClose: () => void }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
+  const slug = useShopSlug();
 
-  const [token, setToken] = useState(() => sessionStorage.getItem("wallet_token") || "");
+  const [token, setToken] = useState(() => sessionStorage.getItem(sessionKey(slug)) || "");
   const [result, setResult] = useState<{ product_name: string; price: number; balance: number; data: any } | null>(null);
   const [error, setError] = useState("");
   const [miniStep, setMiniStep] = useState<"email" | "pin">("email");
@@ -876,9 +884,9 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
     if (!em || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { setMiniError("รูปแบบอีเมลไม่ถูกต้อง"); return; }
     setMiniLoading(true); setMiniError("");
     try {
-      const res = await fetch(`/api/wallet/check?email=${encodeURIComponent(em)}`);
+      const res = await fetch(`/api/wallet/check?email=${encodeURIComponent(em)}${shopQs(slug).replace("?", "&")}`);
       const data = await res.json();
-      if (!data.has_pin) { handleClose(); setLocation("/wallet"); return; }
+      if (!data.has_pin) { handleClose(); setLocation(walletPath(slug)); return; }
       setMiniStep("pin");
     } catch { setMiniError("เกิดข้อผิดพลาด"); } finally { setMiniLoading(false); }
   };
@@ -889,11 +897,11 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
     try {
       const res = await fetch("/api/wallet/auth", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: em, pin }),
+        body: JSON.stringify({ email: em, pin, shop_slug: slug || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "เกิดข้อผิดพลาด");
-      sessionStorage.setItem("wallet_token", data.token);
+      sessionStorage.setItem(sessionKey(slug), data.token);
       window.dispatchEvent(new CustomEvent("wallet-token-updated"));
       setToken(data.token); setPin(""); setMiniStep("email");
     } catch (e: any) { setMiniError(e.message); setPin(""); } finally { setMiniLoading(false); }
@@ -992,13 +1000,13 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
                 {!hasEnough && !walletQuery.isLoading && (
                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400 flex items-center justify-between">
                     <span>เครดิตไม่พอ (ขาด {(price - balance).toLocaleString("th-TH")} เครดิต)</span>
-                    <button onClick={() => { handleClose(); setLocation("/wallet"); }} className="text-xs underline ml-2">เติมเงิน</button>
+                    <button onClick={() => { handleClose(); setLocation(walletPath(slug)); }} className="text-xs underline ml-2">เติมเงิน</button>
                   </div>
                 )}
                 {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">{error}</div>}
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="text-xs"
-                    onClick={() => { sessionStorage.removeItem("wallet_token"); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
+                    onClick={() => { sessionStorage.removeItem(sessionKey(slug)); window.dispatchEvent(new CustomEvent("wallet-token-updated")); setToken(""); setMiniStep("email"); setError(""); }}>
                     เปลี่ยนบัญชี
                   </Button>
                   <Button className="flex-1 font-bold"
@@ -1008,7 +1016,7 @@ function GafiwBuyModal({ product, onClose }: { product: GafiwProduct | null; onC
                     {purchaseMutation.isPending ? "กำลังดำเนินการ..." : `ซื้อ ${price.toLocaleString()} เครดิต`}
                   </Button>
                 </div>
-                <button onClick={() => { handleClose(); setLocation("/wallet"); }}
+                <button onClick={() => { handleClose(); setLocation(walletPath(slug)); }}
                   className="w-full text-xs text-muted-foreground hover:text-primary flex items-center justify-center gap-1.5 transition-colors">
                   <Wallet size={12} /> ดูกระเป๋าเครดิต / เติมเงิน
                 </button>
@@ -1416,6 +1424,7 @@ const FAKE_MASKED = ["ap***48","jd***88","ni***07","pp***21","kk***33","ta***91"
 
 export default function StoreFront() {
   const [, setLocation] = useLocation();
+  const slug = useShopSlug();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedGafiwProduct, setSelectedGafiwProduct] = useState<GafiwProduct | null>(null);
   const [showOrderStatus, setShowOrderStatus] = useState(false);
@@ -1475,12 +1484,12 @@ export default function StoreFront() {
   const totalSold = (storeStats?.total_orders ?? 0) + (storeStats?.fake_base ?? 12847);
   const memberCount = storeStats?.member_count ?? 18947;
 
-  const [headerToken, setHeaderToken] = useState(() => sessionStorage.getItem("wallet_token") || "");
+  const [headerToken, setHeaderToken] = useState(() => sessionStorage.getItem(sessionKey(slug)) || "");
   useEffect(() => {
-    const onTokenUpdate = () => setHeaderToken(sessionStorage.getItem("wallet_token") || "");
+    const onTokenUpdate = () => setHeaderToken(sessionStorage.getItem(sessionKey(slug)) || "");
     window.addEventListener("wallet-token-updated", onTokenUpdate);
     return () => window.removeEventListener("wallet-token-updated", onTokenUpdate);
-  }, []);
+  }, [slug]);
   const { data: headerWallet } = useQuery<{ balance: number }>({
     queryKey: ["wallet-header", headerToken],
     queryFn: async () => {
@@ -1528,14 +1537,14 @@ export default function StoreFront() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             <button
-              onClick={() => setLocation("/wallet")}
+              onClick={() => setLocation(walletPath(slug))}
               style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 20, border: `1px solid ${headerWallet ? C.indigo + "60" : C.border}`, background: headerWallet ? C.indigoLt : C.card, color: headerWallet ? C.indigo : C.sub, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
             >
               <Wallet size={12} />
               {headerWallet ? `฿${headerWallet.balance.toLocaleString("th-TH")}` : "กระเป๋า"}
             </button>
             <button
-              onClick={() => { markAllSeen(); setLocation("/announcements"); }}
+              onClick={() => { markAllSeen(); setLocation(slug ? `/r/${slug}/announcements` : "/announcements"); }}
               style={{ position: "relative", width: 34, height: 34, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
             >
               <Megaphone size={14} color={C.sub} />
@@ -1548,7 +1557,7 @@ export default function StoreFront() {
       {/* ── Announcement ticker ── */}
       {announcement && (
         <button
-          onClick={() => setLocation("/announcements")}
+          onClick={() => setLocation(slug ? `/r/${slug}/announcements` : "/announcements")}
           style={{ width: "100%", background: "#1f1a0a", borderBottom: "1px solid #3a2f0a", display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", textAlign: "left" as const, cursor: "pointer" }}
         >
           <Megaphone size={13} color="#f59e0b" style={{ flexShrink: 0 }} />
@@ -1712,10 +1721,10 @@ export default function StoreFront() {
       <nav className="sm:hidden" style={{ position: "fixed", bottom: 14, left: "50%", transform: "translateX(-50%)", width: "calc(100vw - 32px)", maxWidth: 380, background: "rgba(15,19,17,0.95)", backdropFilter: "blur(20px)", borderRadius: 32, border: `1px solid ${C.border}`, boxShadow: "0 4px 24px rgba(0,0,0,0.40)", display: "flex", alignItems: "center", justifyContent: "space-around", padding: "6px 12px", zIndex: 50 }}>
         {[
           { Icon: Home,      label: "หน้าแรก",  key: "home",   action: () => setNavTab("home") },
-          { Icon: Wallet,    label: "เติมเงิน", key: "wallet", action: () => { setNavTab("wallet"); setLocation("/wallet"); } },
+          { Icon: Wallet,    label: "เติมเงิน", key: "wallet", action: () => { setNavTab("wallet"); setLocation(walletPath(slug)); } },
           { isMain: true,    key: "shop" },
-          { Icon: History,   label: "ออเดอร์",  key: "orders", action: () => { setNavTab("orders"); setLocation("/wallet"); } },
-          { Icon: Megaphone, label: "ประกาศ",   key: "notify", action: () => { setNavTab("notify"); markAllSeen(); setLocation("/announcements"); } },
+          { Icon: History,   label: "ออเดอร์",  key: "orders", action: () => { setNavTab("orders"); setLocation(walletPath(slug)); } },
+          { Icon: Megaphone, label: "ประกาศ",   key: "notify", action: () => { setNavTab("notify"); markAllSeen(); setLocation(slug ? `/r/${slug}/announcements` : "/announcements"); } },
         ].map((n: any) => {
           if (n.isMain) return (
             <button key="shop" onClick={() => setNavTab("shop")} style={{ width: 46, height: 46, borderRadius: "50%", background: C.indigo, border: `3px solid ${C.bg}`, display: "flex", alignItems: "center", justifyContent: "center", marginTop: -18, boxShadow: `0 4px 14px ${C.indigo}60`, cursor: "pointer", flexShrink: 0 }}>
