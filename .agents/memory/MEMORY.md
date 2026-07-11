@@ -18,3 +18,4 @@
 - [Slip upload image not URL](slip-upload-image.md) — booking slip and topup slip both use file upload (compressImage → /api/upload/slip); URL text input removed; slips auto-deleted after 7 days by _cleanup_old_slips() in upload.py
 - [Wallet login tab isolation](wallet-login-tab-isolation.md) — never open a wallet login link with target="_blank"; sessionStorage isn't shared across tabs so the caller page won't see the new token
 - [Nail wallet cross-shop payment](nail-wallet-cross-shop-payment.md) — hold/pay-wallet endpoints must verify customer.shop_id == booking.shop_id; per-shop customer isolation alone doesn't stop cross-shop token misuse
+- [Superadmin rebrand & multi-shop UX](superadmin-rebrand-ux.md) — /superadmin header is now "CSC / Chain System Care"; page is tab-based with search/pagination for scaling to many shops

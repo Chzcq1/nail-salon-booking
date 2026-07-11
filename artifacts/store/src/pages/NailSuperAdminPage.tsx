@@ -151,8 +151,8 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
             <Shield size={24} color={S.accent} />
           </div>
           <div>
-            <h1 style={{ color: S.text, fontSize: 18, fontWeight: 700, margin: 0 }}>Super Admin</h1>
-            <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>ระบบเจ้าของ — Nail Booking</p>
+            <h1 style={{ color: S.text, fontSize: 18, fontWeight: 700, margin: 0 }}>CSC Super Admin</h1>
+            <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>Chain System Care — ระบบเจ้าของ</p>
           </div>
         </div>
 
@@ -638,6 +638,20 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [deleteShop, setDeleteShop] = useState<any | null>(null);
+  const [search, setSearch] = useState("");
+  const PAGE_SIZE = 8;
+  const [page, setPage] = useState(1);
+
+  const filteredShops = shops.filter((sh: any) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return sh.name.toLowerCase().includes(q) || sh.slug.toLowerCase().includes(q);
+  });
+  const totalPages = Math.max(1, Math.ceil(filteredShops.length / PAGE_SIZE));
+  const pageShops = filteredShops.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
 
   const copyLink = (e: React.MouseEvent, slug: string, id: number, isAdmin = false) => {
     e.stopPropagation();
@@ -714,6 +728,13 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
           </button>
         </div>
 
+        {/* Search — จำเป็นเมื่อร้านเยอะขึ้น (10+) ไม่ต้องเลื่อนหาเอง */}
+        {shops.length > 5 && (
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="ค้นหาร้าน (ชื่อ หรือ slug)..."
+            style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13, boxSizing: "border-box", marginBottom: 14 }} />
+        )}
+
         {showCreate && (
           <div style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
@@ -753,8 +774,14 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
           </div>
         )}
 
+        {filteredShops.length === 0 && (
+          <div style={{ textAlign: "center", padding: 30, color: S.muted, fontSize: 13 }}>
+            ไม่พบร้านที่ตรงกับ "{search}"
+          </div>
+        )}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {shops.map((sh: any) => (
+          {pageShops.map((sh: any) => (
             <div key={sh.id}
               onClick={() => editingId !== sh.id && onSelectShop(sh.id)}
               style={{
@@ -833,6 +860,21 @@ function ShopsSection({ sKey, selectedShopId, onSelectShop }: { sKey: string; se
             </div>
           ))}
         </div>
+
+        {/* Pagination — กันไม่ให้หน้ายาวเกินไปเมื่อร้านเยอะ (10+ ร้าน) */}
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 16 }}>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "6px 12px", cursor: page === 1 ? "not-allowed" : "pointer", color: page === 1 ? S.muted : S.sub, fontFamily: "inherit", fontSize: 13, opacity: page === 1 ? 0.5 : 1 }}>
+              ก่อนหน้า
+            </button>
+            <span style={{ color: S.muted, fontSize: 13 }}>หน้า {page} / {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "6px 12px", cursor: page === totalPages ? "not-allowed" : "pointer", color: page === totalPages ? S.muted : S.sub, fontFamily: "inherit", fontSize: 13, opacity: page === totalPages ? 0.5 : 1 }}>
+              ถัดไป
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1194,6 +1236,9 @@ export default function NailSuperAdminPage() {
   // ร้านที่กำลังเลือกจัดการ (multi-shop) — ค่าเริ่มต้น 1 = ร้านหลัก
   const [selectedShopId, setSelectedShopId] = useState<number>(1);
 
+  // แท็บหลัก — แยกหน้าจอเป็นส่วนๆ กันหน้ายาวเกินไปเมื่อร้านเยอะขึ้น
+  const [tab, setTab] = useState<"shops" | "status" | "renewals" | "finance" | "usage">("shops");
+
   const qc = useQueryClient();
 
   // รายชื่อร้านทั้งหมด — ใช้ส่งไปยัง ShopKeysSection เพื่อ quick-switch
@@ -1281,8 +1326,8 @@ export default function NailSuperAdminPage() {
           <Shield size={20} color={S.accent} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>Super Admin</div>
-          <div style={{ color: S.muted, fontSize: 12 }}>Nail Booking System</div>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>CSC Super Admin</div>
+          <div style={{ color: S.muted, fontSize: 12 }}>Chain System Care</div>
         </div>
         {pendingCount > 0 && (
           <span style={{ background: S.warning, color: "#000", borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
@@ -1299,154 +1344,201 @@ export default function NailSuperAdminPage() {
         </button>
       </div>
 
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px 16px" }}>
-        {/* Shops management + selector */}
-        <ShopsSection sKey={sKey} selectedShopId={selectedShopId} onSelectShop={setSelectedShopId} />
-
-        {/* Shop Status Card */}
-        <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-            <Crown size={18} color={S.accent} />
-            <span style={{ fontWeight: 700, fontSize: 15 }}>สถานะร้าน #{selectedShopId}</span>
-            {statusLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
-          </div>
-          {shopStatus && (
-            <>
-              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-                <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
-                  <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>ชื่อร้าน</div>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{shopStatus.shop_name}</div>
-                </div>
-                <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
-                  <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>วันหมดอายุ</div>
-                  <div style={{ fontWeight: 600, fontSize: 15, color: shopStatus.is_expired ? S.error : (shopStatus.days_left !== null && shopStatus.days_left <= 7 ? S.warning : S.success) }}>
-                    {shopStatus.expired_at ? fmtDate(shopStatus.expired_at) : "ไม่มีกำหนด"}
-                  </div>
-                </div>
-                <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
-                  <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>สถานะ</div>
-                  <div style={{ fontWeight: 600, fontSize: 15, color: shopStatus.is_expired ? S.error : S.success }}>
-                    {shopStatus.is_expired ? "หมดอายุ" : shopStatus.days_left !== null ? `เหลือ ${shopStatus.days_left} วัน` : "ไม่มีกำหนด"}
-                  </div>
-                </div>
-              </div>
-
-              {/* Direct expiry control */}
-              <div style={{ borderTop: `1px solid ${S.border}`, paddingTop: 14 }}>
-                <div style={{ color: S.sub, fontSize: 13, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                  <Calendar size={13} /> ตั้งวันหมดอายุโดยตรง
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input type="datetime-local" value={newExpiry} onChange={e => setNewExpiry(e.target.value)}
-                    style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13 }} />
-                  <button onClick={setExpiry} disabled={expiryLoading}
-                    style={{ background: S.accent, border: "none", borderRadius: 8, padding: "9px 14px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-                    {expiryLoading ? <Loader2 size={13} className="animate-spin" /> : null} บันทึก
-                  </button>
-                  <button onClick={clearExpiry}
-                    style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", cursor: "pointer", color: S.muted, fontFamily: "inherit", fontSize: 12 }}>
-                    ลบ
-                  </button>
-                </div>
-                {expiryMsg && <p style={{ color: expiryMsg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginTop: 8 }}>{expiryMsg}</p>}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Per-shop API keys */}
-        <ShopKeysSection sKey={sKey} shopId={selectedShopId} shops={allShops} onSelectShop={setSelectedShopId} />
-
-        {/* Usage / Monitoring */}
-        <UsageSection sKey={sKey} />
-
-        {/* Payment Info */}
-        <PaymentInfoSection sKey={sKey} />
-
-        {/* Pricing */}
-        <PricingSection sKey={sKey} shopId={selectedShopId} />
-
-        {/* Renewal Requests */}
-        <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-            <Clock size={18} color={S.accent} />
-            <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>คำขอต่ออายุ</span>
-            {renewalsLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
-          </div>
-
-          {/* Filter */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-            {(["", "pending", "approved", "rejected"] as const).map(f => (
-              <button key={f} onClick={() => setFilterStatus(f)}
-                style={{ background: filterStatus === f ? S.accent : S.card, color: filterStatus === f ? "#fff" : S.sub, border: `1px solid ${filterStatus === f ? S.accent : S.border}`, borderRadius: 100, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>
-                {f === "" ? "ทั้งหมด" : f === "pending" ? "รอดำเนินการ" : f === "approved" ? "อนุมัติแล้ว" : "ปฏิเสธแล้ว"}
+      {/* Tab nav — แยกหน้าจอเป็นส่วนๆ กันเลื่อนยาวเกินไปเมื่อร้านเยอะขึ้น */}
+      <div style={{ background: S.surface, borderBottom: `1px solid ${S.border}`, position: "sticky", top: 57, zIndex: 90, overflowX: "auto" }}>
+        <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px", display: "flex", gap: 4 }}>
+          {(([
+            { id: "shops", label: "ร้านทั้งหมด", icon: Store, badge: allShops.length, badgeColor: undefined },
+            { id: "status", label: "สถานะร้าน", icon: Crown, badge: 0, badgeColor: undefined },
+            { id: "renewals", label: "คำขอต่ออายุ", icon: Clock, badge: pendingCount, badgeColor: S.warning },
+            { id: "finance", label: "การเงิน", icon: Tag, badge: 0, badgeColor: undefined },
+            { id: "usage", label: "การใช้งาน", icon: Activity, badge: 0, badgeColor: undefined },
+          ]) as { id: typeof tab; label: string; icon: any; badge: number; badgeColor?: string }[]).map(t => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+                  padding: "12px 10px", display: "flex", alignItems: "center", gap: 6,
+                  color: active ? S.accent : S.muted, fontSize: 13, fontWeight: active ? 700 : 500,
+                  borderBottom: `2px solid ${active ? S.accent : "transparent"}`, whiteSpace: "nowrap",
+                }}>
+                <Icon size={14} /> {t.label}
+                {!!t.badge && (
+                  <span style={{ background: t.badgeColor ?? S.card, color: t.badgeColor ? "#000" : S.sub, borderRadius: 100, padding: "1px 6px", fontSize: 11, fontWeight: 700 }}>
+                    {t.badge}
+                  </span>
+                )}
               </button>
-            ))}
-          </div>
+            );
+          })}
+        </div>
+      </div>
 
-          {renewals.length === 0 && !renewalsLoading && (
-            <div style={{ textAlign: "center", padding: 40, color: S.muted, fontSize: 14 }}>
-              <Clock size={32} style={{ margin: "0 auto 8px", display: "block" }} />
-              ไม่มีคำขอ{filterStatus ? "ในสถานะนี้" : ""}
-            </div>
-          )}
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "20px 16px" }}>
+        {tab === "shops" && (
+          <ShopsSection sKey={sKey} selectedShopId={selectedShopId} onSelectShop={id => { setSelectedShopId(id); setTab("status"); }} />
+        )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {(renewals as any[]).map(r => (
-              <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                style={{ background: S.card, border: `1px solid ${r.status === "pending" ? S.warning + "55" : S.border}`, borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>
-                      ต่ออายุ {r.duration_months} เดือน — ฿{r.amount.toLocaleString()}
+        {tab === "status" && (
+          <>
+            {/* Shop Status Card */}
+            <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <Crown size={18} color={S.accent} />
+                <span style={{ fontWeight: 700, fontSize: 15 }}>สถานะร้าน #{selectedShopId}</span>
+                {statusLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+              </div>
+              {shopStatus && (
+                <>
+                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+                    <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
+                      <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>ชื่อร้าน</div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }}>{shopStatus.shop_name}</div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                      {paymentChannelBadge(r.payment_channel)}
-                    </div>
-                    <div style={{ color: S.muted, fontSize: 12, marginTop: 4 }}>
-                      ส่งคำขอเมื่อ {fmtDate(r.requested_at)}
-                    </div>
-                    {r.approved_at && (
-                      <div style={{ color: S.success, fontSize: 12, marginTop: 2 }}>
-                        อนุมัติเมื่อ {fmtDate(r.approved_at)} → หมดอายุ {fmtDate(r.new_expired_at)}
+                    <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
+                      <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>วันหมดอายุ</div>
+                      <div style={{ fontWeight: 600, fontSize: 15, color: shopStatus.is_expired ? S.error : (shopStatus.days_left !== null && shopStatus.days_left <= 7 ? S.warning : S.success) }}>
+                        {shopStatus.expired_at ? fmtDate(shopStatus.expired_at) : "ไม่มีกำหนด"}
                       </div>
-                    )}
-                    {r.admin_note && r.status === "rejected" && (
-                      <div style={{ color: S.error, fontSize: 12, marginTop: 2 }}>เหตุผล: {r.admin_note}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 120, background: S.card, borderRadius: 12, padding: 14 }}>
+                      <div style={{ color: S.muted, fontSize: 12, marginBottom: 4 }}>สถานะ</div>
+                      <div style={{ fontWeight: 600, fontSize: 15, color: shopStatus.is_expired ? S.error : S.success }}>
+                        {shopStatus.is_expired ? "หมดอายุ" : shopStatus.days_left !== null ? `เหลือ ${shopStatus.days_left} วัน` : "ไม่มีกำหนด"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct expiry control */}
+                  <div style={{ borderTop: `1px solid ${S.border}`, paddingTop: 14 }}>
+                    <div style={{ color: S.sub, fontSize: 13, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                      <Calendar size={13} /> ตั้งวันหมดอายุโดยตรง
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input type="datetime-local" value={newExpiry} onChange={e => setNewExpiry(e.target.value)}
+                        style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", color: S.text, fontFamily: "inherit", fontSize: 13 }} />
+                      <button onClick={setExpiry} disabled={expiryLoading}
+                        style={{ background: S.accent, border: "none", borderRadius: 8, padding: "9px 14px", cursor: "pointer", color: "#fff", fontWeight: 600, fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                        {expiryLoading ? <Loader2 size={13} className="animate-spin" /> : null} บันทึก
+                      </button>
+                      <button onClick={clearExpiry}
+                        style={{ background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "9px 12px", cursor: "pointer", color: S.muted, fontFamily: "inherit", fontSize: 12 }}>
+                        ลบ
+                      </button>
+                    </div>
+                    {expiryMsg && <p style={{ color: expiryMsg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginTop: 8 }}>{expiryMsg}</p>}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Per-shop API keys */}
+            <ShopKeysSection sKey={sKey} shopId={selectedShopId} shops={allShops} onSelectShop={setSelectedShopId} />
+          </>
+        )}
+
+        {tab === "finance" && (
+          <>
+            {/* Payment Info */}
+            <PaymentInfoSection sKey={sKey} />
+
+            {/* Pricing */}
+            <PricingSection sKey={sKey} shopId={selectedShopId} />
+          </>
+        )}
+
+        {tab === "usage" && (
+          <>
+            {/* Usage / Monitoring */}
+            <UsageSection sKey={sKey} />
+
+            {/* Traffic Dashboard */}
+            <TrafficSection sKey={sKey!} />
+          </>
+        )}
+
+        {tab === "renewals" && (
+          /* Renewal Requests */
+          <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <Clock size={18} color={S.accent} />
+              <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>คำขอต่ออายุ</span>
+              {renewalsLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+            </div>
+
+            {/* Filter */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+              {(["", "pending", "approved", "rejected"] as const).map(f => (
+                <button key={f} onClick={() => setFilterStatus(f)}
+                  style={{ background: filterStatus === f ? S.accent : S.card, color: filterStatus === f ? "#fff" : S.sub, border: `1px solid ${filterStatus === f ? S.accent : S.border}`, borderRadius: 100, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>
+                  {f === "" ? "ทั้งหมด" : f === "pending" ? "รอดำเนินการ" : f === "approved" ? "อนุมัติแล้ว" : "ปฏิเสธแล้ว"}
+                </button>
+              ))}
+            </div>
+
+            {renewals.length === 0 && !renewalsLoading && (
+              <div style={{ textAlign: "center", padding: 40, color: S.muted, fontSize: 14 }}>
+                <Clock size={32} style={{ margin: "0 auto 8px", display: "block" }} />
+                ไม่มีคำขอ{filterStatus ? "ในสถานะนี้" : ""}
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {(renewals as any[]).map(r => (
+                <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  style={{ background: S.card, border: `1px solid ${r.status === "pending" ? S.warning + "55" : S.border}`, borderRadius: 12, padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>
+                        ต่ออายุ {r.duration_months} เดือน — ฿{r.amount.toLocaleString()}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                        {paymentChannelBadge(r.payment_channel)}
+                      </div>
+                      <div style={{ color: S.muted, fontSize: 12, marginTop: 4 }}>
+                        ส่งคำขอเมื่อ {fmtDate(r.requested_at)}
+                      </div>
+                      {r.approved_at && (
+                        <div style={{ color: S.success, fontSize: 12, marginTop: 2 }}>
+                          อนุมัติเมื่อ {fmtDate(r.approved_at)} → หมดอายุ {fmtDate(r.new_expired_at)}
+                        </div>
+                      )}
+                      {r.admin_note && r.status === "rejected" && (
+                        <div style={{ color: S.error, fontSize: 12, marginTop: 2 }}>เหตุผล: {r.admin_note}</div>
+                      )}
+                    </div>
+                    {statusBadge(r.status)}
+                  </div>
+
+                  {/* Slip image + actions */}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <button onClick={() => setSlipSrc(r.slip_image)}
+                      style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: S.sub, fontSize: 13, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                      <Eye size={13} /> ดูสลิป
+                    </button>
+                    {r.status === "pending" && (
+                      <>
+                        <button onClick={() => setApproveItem(r)}
+                          style={{ flex: 1, background: `${S.success}22`, border: `1px solid ${S.success}55`, borderRadius: 8, padding: "7px 14px", cursor: "pointer", color: S.success, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                          <CheckCircle size={13} /> อนุมัติ
+                        </button>
+                        <button onClick={() => {
+                          const reason = prompt("เหตุผลในการปฏิเสธ (กดยกเลิกเพื่อไม่ระบุ):");
+                          if (reason !== null) rejectMutation.mutate({ id: r.id, reason: reason || "ไม่ผ่านการตรวจสอบ" });
+                        }}
+                          style={{ flex: 1, background: `${S.error}22`, border: `1px solid ${S.error}55`, borderRadius: 8, padding: "7px 14px", cursor: "pointer", color: S.error, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                          <XCircle size={13} /> ปฏิเสธ
+                        </button>
+                      </>
                     )}
                   </div>
-                  {statusBadge(r.status)}
-                </div>
-
-                {/* Slip image + actions */}
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <button onClick={() => setSlipSrc(r.slip_image)}
-                    style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: S.sub, fontSize: 13, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-                    <Eye size={13} /> ดูสลิป
-                  </button>
-                  {r.status === "pending" && (
-                    <>
-                      <button onClick={() => setApproveItem(r)}
-                        style={{ flex: 1, background: `${S.success}22`, border: `1px solid ${S.success}55`, borderRadius: 8, padding: "7px 14px", cursor: "pointer", color: S.success, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
-                        <CheckCircle size={13} /> อนุมัติ
-                      </button>
-                      <button onClick={() => {
-                        const reason = prompt("เหตุผลในการปฏิเสธ (กดยกเลิกเพื่อไม่ระบุ):");
-                        if (reason !== null) rejectMutation.mutate({ id: r.id, reason: reason || "ไม่ผ่านการตรวจสอบ" });
-                      }}
-                        style={{ flex: 1, background: `${S.error}22`, border: `1px solid ${S.error}55`, borderRadius: 8, padding: "7px 14px", cursor: "pointer", color: S.error, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
-                        <XCircle size={13} /> ปฏิเสธ
-                      </button>
-                    </>
-                  )}
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              ))}
+            </div>
           </div>
-        </div>
-
-        {/* Traffic Dashboard */}
-        <TrafficSection sKey={sKey!} />
+        )}
       </div>
 
       {/* Modals */}
