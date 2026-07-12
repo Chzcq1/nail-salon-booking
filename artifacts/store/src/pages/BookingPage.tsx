@@ -926,20 +926,25 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const [refImagePreview, setRefImagePreview] = useState<string | null>(null);
   const refImageRef = useRef<HTMLInputElement>(null);
 
-  // ใช้ ref ติดตาม hold_token และ payment status เพื่อ release hold เมื่อออกจากหน้า
+  // ใช้ ref ติดตาม hold_token, payment status และ mount state
   const holdTokenRef = useRef<string | null>(null);
   const paymentDoneRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   /** ปล่อย hold กลับคืนถ้ายังไม่ได้ชำระเงิน — fire-and-forget */
-  const releaseHold = () => {
-    if (!holdTokenRef.current || paymentDoneRef.current) return;
-    const token = holdTokenRef.current;
-    holdTokenRef.current = null;
+  const doRelease = (token: string) => {
     fetch("/api/nail/booking/hold", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ hold_token: token }),
     }).catch(() => {});
+  };
+
+  const releaseHold = () => {
+    if (!holdTokenRef.current || paymentDoneRef.current) return;
+    const token = holdTokenRef.current;
+    holdTokenRef.current = null;
+    doRelease(token);
   };
 
   const handleBack = () => { releaseHold(); onBack(); };
@@ -953,14 +958,20 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
       customer_line: booking.line || undefined,
       customer_note: booking.note,
     }),
-    onSuccess: data => { setHoldData(data); holdTokenRef.current = data.hold_token; },
-    onError: (e: any) => setPayError(e.message),
+    onSuccess: data => {
+      holdTokenRef.current = data.hold_token;
+      // race condition guard: ถ้า component unmount ก่อน response กลับมา ให้ release ทันที
+      if (!isMountedRef.current) { doRelease(data.hold_token); return; }
+      setHoldData(data);
+    },
+    onError: (e: any) => { if (isMountedRef.current) setPayError(e.message); },
   });
 
-  // เรียก hold ทันทีที่ mount + ปล่อย hold เมื่อ unmount (เช่น ปิดแท็บ / navigate ออก)
+  // เรียก hold ทันทีที่ mount + ปล่อย hold + mark unmounted เมื่อ unmount
   useEffect(() => {
+    isMountedRef.current = true;
     holdMutation.mutate();
-    return () => { releaseHold(); }; // eslint-disable-line
+    return () => { isMountedRef.current = false; releaseHold(); }; // eslint-disable-line
   }, []); // eslint-disable-line
 
   // คำนวณเวลาที่เหลือจาก held_until จริง
@@ -987,7 +998,15 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isLoggedIn = !!getWalletToken(slug);
+  // reactive: re-read sessionStorage เมื่อ tab ได้ focus กลับมา (เช่น หลังเติมเครดิต)
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!getWalletToken(slug));
+  useEffect(() => {
+    const refresh = () => setIsLoggedIn(!!getWalletToken(slug));
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [slug]);
+
   const walletBalance: number | null = holdData?.wallet_balance ?? null;
   const walletSufficient: boolean = !!holdData?.wallet_sufficient;
 
@@ -1136,8 +1155,6 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
                 </p>
                 <a
                   href={walletHref}
-                  target="_blank"
-                  rel="noreferrer"
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                     background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
@@ -1148,7 +1165,14 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
                 >
                   <ArrowRight size={18} /> เติมเครดิตที่กระเป๋าเงิน
                 </a>
-                <p style={{ fontSize: 11, color: P.muted, marginTop: 8, textAlign: "center" }}>หลังเติมเครดิตแล้ว กลับมากดจ่ายด้านนี้ได้เลย</p>
+                <button
+                  onClick={() => { releaseHold(); holdMutation.mutate(); }}
+                  disabled={holdMutation.isPending}
+                  style={{ width: "100%", marginTop: 10, background: "none", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "11px", fontSize: 14, fontWeight: 600, color: P.pink, cursor: holdMutation.isPending ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                >
+                  {holdMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> กำลังตรวจสอบ...</> : "🔄 เติมแล้ว — ตรวจสอบยอดใหม่"}
+                </button>
+                <p style={{ fontSize: 11, color: P.muted, marginTop: 6, textAlign: "center" }}>เติมเครดิตเสร็จแล้วกด "ตรวจสอบยอดใหม่" ได้เลย</p>
               </div>
             )}
           </div>
