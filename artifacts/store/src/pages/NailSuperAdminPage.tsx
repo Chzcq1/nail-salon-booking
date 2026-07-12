@@ -319,7 +319,7 @@ function RegistrationsTab({ sKey }: { sKey: string }) {
   const url = `${API}/superadmin/registrations${filter ? `?status=${filter}` : ""}`;
   const { data: regs = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["sa-registrations", filter],
-    queryFn: () => saFetch(url, sKey).then(r => r.json()),
+    queryFn: () => saFetch(url, sKey),
     refetchInterval: 30_000,
   });
 
