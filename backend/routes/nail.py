@@ -3266,9 +3266,11 @@ def superadmin_delete_shop(
         db.query(NailService).filter(NailService.shop_id == shop_id).delete()
         db.query(NailShopApiKeys).filter(NailShopApiKeys.shop_id == shop_id).delete()
         db.query(NailShopSettings).filter(NailShopSettings.shop_id == shop_id).delete()
-        # wallet references เป็น nullable FK → null ออกแทนลบ
+        # wallet / customer references เป็น nullable FK → null ออกแทนลบ
         db.query(TopupRequest).filter(TopupRequest.shop_id == shop_id).update({"shop_id": None})
         db.query(CreditTransaction).filter(CreditTransaction.shop_id == shop_id).update({"shop_id": None})
+        db.query(Customer).filter(Customer.shop_id == shop_id).update({"shop_id": None})
+        db.query(ShopRegistration).filter(ShopRegistration.shop_id == shop_id).update({"shop_id": None})
         # ลบ OTP sessions ที่เกี่ยวข้อง
         db.query(EmailOTPSession).filter(
             EmailOTPSession.email == f"{_DELETE_OTP_SENTINEL_PREFIX}{shop_id}"
