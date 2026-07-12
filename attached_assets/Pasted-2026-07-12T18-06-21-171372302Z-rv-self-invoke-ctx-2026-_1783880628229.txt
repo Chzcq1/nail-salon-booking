@@ -1,0 +1,50 @@
+2026-07-12T18:06:21.171372302Z     rv = self.invoke(ctx)
+2026-07-12T18:06:21.171380692Z          ^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.171387512Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/click/core.py", line 1353, in invoke
+2026-07-12T18:06:21.171704971Z     return ctx.invoke(self.callback, **ctx.params)
+2026-07-12T18:06:21.171715821Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.171719781Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/click/core.py", line 907, in invoke
+2026-07-12T18:06:21.171953097Z     return callback(*args, **kwargs)
+2026-07-12T18:06:21.171966558Z            ^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.171972988Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/main.py", line 412, in main
+2026-07-12T18:06:21.172126292Z     run(
+2026-07-12T18:06:21.172135942Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/main.py", line 579, in run
+2026-07-12T18:06:21.172289136Z     server.run()
+2026-07-12T18:06:21.172298757Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/server.py", line 65, in run
+2026-07-12T18:06:21.172380019Z     return asyncio.run(self.serve(sockets=sockets))
+2026-07-12T18:06:21.172391899Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.172396209Z   File "/opt/render/project/python/Python-3.11.11/lib/python3.11/asyncio/runners.py", line 190, in run
+2026-07-12T18:06:21.172546814Z     return runner.run(main)
+2026-07-12T18:06:21.172558154Z            ^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.172564384Z   File "/opt/render/project/python/Python-3.11.11/lib/python3.11/asyncio/runners.py", line 118, in run
+2026-07-12T18:06:21.172674757Z     return self._loop.run_until_complete(task)
+2026-07-12T18:06:21.172683827Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.172689807Z   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+2026-07-12T18:06:21.17281205Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/server.py", line 69, in serve
+2026-07-12T18:06:21.172878992Z     await self._serve(sockets)
+2026-07-12T18:06:21.172886383Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/server.py", line 76, in _serve
+2026-07-12T18:06:21.172988325Z     config.load()
+2026-07-12T18:06:21.172994795Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/config.py", line 434, in load
+2026-07-12T18:06:21.17315295Z     self.loaded_app = import_from_string(self.app)
+2026-07-12T18:06:21.17316091Z                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.17316499Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/importer.py", line 22, in import_from_string
+2026-07-12T18:06:21.173256282Z     raise exc from None
+2026-07-12T18:06:21.173260373Z   File "/opt/render/project/src/.venv/lib/python3.11/site-packages/uvicorn/importer.py", line 19, in import_from_string
+2026-07-12T18:06:21.173323634Z     module = importlib.import_module(module_str)
+2026-07-12T18:06:21.173355535Z              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.173358725Z   File "/opt/render/project/python/Python-3.11.11/lib/python3.11/importlib/__init__.py", line 126, in import_module
+2026-07-12T18:06:21.173456968Z     return _bootstrap._gcd_import(name[level:], package, level)
+2026-07-12T18:06:21.17351016Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-07-12T18:06:21.173513709Z   File "<frozen importlib._bootstrap>", line 1204, in _gcd_import
+2026-07-12T18:06:21.173515749Z   File "<frozen importlib._bootstrap>", line 1176, in _find_and_load
+2026-07-12T18:06:21.17351777Z   File "<frozen importlib._bootstrap>", line 1147, in _find_and_load_unlocked
+2026-07-12T18:06:21.17352346Z   File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
+2026-07-12T18:06:21.17352563Z   File "<frozen importlib._bootstrap_external>", line 940, in exec_module
+2026-07-12T18:06:21.17352751Z   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+2026-07-12T18:06:21.173555971Z   File "/opt/render/project/src/backend/main.py", line 571, in <module>
+2026-07-12T18:06:21.173882799Z     from backend.routes.nail import router as nail_router
+2026-07-12T18:06:21.17388945Z   File "/opt/render/project/src/backend/routes/nail.py", line 35, in <module>
+2026-07-12T18:06:21.173999922Z     from backend.totp_utils import generate_totp_secret, get_totp_uri, get_qr_code_base64, verify_totp as _verify_totp
+2026-07-12T18:06:21.174003153Z   File "/opt/render/project/src/backend/totp_utils.py", line 7, in <module>
+2026-07-12T18:06:21.174085955Z     import pyotp
+2026-07-12T18:06:21.174105916Z ModuleNotFoundError: No module named 'pyotp'
