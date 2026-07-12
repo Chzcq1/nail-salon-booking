@@ -926,6 +926,10 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const [slipError, setSlipError] = useState("");
   const [slipSubmitted, setSlipSubmitted] = useState(false);
   const slipFileRef = useRef<HTMLInputElement>(null);
+  // รูปอ้างอิงแบบงาน (brief) — ใช้เมื่อร้านเปิด allow_ref_image
+  const [refImageFile, setRefImageFile] = useState<File | null>(null);
+  const [refImagePreview, setRefImagePreview] = useState<string | null>(null);
+  const refImageRef = useRef<HTMLInputElement>(null);
 
   // ใช้ ref ติดตาม hold_token และ payment status เพื่อ release hold เมื่อออกจากหน้า
   const holdTokenRef = useRef<string | null>(null);
@@ -1005,10 +1009,23 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
       const base64 = await compressImage(slipFile);
       const uploadRes = await api.uploadSlip(base64);
       if (!uploadRes?.url) throw new Error("อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่");
+
+      // อัปโหลดรูปบรีฟ (ถ้ามี)
+      let refImageUrl: string | undefined;
+      if (refImageFile && holdData?.allow_ref_image) {
+        const refBase64 = await compressImage(refImageFile);
+        const refUploadRes = await api.uploadSlip(refBase64);
+        if (refUploadRes?.url) refImageUrl = refUploadRes.url;
+      }
+
       const r = await fetch("/api/nail/booking/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hold_token: holdData.hold_token, payment_proof: uploadRes.url }),
+        body: JSON.stringify({
+          hold_token: holdData.hold_token,
+          payment_proof: uploadRes.url,
+          ...(refImageUrl ? { ref_image: refImageUrl } : {}),
+        }),
       });
       if (!r.ok) { const e = await r.json(); throw new Error(e?.detail || `HTTP ${r.status}`); }
       return r.json();
@@ -1169,6 +1186,52 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
         {payError && (
           <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: "10px 14px", color: P.error, fontSize: 14, marginTop: 16 }}>
             {payError}
+          </div>
+        )}
+
+        {/* รูปอ้างอิงแบบงาน (brief) — แสดงเมื่อร้านเปิดฟีเจอร์ allow_ref_image */}
+        {holdData?.allow_ref_image && !slipSubmitted && (
+          <div style={{ marginTop: 16, background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 16, padding: 16 }}>
+            <p style={{ fontSize: 14, fontWeight: 700, color: "#5B21B6", marginBottom: 4 }}>🎨 แนบรูปอ้างอิงแบบงาน <span style={{ fontSize: 12, fontWeight: 400, color: "#7C3AED" }}>(ไม่บังคับ)</span></p>
+            <p style={{ fontSize: 12, color: "#7C3AED", marginBottom: 10, lineHeight: 1.5 }}>ช่างจะได้เห็นว่าคุณอยากได้แบบไหน เช่น รูปจาก Pinterest หรือ Instagram</p>
+            {/* Hidden file input */}
+            <input
+              ref={refImageRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setRefImageFile(file);
+                setRefImagePreview(URL.createObjectURL(file));
+              }}
+            />
+            {refImagePreview ? (
+              <div style={{ textAlign: "center", marginBottom: 8, position: "relative", display: "inline-block", width: "100%" }}>
+                <img src={refImagePreview} alt="ref preview" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 12, border: "1.5px solid #DDD6FE", display: "block", margin: "0 auto" }} />
+                <button
+                  onClick={() => { setRefImageFile(null); setRefImagePreview(null); if (refImageRef.current) refImageRef.current.value = ""; }}
+                  style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.55)", border: "none", borderRadius: "50%", width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                >
+                  <X size={14} color="#fff" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => refImageRef.current?.click()}
+                style={{ width: "100%", background: "#EDE9FE", border: "2px dashed #A78BFA", borderRadius: 12, padding: "18px 16px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, fontFamily: "inherit" }}
+              >
+                <Upload size={22} color="#7C3AED" />
+                <span style={{ color: "#7C3AED", fontWeight: 600, fontSize: 13 }}>แตะเพื่อเพิ่มรูปอ้างอิง</span>
+                <span style={{ color: "#A78BFA", fontSize: 11 }}>รองรับ JPG, PNG — ไม่เกิน 5MB</span>
+              </button>
+            )}
+            {refImagePreview && (
+              <button onClick={() => refImageRef.current?.click()} style={{ background: "none", border: "none", color: "#7C3AED", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", marginTop: 4 }}>
+                เปลี่ยนรูป
+              </button>
+            )}
           </div>
         )}
 

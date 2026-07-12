@@ -273,6 +273,9 @@ class NailShopSettings(Base):
     why_choose_custom_text = Column(Text, nullable=True)  # ถ้าตั้งไว้ จะแสดงข้อความนี้แทนจุดเด่นเริ่มต้น 6 ข้อ
     why_choose_heading = Column(String(500), nullable=True)  # ชื่อหัวข้อแถบ "ทำไมต้องเลือกร้านเรา" — ถ้าไม่ตั้งจะใช้ค่า default
     stats_reset_at = Column(DateTime(timezone=True), nullable=True)  # รีเซ็ตนับยอดสรุป ณ เวลานี้ (NULL = นับจากวันแรก)
+    # ── Feature flags ต่อร้าน (superadmin เปิด/ปิดให้ ตั้งปิดไว้ก่อนทุกร้าน) ──────────────────
+    # allow_ref_image: ลูกค้าแนบรูปอ้างอิงแบบงาน (brief) ตอนจองคิว เพื่อให้ช่างดูก่อนเริ่มงาน
+    allow_ref_image = Column(Boolean, server_default="false", default=False, nullable=False)
     # ประเภทธุรกิจ — ขับเคลื่อน default คำศัพท์/emoji/บริการตอนสร้างร้าน (ดู BUSINESS_TYPE_TEMPLATES ใน routes/nail.py)
     # ไม่ล็อกพฤติกรรมใดๆ ของระบบ ร้านยังแก้ไขทุกอย่างเองได้ปกติ — ใช้เพื่อ personalize ตอนเริ่มต้นเท่านั้น
     business_type = Column(String(30), nullable=False, server_default="nail", default="nail")
@@ -382,6 +385,7 @@ class NailBooking(Base):
     deposit_cents = Column(Integer, nullable=True)    # legacy: เดิมสุ่ม 1–99 สตางค์ ตอนนี้ไม่ใช้แล้ว เก็บไว้เป็น 0
     deposit_total = Column(Numeric(10, 2), nullable=True)  # ยอดมัดจำเลขกลมๆ (ไม่มีเศษสตางค์) — ร้านค้าตรวจยอดโอนเอง
     payment_proof = Column(Text, nullable=True)       # URL หรือ base64
+    ref_image = Column(Text, nullable=True)           # รูปอ้างอิงแบบงาน (brief) จากลูกค้า — base64 data URI, เฉพาะร้านที่ allow_ref_image=True
     slip_verify_status = Column(String(30), nullable=True)
     slip_verify_result = Column(Text, nullable=True)
     # held | pending_payment | confirmed | cancelled | completed | walkin

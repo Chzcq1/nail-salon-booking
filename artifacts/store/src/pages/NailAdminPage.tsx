@@ -1061,6 +1061,19 @@ function BookingsTab({ token }: { token: string }) {
                       )}
                     </div>
                   )}
+
+                  {/* Reference Image (Brief) */}
+                  {b.ref_image && (
+                    <div style={{ marginTop: 10, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 12px" }}>
+                      <p style={{ fontSize: 12, color: "#7C3AED", marginBottom: 8, fontWeight: 600 }}>🎨 รูปอ้างอิงแบบงาน (Brief):</p>
+                      <img
+                        src={b.ref_image}
+                        alt="ref brief"
+                        style={{ display: "block", maxWidth: "100%", maxHeight: 220, borderRadius: 8, border: "1px solid #DDD6FE", objectFit: "contain" }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    </div>
+                  )}
                 </motion.div>
               )}
             </div>

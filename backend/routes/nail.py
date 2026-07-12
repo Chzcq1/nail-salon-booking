@@ -465,6 +465,8 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "show_why_choose_section": shop.show_why_choose_section if shop.show_why_choose_section is not None else True,
         "why_choose_custom_text": shop.why_choose_custom_text,
         "why_choose_heading": shop.why_choose_heading,
+        # Feature flags — superadmin เปิด/ปิดต่อร้าน
+        "allow_ref_image": bool(shop.allow_ref_image) if shop.allow_ref_image is not None else False,
     }
 
 
@@ -707,12 +709,15 @@ def hold_slot(
         "customer_name": req.customer_name,
         "wallet_balance": float(customer.balance or 0) if customer else None,
         "wallet_sufficient": (float(customer.balance or 0) >= deposit_total) if customer else False,
+        # Feature flags — ให้ frontend รู้ว่าร้านนี้เปิดฟีเจอร์ใดบ้าง
+        "allow_ref_image": bool(shop.allow_ref_image) if shop.allow_ref_image is not None else False,
     }
 
 
 class PayRequest(BaseModel):
     hold_token: str
-    payment_proof: str   # base64 data URI หรือ URL path
+    payment_proof: str              # base64 data URI หรือ URL path
+    ref_image: Optional[str] = None  # รูปอ้างอิงแบบงาน (brief) — ส่งเฉพาะร้านที่ allow_ref_image=True
 
 
 @router.post("/booking/pay")
@@ -753,6 +758,19 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="ลิงก์ต้องใช้ https:// เท่านั้น")
 
     booking.payment_proof = proof
+
+    # ── รูปอ้างอิงแบบงาน (brief) — เฉพาะร้านที่ allow_ref_image=True ──────────────────────────
+    if req.ref_image:
+        _shop_settings = db.query(NailShopSettings).filter_by(shop_id=booking.shop_id).first()
+        if _shop_settings and _shop_settings.allow_ref_image:
+            ref = req.ref_image.strip()
+            # รับเฉพาะ base64 data URI (data:image/...) ไม่รับ URL ภายนอก
+            if ref.startswith("data:image/") and "base64," in ref:
+                # ตรวจขนาดคร่าวๆ (base64 ~1.37× ขนาดจริง) — ป้องกันรูปใหญ่เกิน 5MB
+                b64_part = ref.split("base64,", 1)[1]
+                approx_bytes = len(b64_part) * 3 // 4
+                if approx_bytes <= 5 * 1024 * 1024:
+                    booking.ref_image = ref
 
     # ไม่ตรวจสลิปอัตโนมัติแล้ว — แอดมินตรวจสอบยอดเงินและยืนยันเองทุกครั้ง
     # (เผื่ออนาคตอยากเปิดใช้ Slip2Go อัตโนมัติอีกครั้ง ดู backend/slip_verify.py)
@@ -3683,6 +3701,50 @@ def superadmin_set_shop_passcode(
     if len(passcode) < 4:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร")
     shop.admin_passcode_hash = hash_passcode(passcode)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Superadmin: Feature Flags ────────────────────────────────────────────────
+class ShopFeaturesBody(BaseModel):
+    allow_ref_image: Optional[bool] = None  # อนุญาตให้ลูกค้าแนบรูปบรีฟตอนจองคิว
+
+
+@router.get("/superadmin/shops/{shop_id}/features")
+def superadmin_get_shop_features(
+    shop_id: int,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ดึง feature flags ของร้าน"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    settings = db.query(NailShopSettings).filter_by(shop_id=shop_id).first()
+    return {
+        "shop_id": shop_id,
+        "allow_ref_image": bool(settings.allow_ref_image) if settings and settings.allow_ref_image is not None else False,
+    }
+
+
+@router.put("/superadmin/shops/{shop_id}/features")
+def superadmin_update_shop_features(
+    shop_id: int,
+    body: ShopFeaturesBody,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """ตั้ง feature flags ของร้าน"""
+    _check_superadmin(x_super_admin_key)
+    shop = db.query(Shop).filter_by(id=shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
+    settings = db.query(NailShopSettings).filter_by(shop_id=shop_id).first()
+    if not settings:
+        raise HTTPException(status_code=404, detail="ไม่พบการตั้งค่าร้าน")
+    if body.allow_ref_image is not None:
+        settings.allow_ref_image = body.allow_ref_image
     db.commit()
     return {"ok": True}
 

@@ -1050,10 +1050,20 @@ function ShopKeysSection({ sKey, shopId, shops, onSelectShop }: { sKey: string; 
   const [showSlip2go, setShowSlip2go] = useState(false);
   const [msg, setMsg] = useState("");
   const [passcodeMsg, setPasscodeMsg] = useState("");
+  // Feature flags
+  const [allowRefImage, setAllowRefImage] = useState(false);
+  const [featuresMsg, setFeaturesMsg] = useState("");
 
   const { data, isLoading, refetch } = useQuery<any>({
     queryKey: ["sa-shop-keys", shopId],
     queryFn: () => saFetch(`${API}/superadmin/shops/${shopId}/api-keys`, sKey),
+    staleTime: 30000,
+    enabled: !!shopId,
+  });
+
+  const { data: featuresData, refetch: refetchFeatures } = useQuery<any>({
+    queryKey: ["sa-shop-features", shopId],
+    queryFn: () => saFetch(`${API}/superadmin/shops/${shopId}/features`, sKey),
     staleTime: 30000,
     enabled: !!shopId,
   });
@@ -1066,6 +1076,12 @@ function ShopKeysSection({ sKey, shopId, shops, onSelectShop }: { sKey: string; 
       setSlip2goKey(""); setSlip2goChanged(false);
     }
   }, [data]);
+
+  useEffect(() => {
+    if (featuresData) {
+      setAllowRefImage(!!featuresData.allow_ref_image);
+    }
+  }, [featuresData]);
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -1088,6 +1104,15 @@ function ShopKeysSection({ sKey, shopId, shops, onSelectShop }: { sKey: string; 
       }),
     onSuccess: () => { setPasscodeMsg("✓ ตั้งรหัสผ่านแล้ว"); setNewPasscode(""); refetch(); qc.invalidateQueries({ queryKey: ["sa-shops"] }); },
     onError: (e: any) => setPasscodeMsg(`⚠ ${e.message}`),
+  });
+
+  const featuresMutation = useMutation({
+    mutationFn: () =>
+      saFetch(`${API}/superadmin/shops/${shopId}/features`, sKey, {
+        method: "PUT", body: JSON.stringify({ allow_ref_image: allowRefImage }),
+      }),
+    onSuccess: () => { setFeaturesMsg("✓ บันทึก Feature flags แล้ว"); refetchFeatures(); },
+    onError: (e: any) => setFeaturesMsg(`⚠ ${e.message}`),
   });
 
   const FieldRow = ({ label, hasValue, masked, showState, setShowState, value, setValue, onChange, placeholder }: any) => (
@@ -1193,6 +1218,24 @@ function ShopKeysSection({ sKey, shopId, shops, onSelectShop }: { sKey: string; 
       <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
         style={{ width: "100%", background: saveMutation.isPending ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, border: "none", borderRadius: 10, padding: "12px", cursor: saveMutation.isPending ? "not-allowed" : "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 20 }}>
         {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} บันทึก API Keys
+      </button>
+
+      {/* ── Feature Flags ── */}
+      <h4 style={{ color: S.sub, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, borderBottom: `1px solid ${S.border}`, paddingBottom: 6 }}>Feature Flags</h4>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>🎨 แนบรูปบรีฟตอนจอง</div>
+          <div style={{ fontSize: 11, color: S.muted }}>ลูกค้าแนบรูปอ้างอิงแบบงานให้ช่างดูได้ (ค่าเริ่มต้น: ปิด)</div>
+        </div>
+        <button onClick={() => setAllowRefImage(v => !v)}
+          style={{ width: 44, height: 24, borderRadius: 100, border: "none", cursor: "pointer", background: allowRefImage ? S.success : S.border, position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+          <div style={{ position: "absolute", top: 3, left: allowRefImage ? 23 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+        </button>
+      </div>
+      {featuresMsg && <p style={{ color: featuresMsg.startsWith("✓") ? S.success : S.error, fontSize: 13, marginBottom: 10 }}>{featuresMsg}</p>}
+      <button onClick={() => { setFeaturesMsg(""); featuresMutation.mutate(); }} disabled={featuresMutation.isPending}
+        style={{ width: "100%", background: featuresMutation.isPending ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, border: "none", borderRadius: 10, padding: "12px", cursor: featuresMutation.isPending ? "not-allowed" : "pointer", color: "#fff", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 20 }}>
+        {featuresMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} บันทึก Features
       </button>
 
       {/* Admin Passcode */}

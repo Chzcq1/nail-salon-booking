@@ -461,6 +461,11 @@ def _run_migrations(engine):
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS stats_reset_at TIMESTAMPTZ",
         # extra_blocks: บล็อกเวลาเพิ่มเติมต่อวัน JSON [{start_time,rounds_count,round_minutes,gap_minutes,max_bookings}]
         "ALTER TABLE nail_slot_templates ADD COLUMN IF NOT EXISTS extra_blocks TEXT",
+        # ── Feature flags ต่อร้าน (superadmin เปิด/ปิด) ────────────────────────────────────────
+        # allow_ref_image: อนุญาตให้ลูกค้าแนบรูปอ้างอิงแบบงาน (brief) ตอนจองคิว
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS allow_ref_image BOOLEAN NOT NULL DEFAULT FALSE",
+        # ref_image: เก็บรูปบรีฟจากลูกค้า (base64 data URI) ใน nail_bookings
+        "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS ref_image TEXT",
     ]
     from sqlalchemy import text
     with engine.connect() as conn:
