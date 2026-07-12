@@ -128,12 +128,12 @@ function makeApi(slug: string | null) {
       if (!r.ok) throw new Error(await parseApiError(r));
       return r.json();
     },
-    payWallet: async (hold_token: string) => {
+    payWallet: async (hold_token: string, ref_image?: string) => {
       const token = getWalletToken(slug);
       const r = await fetch(`/api/nail/booking/pay-wallet${sq()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ hold_token }),
+        body: JSON.stringify({ hold_token, ...(ref_image ? { ref_image } : {}) }),
       });
       if (!r.ok) throw new Error(await parseApiError(r));
       return r.json();
@@ -921,11 +921,6 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const [copied, setCopied] = useState(false);
   const [timer, setTimer] = useState(600);
   const [payError, setPayError] = useState("");
-  const [slipFile, setSlipFile] = useState<File | null>(null);
-  const [slipPreview, setSlipPreview] = useState<string | null>(null);
-  const [slipError, setSlipError] = useState("");
-  const [slipSubmitted, setSlipSubmitted] = useState(false);
-  const slipFileRef = useRef<HTMLInputElement>(null);
   // รูปอ้างอิงแบบงาน (brief) — ใช้เมื่อร้านเปิด allow_ref_image
   const [refImageFile, setRefImageFile] = useState<File | null>(null);
   const [refImagePreview, setRefImagePreview] = useState<string | null>(null);
@@ -997,41 +992,18 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const walletSufficient: boolean = !!holdData?.wallet_sufficient;
 
   const payWalletMutation = useMutation({
-    mutationFn: () => api.payWallet(holdData.hold_token),
-    onSuccess: () => { paymentDoneRef.current = true; onSuccess(holdData); },
-    onError: (e: any) => setPayError(e.message),
-  });
-
-  const submitSlipMutation = useMutation({
     mutationFn: async () => {
-      if (!slipFile) throw new Error("กรุณาเลือกรูปสลิป");
-      // บีบอัดรูปแล้วอัปโหลด
-      const base64 = await compressImage(slipFile);
-      const uploadRes = await api.uploadSlip(base64);
-      if (!uploadRes?.url) throw new Error("อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่");
-
-      // อัปโหลดรูปบรีฟ (ถ้ามี)
+      // อัปโหลดรูปบรีฟก่อน (ถ้าร้านเปิดฟีเจอร์และลูกค้าเลือกรูปมา)
       let refImageUrl: string | undefined;
       if (refImageFile && holdData?.allow_ref_image) {
         const refBase64 = await compressImage(refImageFile);
         const refUploadRes = await api.uploadSlip(refBase64);
         if (refUploadRes?.url) refImageUrl = refUploadRes.url;
       }
-
-      const r = await fetch("/api/nail/booking/pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          hold_token: holdData.hold_token,
-          payment_proof: uploadRes.url,
-          ...(refImageUrl ? { ref_image: refImageUrl } : {}),
-        }),
-      });
-      if (!r.ok) { const e = await r.json(); throw new Error(e?.detail || `HTTP ${r.status}`); }
-      return r.json();
+      return api.payWallet(holdData.hold_token, refImageUrl);
     },
-    onSuccess: () => { paymentDoneRef.current = true; setSlipSubmitted(true); },
-    onError: (e: any) => setSlipError(e.message),
+    onSuccess: () => { paymentDoneRef.current = true; onSuccess(holdData); },
+    onError: (e: any) => setPayError(e.message),
   });
 
   if (holdMutation.isPending) {
@@ -1058,8 +1030,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
     );
   }
 
-  // ถ้าส่งสลิป URL ไปแล้ว อย่าแสดง "หมดเวลา" — booking เป็น pending_payment แล้ว
-  if (timer === 0 && !slipSubmitted) {
+  if (timer === 0) {
     return (
       <PageWrap>
         <div style={{ padding: 24, textAlign: "center" }}>
@@ -1235,79 +1206,6 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
           </div>
         )}
 
-        {/* Bank Transfer + Slip Image Upload — แสดงเมื่อร้านตั้งค่าบัญชีธนาคารไว้ */}
-        {(holdData?.bank_account_name || holdData?.bank_qr_url) && !slipSubmitted && (
-          <div style={{ marginTop: 20, background: "#F8FAFF", border: `1.5px solid #C7D6F5`, borderRadius: 16, padding: 16 }}>
-            <p style={{ fontSize: 14, fontWeight: 700, color: P.text, marginBottom: 10 }}>💳 หรือโอนผ่านบัญชีธนาคาร</p>
-            {holdData.bank_qr_url && (
-              <div style={{ textAlign: "center", marginBottom: 12 }}>
-                <img src={holdData.bank_qr_url} alt="QR PromptPay" style={{ maxWidth: 180, borderRadius: 12, border: "1px solid #C7D6F5" }} />
-              </div>
-            )}
-            {holdData.bank_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 2 }}>ธนาคาร: <strong>{holdData.bank_name}</strong></p>}
-            {holdData.bank_account_name && <p style={{ fontSize: 13, color: P.sub, marginBottom: 12 }}>ชื่อบัญชี: <strong>{holdData.bank_account_name}</strong></p>}
-
-            {/* File picker (ซ่อน) */}
-            <input
-              ref={slipFileRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={e => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                setSlipFile(file);
-                setSlipError("");
-                setSlipPreview(URL.createObjectURL(file));
-              }}
-            />
-
-            {/* Preview หรือ placeholder */}
-            {slipPreview ? (
-              <div style={{ textAlign: "center", marginBottom: 10, position: "relative", display: "inline-block", width: "100%" }}>
-                <img src={slipPreview} alt="slip preview" style={{ maxWidth: "100%", maxHeight: 220, borderRadius: 12, border: `1px solid ${P.pinkBorder}`, display: "block", margin: "0 auto" }} />
-                <button
-                  onClick={() => { setSlipFile(null); setSlipPreview(null); if (slipFileRef.current) slipFileRef.current.value = ""; }}
-                  style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.55)", border: "none", borderRadius: "50%", width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                >
-                  <X size={14} color="#fff" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => slipFileRef.current?.click()}
-                style={{ width: "100%", background: P.pinkPale, border: `2px dashed ${P.pinkBorder}`, borderRadius: 12, padding: "22px 16px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit", marginBottom: 4 }}
-              >
-                <Upload size={26} color={P.pink} />
-                <span style={{ color: P.pink, fontWeight: 600, fontSize: 14 }}>แตะเพื่อเลือกรูปสลิป</span>
-                <span style={{ color: P.muted, fontSize: 12 }}>รองรับ JPG, PNG — ไม่เกิน 5MB</span>
-              </button>
-            )}
-            {slipPreview && (
-              <button onClick={() => slipFileRef.current?.click()} style={{ background: "none", border: "none", color: P.pink, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 6 }}>
-                เปลี่ยนรูป
-              </button>
-            )}
-
-            {slipError && <p style={{ color: P.error, fontSize: 12, marginTop: 4 }}>{slipError}</p>}
-            <button
-              onClick={() => { if (!slipFile) { setSlipError("กรุณาเลือกรูปสลิปก่อน"); return; } submitSlipMutation.mutate(); }}
-              disabled={submitSlipMutation.isPending}
-              style={{ width: "100%", marginTop: 10, background: `linear-gradient(135deg, #3B82F6, #1D4ED8)`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, cursor: submitSlipMutation.isPending ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}
-            >
-              {submitSlipMutation.isPending ? <><Loader2 size={16} className="animate-spin" /> กำลังอัปโหลดและส่ง...</> : "📎 ส่งสลิปให้แอดมินตรวจสอบ"}
-            </button>
-          </div>
-        )}
-
-        {/* Slip submitted confirmation */}
-        {slipSubmitted && (
-          <div style={{ marginTop: 20, background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 16, padding: 20, textAlign: "center" }}>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
-            <p style={{ fontSize: 15, fontWeight: 700, color: "#166534", marginBottom: 4 }}>ส่งสลิปแล้ว</p>
-            <p style={{ fontSize: 13, color: "#16A34A", lineHeight: 1.6 }}>แอดมินจะตรวจสอบและยืนยันการจองให้ภายในไม่นาน</p>
-          </div>
-        )}
       </div>
     </PageWrap>
   );

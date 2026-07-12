@@ -832,6 +832,7 @@ def release_hold(req: ReleaseHoldRequest, db: Session = Depends(get_db)):
 
 class WalletPayRequest(BaseModel):
     hold_token: str
+    ref_image: Optional[str] = None  # รูปอ้างอิงแบบงาน (brief) — ส่งเฉพาะร้านที่ allow_ref_image=True
 
 
 @router.post("/booking/pay-wallet")
@@ -898,6 +899,16 @@ async def submit_payment_wallet(
     booking.payment_method = "wallet"
     booking.status = "confirmed"
     booking.slip_verify_status = "wallet_paid"
+
+    # ── รูปอ้างอิงแบบงาน (brief) — เฉพาะร้านที่ allow_ref_image=True ──────────────
+    if req.ref_image:
+        _shop_settings = db.query(NailShopSettings).filter_by(shop_id=booking.shop_id).first()
+        if _shop_settings and _shop_settings.allow_ref_image:
+            ref = req.ref_image.strip()
+            if ref.startswith("data:image/") and "base64," in ref:
+                b64_part = ref.split("base64,", 1)[1]
+                if len(b64_part) * 3 // 4 <= 5 * 1024 * 1024:
+                    booking.ref_image = ref
     db.add(CreditTransaction(
         customer_id=customer.id,
         txn_type="nail_booking",
