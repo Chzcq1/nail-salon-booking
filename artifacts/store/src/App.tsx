@@ -1,5 +1,36 @@
 import React from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+
+// ── Error Boundary — ป้องกันหน้าขาวเมื่อ component crash ────────────────────
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#0B0F1A", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "sans-serif" }}>
+          <div style={{ background: "#131929", border: "1px solid #EF444440", borderRadius: 16, padding: 32, maxWidth: 440, textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+            <p style={{ color: "#E8EAF0", fontSize: 15, fontWeight: 700, marginBottom: 8 }}>เกิดข้อผิดพลาดในแอป</p>
+            <p style={{ color: "#9AA5C0", fontSize: 13, marginBottom: 20 }}>{this.state.error.message}</p>
+            <button onClick={() => window.location.reload()} style={{ background: "linear-gradient(135deg,#6C8EFF,#4F72FF)", color: "#fff", border: "none", borderRadius: 10, padding: "11px 24px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+              รีเฟรชหน้า
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { ShopSlugContext } from "@/lib/shopSlugContext";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -195,16 +226,18 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <div className="min-h-screen bg-background text-foreground">
-            <Router />
-          </div>
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <div className="min-h-screen bg-background text-foreground">
+              <Router />
+            </div>
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   );
 }
 

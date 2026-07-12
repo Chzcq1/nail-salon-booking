@@ -164,19 +164,23 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ message: string; auto_verified: boolean } | null>(null);
+  const [fetchError, setFetchError] = useState("");
 
   const slugTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/register/plans`).then(r => r.json()),
-      fetch(`${API}/register/bank-info`).then(r => r.json()),
+      fetch(`${API}/register/plans`).then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); }),
+      fetch(`${API}/register/bank-info`).then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); }),
     ]).then(([p, b]) => {
-      setPlans(p);
+      const planList = Array.isArray(p) ? p : [];
+      setPlans(planList);
       setBankInfo(b);
-      const available = p.find((pl: any) => pl.is_available);
+      const available = planList.find((pl: any) => pl.is_available);
       if (available) setSelectedPlan(available);
+    }).catch((err) => {
+      setFetchError("โหลดข้อมูลไม่ได้ กรุณารีเฟรชหน้าใหม่ (" + (err?.message ?? "network error") + ")");
     }).finally(() => setLoading(false));
   }, []);
 
@@ -247,6 +251,22 @@ export default function RegisterPage() {
       <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Loader2 size={32} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
         <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700&display=swap');`}</style>
+        <div style={{ background: C.surface, border: `1px solid ${C.error}40`, borderRadius: 16, padding: 32, maxWidth: 400, textAlign: "center" }}>
+          <AlertCircle size={40} color={C.error} style={{ marginBottom: 12 }} />
+          <p style={{ color: C.text, fontSize: 15, marginBottom: 8 }}>ไม่สามารถโหลดข้อมูลได้</p>
+          <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>{fetchError}</p>
+          <button onClick={() => window.location.reload()} style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.accentDk})`, color: C.text, border: "none", borderRadius: 10, padding: "11px 24px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            รีเฟรชหน้า
+          </button>
+        </div>
       </div>
     );
   }
