@@ -1038,6 +1038,8 @@ def admin_list_bookings(
             "payment_method": b.payment_method,
             "deposit_total": float(b.deposit_total or 0),
             "slip_verify_status": b.slip_verify_status,
+            "payment_proof": b.payment_proof,
+            "ref_image": b.ref_image,
             "admin_note": b.admin_note,
             "is_walkin": b.is_walkin,
             "created_at": b.created_at.isoformat() if b.created_at else None,
