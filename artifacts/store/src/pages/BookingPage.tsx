@@ -1161,7 +1161,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
         )}
 
         {/* รูปอ้างอิงแบบงาน (brief) — แสดงเมื่อร้านเปิดฟีเจอร์ allow_ref_image */}
-        {holdData?.allow_ref_image && !slipSubmitted && (
+        {holdData?.allow_ref_image && (
           <div style={{ marginTop: 16, background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 16, padding: 16 }}>
             <p style={{ fontSize: 14, fontWeight: 700, color: "#5B21B6", marginBottom: 4 }}>🎨 แนบรูปอ้างอิงแบบงาน <span style={{ fontSize: 12, fontWeight: 400, color: "#7C3AED" }}>(ไม่บังคับ)</span></p>
             <p style={{ fontSize: 12, color: "#7C3AED", marginBottom: 10, lineHeight: 1.5 }}>ช่างจะได้เห็นว่าคุณอยากได้แบบไหน เช่น รูปจาก Pinterest หรือ Instagram</p>
