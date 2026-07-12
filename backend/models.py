@@ -489,6 +489,8 @@ class ShopRegistration(Base):
     amount_paid = Column(Numeric(10, 2), nullable=True)      # ยอดที่โอนมา (จาก Slip2Go)
     status = Column(String(20), nullable=False, server_default="pending", default="pending")  # pending|approved|rejected
     auto_verified = Column(Boolean, server_default="false", default=False, nullable=False)  # Slip2Go ผ่านอัตโนมัติ
+    payment_channel = Column(String(20), server_default="bank_slip", default="bank_slip", nullable=False)  # "bank_slip" | "angpao"
+    voucher_code = Column(String(200), nullable=True)   # TrueMoney voucher code (angpao channel)
     reject_reason = Column(String(500), nullable=True)
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True)  # หลัง approve แล้วชี้ไปที่ร้าน
     created_at = Column(DateTime(timezone=True), server_default=func.now())

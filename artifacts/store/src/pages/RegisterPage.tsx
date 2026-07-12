@@ -159,6 +159,8 @@ export default function RegisterPage() {
   const [slugChecking, setSlugChecking] = useState(false);
   const [email, setEmail] = useState("");
   const [line, setLine] = useState("");
+  const [payMethod, setPayMethod] = useState<"slip" | "truemoney">("slip");
+  const [voucher, setVoucher] = useState("");
   const [slipFile, setSlipFile] = useState<string | null>(null);
   const [slipName, setSlipName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -227,16 +229,21 @@ export default function RegisterPage() {
     if (!shopName.trim()) return setError("กรุณากรอกชื่อร้าน");
     if (!slug || !slugStatus?.available) return setError("กรุณาตรวจสอบ slug ให้ถูกต้อง");
     if (!email.includes("@")) return setError("กรุณากรอกอีเมลให้ถูกต้อง");
-    if (!slipFile) return setError("กรุณาอัปโหลดสลิปการโอนเงิน");
+    if (payMethod === "slip" && !slipFile) return setError("กรุณาอัปโหลดสลิปการโอนเงิน");
+    if (payMethod === "truemoney" && !voucher.trim()) return setError("กรุณากรอกลิงก์หรือรหัสซองอั่งเปา");
     setError(""); setSubmitting(true);
     try {
+      const body: any = {
+        plan_id: selectedPlan.id, shop_name: shopName.trim(),
+        slug, owner_email: email.trim().toLowerCase(),
+        owner_line: line.trim() || undefined,
+        payment_channel: payMethod === "slip" ? "bank_slip" : "angpao",
+      };
+      if (payMethod === "slip") body.slip_image = slipFile;
+      else body.voucher_code = voucher.trim();
       const res = await fetch(`${API}/register/submit`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          plan_id: selectedPlan.id, shop_name: shopName.trim(),
-          slug, owner_email: email.trim().toLowerCase(),
-          owner_line: line.trim() || undefined, slip_image: slipFile,
-        }),
+        body: JSON.stringify(body),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail ?? "ส่งคำขอไม่สำเร็จ");
@@ -355,36 +362,64 @@ export default function RegisterPage() {
                 <input style={inp} placeholder="@lineid" value={line} onChange={e => setLine(e.target.value)} />
               </Section>
 
-              {/* Step 3: Payment */}
-              <Section title="3. โอนเงินค่าสมัคร">
-                {bankInfo && <BankBox bankInfo={bankInfo} price={selectedPlan.price} />}
-              </Section>
-
-              {/* Step 4: Upload slip */}
-              <Section title="4. อัปโหลดสลิปโอนเงิน">
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{
-                    border: `2px dashed ${slipFile ? C.success : C.border}`, borderRadius: 12,
-                    padding: "28px 20px", textAlign: "center", cursor: "pointer",
-                    background: slipFile ? `${C.success}08` : "transparent", transition: "all .2s",
-                  }}>
-                  {slipFile ? (
-                    <>
-                      <CheckCircle size={28} color={C.success} style={{ marginBottom: 8 }} />
-                      <p style={{ color: C.success, fontWeight: 600, margin: "0 0 4px" }}>อัปโหลดสลิปแล้ว</p>
-                      <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>{slipName}</p>
-                      <p style={{ color: C.muted, fontSize: 12, margin: "4px 0 0" }}>กดเพื่อเปลี่ยนรูป</p>
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={28} color={C.muted} style={{ marginBottom: 8 }} />
-                      <p style={{ color: C.sub, fontWeight: 600, margin: "0 0 4px" }}>กดเพื่ออัปโหลดสลิป</p>
-                      <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>รองรับ JPG, PNG (ไม่เกิน 10MB)</p>
-                    </>
-                  )}
+              {/* Step 3: Payment method */}
+              <Section title="3. ชำระเงินค่าสมัคร">
+                {/* Method selector */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  {([["slip", "🏦 โอนสลิป"], ["truemoney", "🧧 อั่งเปา TrueMoney"]] as const).map(([m, label]) => (
+                    <button key={m} type="button" onClick={() => setPayMethod(m)} style={{
+                      flex: 1, border: `1.5px solid ${payMethod === m ? C.accent : C.border}`,
+                      background: payMethod === m ? `${C.accent}18` : C.card,
+                      borderRadius: 10, padding: "10px 6px", cursor: "pointer",
+                      fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+                      color: payMethod === m ? C.accent : C.sub,
+                    }}>{label}</button>
+                  ))}
                 </div>
-                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
+
+                {payMethod === "slip" ? (
+                  <>
+                    {bankInfo && <BankBox bankInfo={bankInfo} price={selectedPlan.price} />}
+                    <div onClick={() => fileInputRef.current?.click()} style={{
+                      border: `2px dashed ${slipFile ? C.success : C.border}`, borderRadius: 12,
+                      padding: "24px 20px", textAlign: "center", cursor: "pointer",
+                      background: slipFile ? `${C.success}08` : "transparent", transition: "all .2s",
+                    }}>
+                      {slipFile ? (
+                        <>
+                          <CheckCircle size={28} color={C.success} style={{ marginBottom: 8 }} />
+                          <p style={{ color: C.success, fontWeight: 600, margin: "0 0 4px" }}>อัปโหลดสลิปแล้ว</p>
+                          <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>{slipName}</p>
+                          <p style={{ color: C.muted, fontSize: 12, margin: "4px 0 0" }}>กดเพื่อเปลี่ยนรูป</p>
+                        </>
+                      ) : (
+                        <>
+                          <Upload size={28} color={C.muted} style={{ marginBottom: 8 }} />
+                          <p style={{ color: C.sub, fontWeight: 600, margin: "0 0 4px" }}>กดเพื่ออัปโหลดสลิป</p>
+                          <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>รองรับ JPG, PNG (ไม่เกิน 10MB)</p>
+                        </>
+                      )}
+                    </div>
+                    <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
+                  </>
+                ) : (
+                  <div>
+                    <div style={{ background: `${C.warning}12`, border: `1px solid ${C.warning}40`, borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+                      <p style={{ color: C.warning, fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>💰 ยอดที่ต้องโอน ฿{selectedPlan.price.toFixed(0)}</p>
+                      <p style={{ color: C.sub, fontSize: 12, margin: 0 }}>ส่งซองอั่งเปา TrueMoney มูลค่าเท่ากับหรือมากกว่า ฿{selectedPlan.price.toFixed(0)}</p>
+                    </div>
+                    <input
+                      type="text"
+                      value={voucher}
+                      onChange={e => setVoucher(e.target.value)}
+                      placeholder="https://gift.truemoney.com/campaign/?v=... หรือรหัสซอง"
+                      style={{ ...inp }}
+                    />
+                    <p style={{ color: C.muted, fontSize: 12, margin: "6px 0 0" }}>
+                      วางลิงก์ซอง TrueMoney Gift จาก TrueMoney Wallet App — ระบบจะแลกอัตโนมัติ
+                    </p>
+                  </div>
+                )}
               </Section>
 
               {/* Submit */}

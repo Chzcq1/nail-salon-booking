@@ -4018,12 +4018,17 @@ class _SubmitReg(BaseModel):
     slug: str
     owner_email: str
     owner_line: Optional[str] = None
-    slip_image: str
+    payment_channel: str = "bank_slip"   # "bank_slip" | "angpao"
+    slip_image: Optional[str] = None     # base64 data URI (bank_slip only)
+    voucher_code: Optional[str] = None  # TrueMoney gift link or code (angpao only)
 
 
 @router.post("/register/submit")
 async def register_submit(body: _SubmitReg, db: Session = Depends(get_db)):
-    """ยื่นสมัครร้านใหม่ — Slip2Go auto-verify → pending รอ superadmin approve"""
+    """ยื่นสมัครร้านใหม่ — bank_slip: Slip2Go verify / angpao: TrueMoney auto-redeem"""
+    if body.payment_channel not in ("bank_slip", "angpao"):
+        raise HTTPException(status_code=400, detail="ช่องทางชำระเงินไม่ถูกต้อง")
+
     plan = db.query(ShopPlan).filter_by(id=body.plan_id, is_active=True).first()
     if not plan:
         raise HTTPException(status_code=404, detail="ไม่พบแพ็กเกจที่เลือก")
@@ -4043,21 +4048,39 @@ async def register_submit(body: _SubmitReg, db: Session = Depends(get_db)):
     email = (body.owner_email or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="อีเมลไม่ถูกต้อง")
-    if not body.slip_image or not body.slip_image.startswith("data:image"):
-        raise HTTPException(status_code=400, detail="กรุณาอัปโหลดสลิปการโอนเงิน")
+
+    # ── Validate & prepare payment payload ───────────────────────────────────
+    if body.payment_channel == "bank_slip":
+        if not body.slip_image or not body.slip_image.startswith("data:image"):
+            raise HTTPException(status_code=400, detail="กรุณาอัปโหลดสลิปการโอนเงิน")
+        image_or_voucher = body.slip_image
+        voucher_code_clean = None
+    else:  # angpao
+        if not body.voucher_code:
+            raise HTTPException(status_code=400, detail="กรุณาระบุลิงก์/รหัสซองอั่งเปา")
+        from backend.truemoney import extract_voucher_code as _extract_vc
+        voucher_code_clean = _extract_vc(body.voucher_code)
+        # Double-spend guard
+        if db.query(ShopRegistration).filter(ShopRegistration.voucher_code == voucher_code_clean).first():
+            raise HTTPException(status_code=409, detail="ซองอั่งเปานี้ถูกใช้ไปแล้ว กรุณาใช้ซองใหม่")
+        image_or_voucher = f"voucher:{voucher_code_clean}"
 
     reg = ShopRegistration(
         plan_id=plan.id, shop_name=(body.shop_name or "").strip(),
         slug=slug, owner_email=email,
         owner_line=(body.owner_line or "").strip() or None,
-        slip_image=body.slip_image, status="pending", auto_verified=False,
+        slip_image=image_or_voucher,
+        payment_channel=body.payment_channel,
+        voucher_code=voucher_code_clean,
+        status="pending", auto_verified=False,
     )
     db.add(reg)
     db.flush()
 
-    cfg = get_settings()
     auto_verified = False
-    if cfg.slip2go_api_key:
+    cfg = get_settings()
+
+    if body.payment_channel == "bank_slip" and cfg.slip2go_api_key:
         try:
             from backend.slip_verify import verify_slip
             result = await verify_slip(body.slip_image, cfg.slip2go_api_key, expected_amount=float(plan.price))
@@ -4068,14 +4091,34 @@ async def register_submit(body: _SubmitReg, db: Session = Depends(get_db)):
         except Exception as exc:
             logging.warning(f"[register] Slip2Go auto-verify failed: {exc}")
 
+    elif body.payment_channel == "angpao":
+        from backend.truemoney import redeem_voucher as _redeem
+        from backend.models import StoreSettings
+        try:
+            phone_row = db.query(StoreSettings).filter_by(key="truemoney_phone").first()
+            phone = (phone_row.value or "").strip() if phone_row else ""
+            result = await _redeem(voucher_code_clean, phone) if phone else await _redeem(voucher_code_clean)
+            if result["success"]:
+                voucher_amount = Decimal(str(result["amount"]))
+                reg.amount_paid = voucher_amount
+                if voucher_amount >= Decimal(str(plan.price)):
+                    reg.auto_verified = True
+                    auto_verified = True
+            else:
+                logging.warning(f"[register angpao] Redeem failed: {result.get('error_message')}")
+        except Exception as exc:
+            logging.warning(f"[register angpao] TrueMoney redeem failed: {exc}")
+
     db.commit()
     db.refresh(reg)
     return {
         "ok": True, "registration_id": reg.id, "auto_verified": auto_verified,
         "message": (
+            "ระบบตรวจสอบซองอั่งเปาแล้ว! ทีมงานจะสร้างร้านให้ภายใน 24 ชั่วโมง"
+            if (auto_verified and body.payment_channel == "angpao") else
             "ระบบตรวจสลิปอัตโนมัติแล้ว รอ Admin อนุมัติสักครู่ครับ"
-            if auto_verified else
-            "ส่งคำขอสมัครสำเร็จ! ทีมงานจะตรวจสอบสลิปและติดต่อกลับทางอีเมลภายใน 24 ชั่วโมง"
+            if (auto_verified and body.payment_channel == "bank_slip") else
+            "ส่งคำขอสมัครสำเร็จ! ทีมงานจะตรวจสอบและติดต่อกลับทางอีเมลภายใน 24 ชั่วโมง"
         ),
     }
 
@@ -4102,6 +4145,8 @@ def superadmin_list_registrations(
             "status": r.status, "auto_verified": r.auto_verified,
             "amount_paid": float(r.amount_paid) if r.amount_paid else None,
             "slip_image": r.slip_image, "reject_reason": r.reject_reason,
+            "payment_channel": r.payment_channel or "bank_slip",
+            "voucher_code": r.voucher_code,
             "shop_id": r.shop_id,
             "plan_name": plan.name if plan else None,
             "plan_price": float(plan.price) if plan else None,
