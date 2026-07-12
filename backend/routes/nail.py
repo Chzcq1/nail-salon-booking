@@ -3270,7 +3270,9 @@ def superadmin_delete_shop(
         db.query(TopupRequest).filter(TopupRequest.shop_id == shop_id).update({"shop_id": None})
         db.query(CreditTransaction).filter(CreditTransaction.shop_id == shop_id).update({"shop_id": None})
         # ลบ OTP sessions ที่เกี่ยวข้อง
-        db.query(EmailOTPSession).filter(EmailOTPSession.email == sentinel_email).delete()
+        db.query(EmailOTPSession).filter(
+            EmailOTPSession.email == f"{_DELETE_OTP_SENTINEL_PREFIX}{shop_id}"
+        ).delete()
         db.delete(shop_row)
         db.commit()
     except Exception as e:
