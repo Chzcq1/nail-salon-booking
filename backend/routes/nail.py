@@ -3223,7 +3223,7 @@ async def superadmin_request_delete_otp(
 
 
 class DeleteShopBody(BaseModel):
-    otp_code: str
+    totp_code: str       # รหัส 6 หลักจาก Google Authenticator
     confirm_slug: str
 
 
@@ -3234,7 +3234,7 @@ def superadmin_delete_shop(
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
-    """ลบร้านและข้อมูลทั้งหมดแบบถาวร — ต้องยืนยันด้วย OTP + พิมพ์ slug ร้าน"""
+    """ลบร้านและข้อมูลทั้งหมดแบบถาวร — ยืนยันด้วย TOTP (Google Authenticator) + พิมพ์ slug ร้าน"""
     _check_superadmin(x_super_admin_key)
     if shop_id == 1:
         raise HTTPException(status_code=400, detail="ไม่สามารถลบร้านหลัก (id=1) ได้")
@@ -3246,27 +3246,12 @@ def superadmin_delete_shop(
     if body.confirm_slug.strip() != shop_row.slug:
         raise HTTPException(status_code=400, detail="slug ไม่ตรงกับร้านที่ต้องการลบ")
 
-    # ตรวจสอบ OTP จาก DB
-    sentinel_email = f"{_DELETE_OTP_SENTINEL_PREFIX}{shop_id}"
-    now = _now()
-    otp_session = (
-        db.query(EmailOTPSession)
-        .filter(
-            EmailOTPSession.email == sentinel_email,
-            EmailOTPSession.is_used == False,
-            EmailOTPSession.expires_at > now,
-        )
-        .order_by(EmailOTPSession.created_at.desc())
-        .first()
-    )
-    if not otp_session:
-        raise HTTPException(status_code=400, detail="ยังไม่ได้ขอ OTP หรือ OTP หมดอายุแล้ว กรุณาขอใหม่")
-    if not secrets.compare_digest(body.otp_code.strip(), otp_session.otp_code or ""):
-        raise HTTPException(status_code=400, detail="OTP ไม่ถูกต้อง")
-
-    # ทำเครื่องหมาย OTP ว่าใช้แล้ว (ก่อน delete เพื่อป้องกัน double-submit)
-    otp_session.is_used = True
-    db.commit()
+    # ยืนยัน TOTP แทน Telegram OTP
+    totp_secret = _get_superadmin_totp_secret(db)
+    if not totp_secret:
+        raise HTTPException(status_code=400, detail="ยังไม่ได้ตั้งค่า TOTP กรุณาตั้งค่าที่ /superadmin/setup-totp ก่อน")
+    if not _verify_totp(totp_secret, (body.totp_code or "").strip()):
+        raise HTTPException(status_code=403, detail="รหัส Google Authenticator ไม่ถูกต้อง")
 
     slug_deleted = shop_row.slug
     try:

@@ -784,30 +784,21 @@ function UsageSection({ sKey }: { sKey: string }) {
 // ── Shops Management ─────────────────────────────────────────────────────────
 // ── Delete Shop Modal ─────────────────────────────────────────────────────────
 function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: string; onClose: () => void; onDone: () => void }) {
-  const [step, setStep] = useState<"confirm" | "otp">("confirm");
   const [confirmSlug, setConfirmSlug] = useState("");
-  const [otpCode, setOtpCode] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [msg, setMsg] = useState("");
-  const [telegramSent, setTelegramSent] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const requestOtp = async () => {
-    if (confirmSlug.trim() !== shop.slug) { setMsg("slug ไม่ตรง"); return; }
-    setLoading(true); setMsg("");
-    try {
-      const d = await saFetch(`${API}/superadmin/shops/${shop.id}/delete-otp`, sKey, { method: "POST" });
-      setTelegramSent(d.telegram_sent ?? false);
-      setStep("otp");
-    } catch (e: any) { setMsg(e.message); }
-    finally { setLoading(false); }
-  };
+  const slugOk = confirmSlug.trim() === shop.slug;
+  const canDelete = slugOk && totpCode.length === 6;
 
   const confirmDelete = async () => {
+    if (!canDelete) return;
     setLoading(true); setMsg("");
     try {
       await saFetch(`${API}/superadmin/shops/${shop.id}`, sKey, {
         method: "DELETE",
-        body: JSON.stringify({ otp_code: otpCode.trim(), confirm_slug: confirmSlug.trim() }),
+        body: JSON.stringify({ totp_code: totpCode.trim(), confirm_slug: confirmSlug.trim() }),
       });
       onDone();
     } catch (e: any) { setMsg(e.message); }
@@ -819,58 +810,71 @@ function DeleteShopModal({ shop, sKey, onDone, onClose }: { shop: any; sKey: str
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <motion.div initial={{ scale: 0.94, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
         style={{ background: S.surface, border: `1.5px solid ${S.error}66`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 420 }}>
+
+        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
           <Trash2 size={18} color={S.error} />
           <span style={{ fontWeight: 700, fontSize: 16, color: S.error, flex: 1 }}>ลบร้าน — {shop.name}</span>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.muted }}><X size={18} /></button>
         </div>
 
-        {step === "confirm" && (
-          <>
-            <div style={{ background: `${S.error}18`, border: `1px solid ${S.error}44`, borderRadius: 10, padding: 12, marginBottom: 16 }}>
-              <p style={{ color: S.error, fontSize: 13, margin: 0, lineHeight: 1.6 }}>
-                ⚠️ การลบร้านจะ<strong>ลบข้อมูลทั้งหมดถาวร</strong>รวมถึงการจอง บริการ พนักงาน และสถิติทั้งหมด ไม่สามารถกู้คืนได้
-              </p>
-            </div>
-            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>
-              พิมพ์ slug ร้าน <strong style={{ color: S.text }}>{shop.slug}</strong> เพื่อยืนยัน
-            </label>
-            <input value={confirmSlug} onChange={e => { setConfirmSlug(e.target.value); setMsg(""); }}
-              placeholder={shop.slug} autoFocus
-              style={{ width: "100%", background: S.card, border: `1.5px solid ${confirmSlug === shop.slug ? S.error : S.border}`, borderRadius: 8, padding: "10px 12px", color: S.text, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box", marginBottom: 12 }} />
-            {msg && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{msg}</p>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={onClose} style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", cursor: "pointer", color: S.sub, fontFamily: "inherit", fontSize: 13 }}>ยกเลิก</button>
-              <button onClick={requestOtp} disabled={confirmSlug !== shop.slug || loading}
-                style={{ flex: 1, background: confirmSlug === shop.slug ? S.error : S.card, border: "none", borderRadius: 8, padding: "10px", cursor: confirmSlug === shop.slug ? "pointer" : "not-allowed", color: confirmSlug === shop.slug ? "#fff" : S.muted, fontFamily: "inherit", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {loading ? <Loader2 size={13} className="animate-spin" /> : null} ขอ OTP
-              </button>
-            </div>
-          </>
-        )}
+        {/* Warning */}
+        <div style={{ background: `${S.error}15`, border: `1px solid ${S.error}44`, borderRadius: 10, padding: 12, marginBottom: 20 }}>
+          <p style={{ color: S.error, fontSize: 13, margin: 0, lineHeight: 1.6 }}>
+            ⚠️ การลบร้านจะ<strong>ลบข้อมูลทั้งหมดถาวร</strong>รวมถึงการจอง บริการ พนักงาน และสถิติทั้งหมด ไม่สามารถกู้คืนได้
+          </p>
+        </div>
 
-        {step === "otp" && (
-          <>
-            <div style={{ background: S.card, borderRadius: 10, padding: 12, marginBottom: 16 }}>
-              {telegramSent
-                ? <p style={{ color: S.success, fontSize: 13, margin: 0 }}>✅ ส่ง OTP ไปที่ <strong>Telegram Group</strong> แล้ว — ตรวจสอบได้เลย</p>
-                : <p style={{ color: S.warning, fontSize: 13, margin: 0 }}>⚠️ ยังไม่ได้ตั้งค่า BOT_TOKEN / ADMIN_GROUP_ID — ดู OTP ได้จาก Render server logs</p>
-              }
-            </div>
-            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>กรอก OTP 6 หลัก</label>
-            <input value={otpCode} onChange={e => { setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setMsg(""); }}
-              placeholder="000000" maxLength={6} autoFocus inputMode="numeric"
-              style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px 12px", color: S.text, fontFamily: "'Courier New', monospace", fontSize: 20, letterSpacing: 6, textAlign: "center", boxSizing: "border-box", marginBottom: 12 }} />
-            {msg && <p style={{ color: S.error, fontSize: 13, marginBottom: 8 }}>{msg}</p>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => { setStep("confirm"); setOtpCode(""); setMsg(""); }} style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", cursor: "pointer", color: S.sub, fontFamily: "inherit", fontSize: 13 }}>ย้อนกลับ</button>
-              <button onClick={confirmDelete} disabled={otpCode.length !== 6 || loading}
-                style={{ flex: 2, background: otpCode.length === 6 ? S.error : S.card, border: "none", borderRadius: 8, padding: "10px", cursor: otpCode.length === 6 ? "pointer" : "not-allowed", color: otpCode.length === 6 ? "#fff" : S.muted, fontFamily: "inherit", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {loading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} ยืนยันลบร้านถาวร
-              </button>
-            </div>
-          </>
-        )}
+        {/* Slug confirm */}
+        <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 5 }}>
+          พิมพ์ slug ร้าน <strong style={{ color: S.text, fontFamily: "monospace" }}>{shop.slug}</strong> เพื่อยืนยัน
+        </label>
+        <input
+          value={confirmSlug}
+          onChange={e => { setConfirmSlug(e.target.value); setMsg(""); }}
+          placeholder={shop.slug}
+          autoFocus
+          style={{
+            width: "100%", background: S.card,
+            border: `1.5px solid ${confirmSlug ? (slugOk ? S.error : S.border) : S.border}`,
+            borderRadius: 8, padding: "10px 12px", color: S.text,
+            fontFamily: "monospace", fontSize: 14, boxSizing: "border-box", marginBottom: 16,
+          }}
+        />
+
+        {/* TOTP */}
+        <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 5 }}>
+          🔐 รหัส Google Authenticator (TOTP) 6 หลัก
+        </label>
+        <input
+          value={totpCode}
+          onChange={e => { setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setMsg(""); }}
+          placeholder="000000"
+          maxLength={6}
+          inputMode="numeric"
+          disabled={!slugOk}
+          style={{
+            width: "100%", background: slugOk ? S.card : `${S.card}88`,
+            border: `1px solid ${totpCode.length === 6 ? S.error + "88" : S.border}`,
+            borderRadius: 8, padding: "10px 12px", color: S.text,
+            fontFamily: "'Courier New', monospace", fontSize: 22, letterSpacing: 8,
+            textAlign: "center", boxSizing: "border-box", marginBottom: 16,
+            opacity: slugOk ? 1 : 0.4,
+          }}
+        />
+
+        {msg && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{msg}</p>}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose}
+            style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", cursor: "pointer", color: S.sub, fontFamily: "inherit", fontSize: 13 }}>
+            ยกเลิก
+          </button>
+          <button onClick={confirmDelete} disabled={!canDelete || loading}
+            style={{ flex: 2, background: canDelete ? S.error : S.card, border: "none", borderRadius: 8, padding: "10px", cursor: canDelete ? "pointer" : "not-allowed", color: canDelete ? "#fff" : S.muted, fontFamily: "inherit", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: canDelete ? 1 : 0.5 }}>
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} ยืนยันลบร้านถาวร
+          </button>
+        </div>
       </motion.div>
     </motion.div>
   );
