@@ -121,6 +121,81 @@ async def _send_via_brevo(to_email: str, otp_code: str, api_key: str, from_email
     raise RuntimeError(f"ส่งอีเมลไม่สำเร็จ (Brevo {resp.status_code}): {error_body}")
 
 
+async def send_custom_email(to_email: str, subject: str, html: str, text: str) -> bool:
+    """ส่งอีเมล custom content — subject/html/text กำหนดเองได้"""
+    settings = get_settings()
+
+    if settings.brevo_api_key:
+        from_email = settings.smtp_from_email
+        if not from_email:
+            raise ValueError("กรุณาตั้งค่า SMTP_FROM_EMAIL")
+        payload = {
+            "sender": {"name": "CSC System", "email": from_email},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "htmlContent": html,
+            "textContent": text,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={"api-key": settings.brevo_api_key, "Content-Type": "application/json"},
+                json=payload,
+            )
+        if resp.status_code in (200, 201, 202):
+            return True
+        logger.error("Brevo custom email error %s: %s", resp.status_code, resp.text)
+        return False
+
+    if settings.resend_api_key:
+        from_email = settings.smtp_from_email or "onboarding@resend.dev"
+        payload = {
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": text,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {settings.resend_api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if resp.status_code in (200, 201):
+            return True
+        logger.error("Resend custom email error %s: %s", resp.status_code, resp.text)
+        return False
+
+    if not all([settings.smtp_host, settings.smtp_user, settings.smtp_password, settings.smtp_from_email]):
+        raise ValueError("ระบบอีเมลยังไม่ได้ตั้งค่า")
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.smtp_from_email
+    msg["To"] = to_email
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    def _send():
+        port = settings.smtp_port or 587
+        ctx = ssl.create_default_context()
+        SMTP_TIMEOUT = 15
+        if port == 465:
+            with smtplib.SMTP_SSL(settings.smtp_host, port, context=ctx, timeout=SMTP_TIMEOUT) as server:
+                server.login(settings.smtp_user, settings.smtp_password)
+                server.sendmail(settings.smtp_from_email, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(settings.smtp_host, port, timeout=SMTP_TIMEOUT) as server:
+                server.ehlo()
+                server.starttls(context=ctx)
+                server.login(settings.smtp_user, settings.smtp_password)
+                server.sendmail(settings.smtp_from_email, to_email, msg.as_string())
+        return True
+
+    return await asyncio.to_thread(_send)
+
+
 async def send_otp_email(to_email: str, otp_code: str) -> bool:
     settings = get_settings()
 

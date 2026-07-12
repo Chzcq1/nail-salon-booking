@@ -221,6 +221,7 @@ class Shop(Base):
     ร้านหนึ่งร้านในระบบ multi-tenant — 1 แถว = 1 ร้านที่เช่าใช้ระบบ
     ทุกตาราง nail_* ผูกกับ shop_id เพื่อแยกข้อมูลแต่ละร้านออกจากกันใน DB เดียว
     slug ใช้ทำลิงก์ /r/{slug} (หน้าร้าน) และ /r/{slug}/admin (หลังร้าน)
+    auth_method: 'telegram_otp' (ร้านเก่า) | 'totp' (ร้านใหม่ผ่าน self-registration)
     """
     __tablename__ = "shops"
 
@@ -229,6 +230,12 @@ class Shop(Base):
     name = Column(String(255), nullable=False)
     admin_passcode_hash = Column(String(255), nullable=True)  # รหัสเข้าหลังร้านของร้านนี้ (แยกจากร้านอื่น)
     is_active = Column(Boolean, default=True, nullable=False)
+    # ── Auth method — telegram_otp (legacy) | totp (new self-registered shops) ──
+    auth_method = Column(String(20), nullable=False, server_default="telegram_otp", default="telegram_otp")
+    totp_secret = Column(String(200), nullable=True)   # TOTP secret สำหรับร้านที่ใช้ Google Authenticator
+    totp_confirmed = Column(Boolean, server_default="false", default=False, nullable=False)  # scanned & confirmed QR แล้ว
+    onboarding_token = Column(String(200), nullable=True)   # one-time token สำหรับหน้า onboarding ครั้งแรก
+    owner_email = Column(String(255), nullable=True)   # อีเมลเจ้าของร้าน (จาก registration)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -437,4 +444,52 @@ class NailApiStats(Base):
     shop_id = Column(Integer, ForeignKey("shops.id"), nullable=False, default=1, index=True)
     stat_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD (Thai time)
     request_count = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class SystemConfig(Base):
+    """Key-value store สำหรับ config ของระบบ — เช่น superadmin_totp_secret"""
+    __tablename__ = "system_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ShopPlan(Base):
+    """แพ็กเกจการสมัครใช้ระบบ — Founding Member, Pro, Business ฯลฯ"""
+    __tablename__ = "shop_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)               # ชื่อแพ็กเกจ เช่น "Founding Member"
+    description = Column(Text, nullable=True)                # รายละเอียดสำหรับแสดงในหน้าสมัคร
+    price = Column(Numeric(10, 2), nullable=False)           # ราคา (บาท)
+    is_active = Column(Boolean, server_default="true", default=True, nullable=False)
+    total_slots = Column(Integer, nullable=True)             # จำนวน slot ทั้งหมด (null = ไม่จำกัด)
+    registered_count = Column(Integer, server_default="0", default=0, nullable=False)  # ลงทะเบียนไปแล้วกี่ร้าน
+    expiry_days = Column(Integer, nullable=True, default=30) # จำนวนวันที่ได้รับเมื่อสมัคร (null = ไม่จำกัด)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ShopRegistration(Base):
+    """คำขอสมัครร้านใหม่จากลูกค้า — pending → approved (สร้างร้านอัตโนมัติ) | rejected"""
+    __tablename__ = "shop_registrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("shop_plans.id"), nullable=True)
+    shop_name = Column(String(255), nullable=False)          # ชื่อร้าน
+    slug = Column(String(100), nullable=False)               # slug ที่ต้องการ
+    owner_email = Column(String(255), nullable=False)        # อีเมลเจ้าของร้าน
+    owner_line = Column(String(100), nullable=True)          # Line ID (optional)
+    slip_image = Column(Text, nullable=True)                 # base64 สลิปโอนเงิน
+    amount_paid = Column(Numeric(10, 2), nullable=True)      # ยอดที่โอนมา (จาก Slip2Go)
+    status = Column(String(20), nullable=False, server_default="pending", default="pending")  # pending|approved|rejected
+    auto_verified = Column(Boolean, server_default="false", default=False, nullable=False)  # Slip2Go ผ่านอัตโนมัติ
+    reject_reason = Column(String(500), nullable=True)
+    shop_id = Column(Integer, ForeignKey("shops.id"), nullable=True)  # หลัง approve แล้วชี้ไปที่ร้าน
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

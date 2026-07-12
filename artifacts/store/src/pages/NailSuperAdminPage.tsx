@@ -86,32 +86,53 @@ function fmtDate(iso?: string | null) {
   });
 }
 
-// ── Auth Screen (PIN → Telegram OTP two-factor login) ───────────────────────
+// ── Auth Screen (TOTP-aware: ตรวจสอบ TOTP status ก่อน เลือก flow อัตโนมัติ) ──
 function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
-  const [step, setStep] = useState<"pin" | "otp">("pin");
+  const [step, setStep] = useState<"pin" | "otp" | "totp">("pin");
   const [pin, setPin] = useState("");
-  const [otp, setOtp] = useState("");
+  const [code, setCode] = useState("");
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [totpEnabled, setTotpEnabled] = useState<boolean | null>(null);
 
-  const requestOtp = async (e: React.FormEvent) => {
+  // ตรวจ TOTP status เมื่อโหลด
+  useEffect(() => {
+    fetch(`${API}/superadmin/totp/status`)
+      .then(r => r.json())
+      .then(d => setTotpEnabled(!!d.totp_enabled))
+      .catch(() => setTotpEnabled(false));
+  }, []);
+
+  const inpStyle: React.CSSProperties = {
+    width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
+    borderRadius: 10, padding: "12px 44px 12px 14px", fontSize: 14, color: S.text,
+    fontFamily: "inherit", boxSizing: "border-box", outline: "none",
+  };
+
+  // Step 1 PIN — TOTP: ส่งตรง / Telegram: ขอ OTP ก่อน
+  const handlePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pin.trim()) return;
     setLoading(true); setErr(""); setInfo("");
     try {
-      await fetch(`${API}/superadmin/login/request-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin }),
-      }).then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d?.detail ?? `HTTP ${r.status}`);
-        return d;
-      });
-      setInfo("ส่ง OTP ไปยัง Telegram แล้ว กรุณาตรวจสอบห้องแอดมิน");
-      setStep("otp");
+      if (totpEnabled) {
+        // TOTP flow — ไม่ต้องส่ง OTP ก่อน แค่เปลี่ยน step
+        setStep("totp");
+      } else {
+        await fetch(`${API}/superadmin/login/request-otp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        }).then(async (r) => {
+          const d = await r.json();
+          if (!r.ok) throw new Error(d?.detail ?? `HTTP ${r.status}`);
+          return d;
+        });
+        setInfo("ส่ง OTP ไปยัง Telegram แล้ว กรุณาตรวจสอบห้องแอดมิน");
+        setStep("otp");
+      }
     } catch (e: any) {
       setErr(e.message ?? "PIN ไม่ถูกต้อง");
     } finally {
@@ -119,15 +140,40 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
     }
   };
 
-  const verifyOtp = async (e: React.FormEvent) => {
+  // Step 2 TOTP — ตรวจ PIN + TOTP code พร้อมกัน
+  const handleTOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!otp.trim()) return;
+    if (code.length !== 6) return;
     setLoading(true); setErr("");
     try {
       const d = await fetch(`${API}/superadmin/login/verify-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin, otp_code: otp }),
+        body: JSON.stringify({ pin, otp_code: code }),
+      }).then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      });
+      localStorage.setItem(LOCAL_KEY, d.token);
+      onAuth(d.token);
+    } catch (e: any) {
+      setErr(e.message ?? "รหัสไม่ถูกต้อง");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2 OTP (Telegram) — เหมือนเดิม
+  const verifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) return;
+    setLoading(true); setErr("");
+    try {
+      const d = await fetch(`${API}/superadmin/login/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, otp_code: code }),
       }).then(async (r) => {
         const body = await r.json();
         if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
@@ -152,12 +198,14 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
           </div>
           <div>
             <h1 style={{ color: S.text, fontSize: 18, fontWeight: 700, margin: 0 }}>CSC Super Admin</h1>
-            <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>Chain System Care — ระบบเจ้าของ</p>
+            <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>
+              {totpEnabled ? "🔐 Google Authenticator" : "💬 Telegram OTP"}
+            </p>
           </div>
         </div>
 
-        {step === "pin" ? (
-          <form onSubmit={requestOtp}>
+        {step === "pin" && (
+          <form onSubmit={handlePin}>
             <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส PIN</label>
             <div style={{ position: "relative", marginBottom: 12 }}>
               <input
@@ -168,11 +216,7 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
                 onChange={e => setPin(e.target.value)}
                 placeholder="กรอกรหัส PIN"
                 autoFocus
-                style={{
-                  width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
-                  borderRadius: 10, padding: "12px 44px 12px 14px", fontSize: 14, color: S.text,
-                  fontFamily: "inherit", boxSizing: "border-box", outline: "none",
-                }}
+                style={inpStyle}
               />
               <button type="button" onClick={() => setShow(!show)}
                 style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.muted, padding: 2 }}>
@@ -180,13 +224,53 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
               </button>
             </div>
             {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-            <button type="submit" disabled={!pin || loading}
-              style={{ width: "100%", background: loading || !pin ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: !pin || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !pin ? 0.5 : 1 }}>
+            <button type="submit" disabled={!pin || loading || totpEnabled === null}
+              style={{ width: "100%", background: loading || !pin || totpEnabled === null ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: !pin || loading || totpEnabled === null ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !pin || totpEnabled === null ? 0.5 : 1 }}>
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
-              {loading ? "กำลังส่ง OTP…" : "ส่ง OTP ไปยัง Telegram"}
+              {totpEnabled === null ? "กำลังโหลด…" : loading ? "กำลังตรวจสอบ…" : totpEnabled ? "ต่อไป →" : "ส่ง OTP ไปยัง Telegram"}
+            </button>
+            {totpEnabled === false && (
+              <p style={{ color: S.muted, fontSize: 12, marginTop: 16, textAlign: "center" }}>
+                ต้องการเปลี่ยนมาใช้ Google Authenticator?{" "}
+                <a href="/superadmin/setup-totp" style={{ color: S.accent }}>ตั้งค่า TOTP</a>
+              </p>
+            )}
+          </form>
+        )}
+
+        {step === "totp" && (
+          <form onSubmit={handleTOTP}>
+            <p style={{ color: S.sub, fontSize: 14, marginBottom: 4 }}>เปิด Google Authenticator</p>
+            <p style={{ color: S.muted, fontSize: 12, marginBottom: 16 }}>กรอกรหัส 6 หลักจากแอป Google Authenticator</p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              autoComplete="one-time-code"
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
+              autoFocus
+              style={{
+                width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
+                borderRadius: 10, padding: "12px 14px", fontSize: 22, letterSpacing: 8, textAlign: "center", color: S.text,
+                fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 12,
+              }}
+            />
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
+            <button type="submit" disabled={code.length !== 6 || loading}
+              style={{ width: "100%", background: loading || code.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: code.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: code.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+              {loading ? "กำลังตรวจสอบ…" : "เข้าสู่ระบบ"}
+            </button>
+            <button type="button" onClick={() => { setStep("pin"); setCode(""); setErr(""); }}
+              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              ← กลับไปกรอก PIN ใหม่
             </button>
           </form>
-        ) : (
+        )}
+
+        {step === "otp" && (
           <form onSubmit={verifyOtp}>
             {info && <p style={{ color: S.success, fontSize: 13, marginBottom: 12 }}>{info}</p>}
             <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส OTP (6 หลัก จาก Telegram)</label>
@@ -196,8 +280,8 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
               maxLength={6}
               name="superadmin-otp"
               autoComplete="one-time-code"
-              value={otp}
-              onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
               placeholder="000000"
               autoFocus
               style={{
@@ -207,18 +291,190 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
               }}
             />
             {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-            <button type="submit" disabled={otp.length !== 6 || loading}
-              style={{ width: "100%", background: loading || otp.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: otp.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: otp.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
+            <button type="submit" disabled={code.length !== 6 || loading}
+              style={{ width: "100%", background: loading || code.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: code.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: code.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
               {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
               {loading ? "กำลังตรวจสอบ…" : "ยืนยันเข้าสู่ระบบ"}
             </button>
-            <button type="button" onClick={() => { setStep("pin"); setOtp(""); setErr(""); setInfo(""); }}
+            <button type="button" onClick={() => { setStep("pin"); setCode(""); setErr(""); setInfo(""); }}
               style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
               ← กลับไปกรอก PIN ใหม่
             </button>
           </form>
         )}
       </motion.div>
+    </div>
+  );
+}
+
+// ── Registrations Tab ────────────────────────────────────────────────────────
+function RegistrationsTab({ sKey }: { sKey: string }) {
+  const [filter, setFilter] = useState<"" | "pending" | "approved" | "rejected">("");
+  const [slipSrc, setSlipSrc] = useState<string | null>(null);
+  const [rejectId, setRejectId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const qc = useQueryClient();
+
+  const url = `${API}/superadmin/registrations${filter ? `?status=${filter}` : ""}`;
+  const { data: regs = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["sa-registrations", filter],
+    queryFn: () => saFetch(url, sKey).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const pendingRegs = (regs as any[]).filter(r => r.status === "pending").length;
+
+  const approve = async (id: number) => {
+    setLoading(true);
+    try {
+      const res = await saFetch(`${API}/superadmin/registrations/${id}/approve`, sKey, {
+        method: "POST", body: JSON.stringify({}),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+      qc.invalidateQueries({ queryKey: ["sa-registrations"] });
+      refetch();
+    } catch (e: any) { alert(`อนุมัติไม่สำเร็จ: ${e.message}`); }
+    finally { setLoading(false); }
+  };
+
+  const reject = async (id: number, reason: string) => {
+    setLoading(true);
+    try {
+      const res = await saFetch(`${API}/superadmin/registrations/${id}/reject`, sKey, {
+        method: "POST", body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+      setRejectId(null); setRejectReason("");
+      qc.invalidateQueries({ queryKey: ["sa-registrations"] });
+      refetch();
+    } catch (e: any) { alert(`ปฏิเสธไม่สำเร็จ: ${e.message}`); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 20 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <PlusCircle size={18} color={S.accent} />
+        <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>
+          คำขอสมัครร้านใหม่
+          {pendingRegs > 0 && (
+            <span style={{ marginLeft: 8, background: S.warning, color: "#000", borderRadius: 100, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>
+              {pendingRegs} รอ
+            </span>
+          )}
+        </span>
+        {isLoading && <Loader2 size={14} color={S.muted} className="animate-spin" />}
+        <button onClick={() => refetch()} style={{ background: "none", border: "none", cursor: "pointer", color: S.muted }}>
+          <RefreshCw size={14} />
+        </button>
+      </div>
+
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+        {(["", "pending", "approved", "rejected"] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            style={{ background: filter === f ? S.accent : S.card, color: filter === f ? "#fff" : S.sub, border: `1px solid ${filter === f ? S.accent : S.border}`, borderRadius: 100, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>
+            {f === "" ? "ทั้งหมด" : f === "pending" ? "รอดำเนินการ" : f === "approved" ? "อนุมัติแล้ว" : "ปฏิเสธแล้ว"}
+          </button>
+        ))}
+      </div>
+
+      {(regs as any[]).length === 0 && !isLoading && (
+        <div style={{ textAlign: "center", padding: 40, color: S.muted, fontSize: 14 }}>
+          <PlusCircle size={32} style={{ margin: "0 auto 8px", display: "block" }} />
+          ยังไม่มีคำขอสมัคร{filter ? "ในสถานะนี้" : ""}
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {(regs as any[]).map(r => (
+          <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            style={{ background: S.card, border: `1px solid ${r.status === "pending" ? S.warning + "55" : S.border}`, borderRadius: 12, padding: 16 }}>
+            {/* Info */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{r.shop_name}</div>
+                <div style={{ color: S.muted, fontSize: 12, marginTop: 2 }}>slug: <span style={{ color: S.sub, fontFamily: "monospace" }}>{r.slug}</span></div>
+                <div style={{ color: S.muted, fontSize: 12 }}>📧 {r.owner_email}{r.owner_line ? ` · Line: ${r.owner_line}` : ""}</div>
+                {r.plan_name && <div style={{ color: S.muted, fontSize: 12 }}>แพ็กเกจ: {r.plan_name} (฿{r.plan_price?.toFixed(0)})</div>}
+                {r.auto_verified && <div style={{ color: S.success, fontSize: 12 }}>✅ Slip2Go ตรวจสลิปผ่านแล้ว</div>}
+                {r.amount_paid && <div style={{ color: S.success, fontSize: 12 }}>💰 ยอดโอน ฿{parseFloat(r.amount_paid).toFixed(0)}</div>}
+                {r.created_at && <div style={{ color: S.muted, fontSize: 12 }}>ส่งคำขอเมื่อ {new Date(r.created_at).toLocaleDateString("th-TH")}</div>}
+                {r.reject_reason && <div style={{ color: S.error, fontSize: 12, marginTop: 4 }}>เหตุผล: {r.reject_reason}</div>}
+                {r.shop_id && <div style={{ color: S.success, fontSize: 12 }}>✅ ร้าน #{r.shop_id} สร้างแล้ว</div>}
+              </div>
+              <span style={{
+                background: r.status === "pending" ? `${S.warning}22` : r.status === "approved" ? `${S.success}22` : `${S.error}22`,
+                color: r.status === "pending" ? S.warning : r.status === "approved" ? S.success : S.error,
+                borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
+              }}>
+                {r.status === "pending" ? "รอดำเนินการ" : r.status === "approved" ? "อนุมัติแล้ว" : "ปฏิเสธแล้ว"}
+              </span>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {r.slip_image && (
+                <button onClick={() => setSlipSrc(r.slip_image)}
+                  style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: S.sub, fontSize: 13, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                  <Eye size={13} /> ดูสลิป
+                </button>
+              )}
+              {r.status === "pending" && (
+                <>
+                  <button onClick={() => { if (window.confirm(`อนุมัติร้าน "${r.shop_name}" และส่งอีเมล onboarding?`)) approve(r.id); }}
+                    disabled={loading}
+                    style={{ flex: 1, background: `${S.success}22`, border: `1px solid ${S.success}55`, borderRadius: 8, padding: "7px 14px", cursor: loading ? "not-allowed" : "pointer", color: S.success, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                    <CheckCircle size={13} /> อนุมัติ + ส่งอีเมล
+                  </button>
+                  <button onClick={() => { setRejectId(r.id); setRejectReason(""); }}
+                    disabled={loading}
+                    style={{ flex: 1, background: `${S.error}22`, border: `1px solid ${S.error}55`, borderRadius: 8, padding: "7px 14px", cursor: loading ? "not-allowed" : "pointer", color: S.error, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontFamily: "inherit" }}>
+                    <XCircle size={13} /> ปฏิเสธ
+                  </button>
+                </>
+              )}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Slip viewer modal */}
+      <AnimatePresence>
+        {slipSrc && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setSlipSrc(null)}>
+            <img src={slipSrc} alt="slip" style={{ maxHeight: "90vh", maxWidth: "90vw", borderRadius: 12 }} onClick={e => e.stopPropagation()} />
+          </motion.div>
+        )}
+
+        {/* Reject modal */}
+        {rejectId !== null && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <div style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 360 }}>
+              <h3 style={{ color: S.text, margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>ปฏิเสธคำขอสมัคร</h3>
+              <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>เหตุผล (ไม่บังคับ)</label>
+              <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={3}
+                placeholder="เช่น สลิปไม่ชัด, ยอดไม่ครบ..."
+                style={{ width: "100%", background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px 12px", color: S.text, fontSize: 14, fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 16 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setRejectId(null)}
+                  style={{ flex: 1, background: S.card, border: `1px solid ${S.border}`, borderRadius: 8, padding: "10px", color: S.sub, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 600 }}>
+                  ยกเลิก
+                </button>
+                <button onClick={() => reject(rejectId, rejectReason)} disabled={loading}
+                  style={{ flex: 1, background: `${S.error}22`, border: `1px solid ${S.error}55`, borderRadius: 8, padding: "10px", color: S.error, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 600 }}>
+                  {loading ? "กำลังดำเนินการ…" : "ยืนยันปฏิเสธ"}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1280,7 +1536,7 @@ export default function NailSuperAdminPage() {
   const [selectedShopId, setSelectedShopId] = useState<number>(1);
 
   // แท็บหลัก — แยกหน้าจอเป็นส่วนๆ กันหน้ายาวเกินไปเมื่อร้านเยอะขึ้น
-  const [tab, setTab] = useState<"shops" | "status" | "renewals" | "finance" | "usage">("shops");
+  const [tab, setTab] = useState<"shops" | "status" | "renewals" | "finance" | "usage" | "registrations">("shops");
 
   const qc = useQueryClient();
 
@@ -1393,7 +1649,8 @@ export default function NailSuperAdminPage() {
           {(([
             { id: "shops", label: "ร้านทั้งหมด", icon: Store, badge: allShops.length, badgeColor: undefined },
             { id: "status", label: "สถานะร้าน", icon: Crown, badge: 0, badgeColor: undefined },
-            { id: "renewals", label: "คำขอต่ออายุ", icon: Clock, badge: pendingCount, badgeColor: S.warning },
+            { id: "renewals", label: "ต่ออายุ", icon: Clock, badge: pendingCount, badgeColor: S.warning },
+            { id: "registrations", label: "สมัครใหม่", icon: PlusCircle, badge: 0, badgeColor: undefined },
             { id: "finance", label: "การเงิน", icon: Tag, badge: 0, badgeColor: undefined },
             { id: "usage", label: "การใช้งาน", icon: Activity, badge: 0, badgeColor: undefined },
           ]) as { id: typeof tab; label: string; icon: any; badge: number; badgeColor?: string }[]).map(t => {
@@ -1500,6 +1757,10 @@ export default function NailSuperAdminPage() {
             {/* Traffic Dashboard */}
             <TrafficSection sKey={sKey!} />
           </>
+        )}
+
+        {tab === "registrations" && (
+          <RegistrationsTab sKey={sKey} />
         )}
 
         {tab === "renewals" && (

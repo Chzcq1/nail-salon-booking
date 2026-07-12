@@ -322,14 +322,14 @@ export default function NailAdminPage() {
     return () => clearInterval(id);
   }, [token, rentalGate?.is_expired]); // eslint-disable-line
 
-  // login steps: "passcode" → "otp"
-  const [loginStep, setLoginStep] = useState<"passcode" | "otp">("passcode");
+  // login steps: "passcode" → "otp" (Telegram) หรือ "totp" (Google Authenticator)
+  const [loginStep, setLoginStep] = useState<"passcode" | "otp" | "totp">("passcode");
   const [passcodeInput, setPasscodeInput] = useState("");
   const [otpInput, setOtpInput] = useState("");
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Step 1 — ตรวจรหัสผ่าน ขอ OTP
+  // Step 1 — ตรวจรหัสผ่าน ขอ OTP หรือ TOTP
   const handlePasscode = async () => {
     if (!passcodeInput.trim()) return;
     setLoading(true);
@@ -342,7 +342,12 @@ export default function NailAdminPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setLoginStep("otp");
+        // backend ส่ง method: 'totp' สำหรับร้านใหม่, 'otp' สำหรับร้านเดิม
+        if (data?.method === "totp") {
+          setLoginStep("totp");
+        } else {
+          setLoginStep("otp");
+        }
       } else {
         setAuthError(data?.detail || "รหัสผ่านไม่ถูกต้อง");
       }
@@ -353,7 +358,7 @@ export default function NailAdminPage() {
     }
   };
 
-  // Step 2 — ยืนยัน OTP รับ JWT
+  // Step 2a — ยืนยัน Telegram OTP รับ JWT
   const handleOTP = async () => {
     if (!otpInput.trim()) return;
     setLoading(true);
@@ -371,6 +376,32 @@ export default function NailAdminPage() {
         setAuthError("");
       } else {
         setAuthError(data?.detail || "OTP ไม่ถูกต้อง");
+      }
+    } catch {
+      setAuthError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2b — ยืนยัน Google Authenticator TOTP รับ JWT
+  const handleTOTP = async () => {
+    if (otpInput.length !== 6) return;
+    setLoading(true);
+    setAuthError("");
+    try {
+      const res = await fetch("/api/nail/admin/login/totp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: passcodeInput, totp_code: otpInput, ...(slug ? { shop_slug: slug } : {}) }),
+      });
+      const data = await res.json();
+      if (res.ok && data.access_token) {
+        localStorage.setItem(storageKey, data.access_token);
+        setToken(data.access_token);
+        setAuthError("");
+      } else {
+        setAuthError(data?.detail || "รหัส TOTP ไม่ถูกต้อง");
       }
     } catch {
       setAuthError("เกิดข้อผิดพลาด กรุณาลองใหม่");
@@ -413,7 +444,35 @@ export default function NailAdminPage() {
                 {loading ? "กำลังตรวจสอบ…" : "ต่อไป →"}
               </button>
             </form>
+          ) : loginStep === "totp" ? (
+            /* Google Authenticator TOTP — ร้านใหม่ที่สมัครผ่านระบบ */
+            <form onSubmit={e => { e.preventDefault(); handleTOTP(); }}>
+              <p style={{ color: A.sub, fontSize: 14, marginBottom: 4 }}>เปิด Google Authenticator</p>
+              <p style={{ color: A.muted, fontSize: 12, marginBottom: 24 }}>กรอกรหัส 6 หลักจากแอป Google Authenticator</p>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={otpInput}
+                onChange={e => setOtpInput(e.target.value.replace(/\D/g, ""))}
+                placeholder="000000"
+                style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: 8, fontWeight: 700 }}
+                autoFocus
+              />
+              {authError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>{authError}</p>}
+              <button type="submit" disabled={loading || otpInput.length < 6}
+                style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 16, fontWeight: 700, cursor: (loading || otpInput.length < 6) ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: (loading || otpInput.length < 6) ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                {loading ? <Loader2 size={18} className="animate-spin" /> : null}
+                {loading ? "กำลังยืนยัน…" : "เข้าสู่ระบบ"}
+              </button>
+              <button type="button" onClick={() => { setLoginStep("passcode"); setOtpInput(""); setAuthError(""); }}
+                style={{ marginTop: 10, background: "none", border: "none", color: A.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                ← กลับใส่รหัสผ่านใหม่
+              </button>
+            </form>
           ) : (
+            /* Telegram OTP — ร้านเดิม */
             <form onSubmit={e => { e.preventDefault(); handleOTP(); }}>
               <p style={{ color: A.sub, fontSize: 14, marginBottom: 8 }}>ส่ง OTP ไปยัง Telegram แล้ว</p>
               <p style={{ color: A.muted, fontSize: 12, marginBottom: 24 }}>กรุณาเปิด Telegram group admin และกรอกรหัส 6 หลักที่ได้รับ</p>

@@ -26,11 +26,14 @@ from backend.models import (
     NailShopSettings, NailService, NailStaff, NailTimeSlot, NailSlotTemplate,
     NailBooking, NailGallery, NailRenewalRequest, NailApiStats, OTPSession,
     Customer, CreditTransaction, NailShopApiKeys, TopupRequest, EmailOTPSession,
+    SystemConfig, ShopPlan, ShopRegistration,
 )
 from backend.auth import generate_otp, create_admin_token, verify_admin_token, hash_passcode, verify_passcode
 from backend.models import Shop
 from backend.routes.wallet import get_wallet_customer
 import backend.bot as bot_module
+from backend.totp_utils import generate_totp_secret, get_totp_uri, get_qr_code_base64, verify_totp as _verify_totp
+from backend.email_service import send_custom_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/nail", tags=["nail"])
@@ -344,6 +347,10 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
         import hmac as _hmac
         if not _hmac.compare_digest(body.passcode.strip(), passcode.strip()):
             raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+
+    # ── TOTP shops — ไม่ต้องส่ง Telegram; แค่ return ให้ frontend รู้ว่าใช้ TOTP
+    if shop_row.auth_method == "totp":
+        return {"message": "กรอกรหัส 6 หลักจาก Google Authenticator", "method": "totp"}
 
     # Load per-shop Telegram credentials FIRST (fail fast before generating OTP)
     shop_keys = db.query(NailShopApiKeys).filter_by(shop_id=shop_row.id).first()
@@ -2403,9 +2410,20 @@ class SuperAdminVerifyOtpBody(BaseModel):
     otp_code: str
 
 
+_SUPERADMIN_TOTP_KEY = "superadmin_totp_secret"
+
+
+def _get_superadmin_totp_secret(db: Session) -> Optional[str]:
+    row = db.query(SystemConfig).filter_by(key=_SUPERADMIN_TOTP_KEY).first()
+    return row.value if row else None
+
+
 @router.post("/superadmin/login/request-otp")
 async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Session = Depends(get_db)):
-    """ขั้นตอนที่ 1: ตรวจ PIN แล้วส่ง OTP 6 หลักไปยังห้อง Telegram ของแอดมิน (ADMIN_GROUP_ID ผ่าน BOT_TOKEN)"""
+    """ขั้นตอนที่ 1: ตรวจ PIN
+    - ถ้าตั้ง TOTP แล้ว → return {method:'totp'} ให้ frontend กรอก code จาก Google Authenticator
+    - ถ้ายังไม่ตั้ง TOTP → fallback ส่ง OTP ผ่าน Telegram (legacy)
+    """
     cfg = get_settings()
     key = cfg.nail_super_admin_key
     if not key:
@@ -2418,13 +2436,18 @@ async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Sessi
         logging.warning("[superadmin] failed PIN attempt")
         raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
 
+    # ── TOTP path (ร้านใหม่) ──
+    totp_secret = _get_superadmin_totp_secret(db)
+    if totp_secret:
+        return {"ok": True, "method": "totp", "message": "กรอกรหัส 6 หลักจาก Google Authenticator"}
+
+    # ── Legacy Telegram OTP path ──
     if not cfg.bot_token or not cfg.admin_group_id:
         raise HTTPException(
             status_code=503,
-            detail="ยังไม่ได้ตั้งค่า BOT_TOKEN หรือ ADMIN_GROUP_ID สำหรับส่ง OTP",
+            detail="ยังไม่ได้ตั้ง TOTP และไม่พบ BOT_TOKEN/ADMIN_GROUP_ID — กรุณาตั้งค่า TOTP ก่อนที่ /superadmin/totp/setup",
         )
 
-    # ลบ OTP เก่าของ login flow ก่อน (ป้องกัน spam / OTP ค้าง)
     db.query(EmailOTPSession).filter(EmailOTPSession.email == _SUPERADMIN_LOGIN_OTP_SENTINEL).delete()
 
     otp_code = f"{secrets.randbelow(1_000_000):06d}"
@@ -2445,16 +2468,18 @@ async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Sessi
     )
     telegram_sent = await _send_telegram_message(cfg.bot_token, cfg.admin_group_id, message)
     if not telegram_sent:
-        # ไม่ log ค่า OTP จริง — ป้องกัน OTP รั่วไหลผ่าน server log ถ้า Telegram ส่งไม่สำเร็จ
-        logging.warning("[superadmin] login OTP generated but Telegram send failed — check BOT_TOKEN/ADMIN_GROUP_ID")
+        logging.warning("[superadmin] login OTP generated but Telegram send failed")
         raise HTTPException(status_code=502, detail="ส่ง OTP ผ่าน Telegram ไม่สำเร็จ กรุณาลองใหม่")
 
-    return {"ok": True, "telegram_sent": True, "expires_in_seconds": 300}
+    return {"ok": True, "method": "telegram", "telegram_sent": True, "expires_in_seconds": 300}
 
 
 @router.post("/superadmin/login/verify-otp")
 def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Depends(get_db)):
-    """ขั้นตอนที่ 2: ตรวจ PIN + OTP ที่ส่งไป Telegram แล้วออก session token ให้ใช้แทน PIN ในทุก request ถัดไป"""
+    """ขั้นตอนที่ 2: ตรวจ PIN + code
+    - ถ้าตั้ง TOTP แล้ว → ตรวจ TOTP code จาก Google Authenticator
+    - ถ้ายังไม่ตั้ง TOTP → ตรวจ OTP ที่ส่งไป Telegram (legacy)
+    """
     cfg = get_settings()
     key = cfg.nail_super_admin_key
     if not key:
@@ -2467,6 +2492,18 @@ def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Dep
         logging.warning("[superadmin] failed PIN attempt (verify-otp)")
         raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
 
+    # ── TOTP path ──
+    totp_secret = _get_superadmin_totp_secret(db)
+    if totp_secret:
+        if not _verify_totp(totp_secret, body.otp_code or ""):
+            _SUPERADMIN_LOGIN_FAILS.append(now_ts)
+            logging.warning("[superadmin] invalid TOTP code")
+            raise HTTPException(status_code=403, detail="รหัส TOTP ไม่ถูกต้อง กรุณาตรวจสอบเวลาอุปกรณ์ให้ตรงกัน")
+        token = _issue_superadmin_session()
+        logging.info("[superadmin] TOTP login success")
+        return {"ok": True, "token": token, "expires_in_seconds": _SUPERADMIN_SESSION_TTL}
+
+    # ── Legacy Telegram OTP path ──
     now = _now()
     otp_session = (
         db.query(EmailOTPSession)
@@ -2487,7 +2524,7 @@ def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Dep
     db.commit()
 
     token = _issue_superadmin_session()
-    logging.info("[superadmin] login success — session issued")
+    logging.info("[superadmin] Telegram OTP login success")
     return {"ok": True, "token": token, "expires_in_seconds": _SUPERADMIN_SESSION_TTL}
 
 
@@ -3762,21 +3799,445 @@ def superadmin_update_shop_features(
     return {"ok": True}
 
 
-@router.put("/superadmin/shops/{shop_id}/passcode")
-def superadmin_set_shop_passcode(
-    shop_id: int,
-    body: ShopPasscodeBody,
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOTP SETUP & SELF-REGISTRATION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_SUPERADMIN_TOTP_KEY = "superadmin_totp_secret"
+
+
+def _get_superadmin_totp_secret(db: Session) -> Optional[str]:
+    row = db.query(SystemConfig).filter_by(key=_SUPERADMIN_TOTP_KEY).first()
+    return row.value if row else None
+
+
+class _SAPin(BaseModel):
+    pin: str
+
+
+class _SATOTPConfirm(BaseModel):
+    pin: str
+    totp_code: str
+
+
+@router.get("/superadmin/totp/status")
+def superadmin_totp_status(db: Session = Depends(get_db)):
+    """Public — ตรวจว่าตั้ง TOTP แล้วหรือยัง ให้ frontend เลือก login flow"""
+    secret = _get_superadmin_totp_secret(db)
+    return {"totp_enabled": bool(secret)}
+
+
+@router.post("/superadmin/totp/setup")
+def superadmin_totp_setup(body: _SAPin, db: Session = Depends(get_db)):
+    """Generate TOTP secret + QR — ต้อง verify PIN ก่อน (ไม่ต้อง login session)"""
+    cfg = get_settings()
+    key = cfg.nail_super_admin_key
+    if not key:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY")
+    if not secrets.compare_digest(body.pin or "", key):
+        raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
+
+    existing = db.query(SystemConfig).filter_by(key=_SUPERADMIN_TOTP_KEY).first()
+    if existing and existing.value:
+        totp_secret = existing.value
+    else:
+        totp_secret = generate_totp_secret()
+        if not existing:
+            db.add(SystemConfig(key=_SUPERADMIN_TOTP_KEY, value=totp_secret))
+        else:
+            existing.value = totp_secret
+        db.commit()
+
+    uri = get_totp_uri(totp_secret, "CSC Super Admin", "CSC System")
+    qr_base64 = get_qr_code_base64(uri)
+    return {"ok": True, "qr_code": qr_base64, "secret": totp_secret}
+
+
+@router.post("/superadmin/totp/confirm")
+def superadmin_totp_confirm(body: _SATOTPConfirm, db: Session = Depends(get_db)):
+    """ยืนยัน TOTP setup ด้วย code จาก Google Authenticator"""
+    cfg = get_settings()
+    key = cfg.nail_super_admin_key
+    if not key:
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY")
+    if not secrets.compare_digest(body.pin or "", key):
+        raise HTTPException(status_code=403, detail="PIN ไม่ถูกต้อง")
+
+    totp_secret = _get_superadmin_totp_secret(db)
+    if not totp_secret:
+        raise HTTPException(status_code=400, detail="ยังไม่ได้ generate secret กรุณาเรียก /setup ก่อน")
+    if not _verify_totp(totp_secret, body.totp_code or ""):
+        raise HTTPException(status_code=403, detail="รหัส TOTP ไม่ถูกต้อง กรุณาลองใหม่")
+
+    return {"ok": True, "message": "ตั้งค่า TOTP สำเร็จ — ใช้ Google Authenticator login ได้เลย"}
+
+
+# ── Shop Admin TOTP Login ─────────────────────────────────────────────────────
+
+class _AdminTOTPLogin(BaseModel):
+    passcode: str
+    totp_code: str
+    shop_slug: Optional[str] = None
+
+
+@router.post("/admin/login/totp")
+def admin_login_totp(body: _AdminTOTPLogin, db: Session = Depends(get_db)):
+    """Login สำหรับร้านที่ใช้ TOTP — passcode + 6-digit TOTP → JWT"""
+    shop_row = _resolve_shop_by_slug(db, body.shop_slug)
+    if not shop_row.is_active:
+        raise HTTPException(status_code=403, detail="ร้านนี้ปิดให้บริการชั่วคราว")
+    if shop_row.auth_method != "totp":
+        raise HTTPException(status_code=400, detail="ร้านนี้ไม่ได้ใช้ TOTP")
+
+    if shop_row.admin_passcode_hash:
+        if not verify_passcode(body.passcode.strip(), shop_row.admin_passcode_hash):
+            raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
+    else:
+        raise HTTPException(status_code=403, detail="ยังไม่ได้ตั้งรหัสผ่าน กรุณาทำ onboarding ก่อน")
+
+    if not shop_row.totp_secret or not _verify_totp(shop_row.totp_secret, body.totp_code or ""):
+        raise HTTPException(status_code=403, detail="รหัส TOTP ไม่ถูกต้อง")
+
+    token = create_admin_token(NAIL_ADMIN_SESSION_ID, shop_id=shop_row.id)
+    return {"access_token": token}
+
+
+# ── Shop Admin Onboarding (ครั้งแรก) ─────────────────────────────────────────
+
+class _OnboardingComplete(BaseModel):
+    setup_token: str
+    pin: str
+    totp_code: str
+
+
+@router.get("/admin/onboarding")
+def admin_onboarding_info(setup_token: str, db: Session = Depends(get_db)):
+    """ดึง QR Code สำหรับ onboarding ครั้งแรก — ตรวจ setup_token"""
+    shop_row = db.query(Shop).filter_by(onboarding_token=setup_token).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ลิงก์ onboarding ไม่ถูกต้องหรือใช้ไปแล้ว")
+    if shop_row.totp_confirmed:
+        raise HTTPException(status_code=400, detail="ร้านนี้ทำ onboarding เสร็จแล้ว กรุณา login ปกติ")
+
+    if not shop_row.totp_secret:
+        shop_row.totp_secret = generate_totp_secret()
+        db.commit()
+
+    uri = get_totp_uri(shop_row.totp_secret, shop_row.name or shop_row.slug, "CSC System")
+    qr_base64 = get_qr_code_base64(uri)
+    return {
+        "shop_name": shop_row.name,
+        "slug": shop_row.slug,
+        "qr_code": qr_base64,
+        "totp_secret": shop_row.totp_secret,
+    }
+
+
+@router.post("/admin/onboarding/complete")
+def admin_onboarding_complete(body: _OnboardingComplete, db: Session = Depends(get_db)):
+    """ตั้ง PIN + ยืนยัน TOTP → จบ onboarding ทำได้ครั้งเดียว"""
+    shop_row = db.query(Shop).filter_by(onboarding_token=body.setup_token).first()
+    if not shop_row:
+        raise HTTPException(status_code=404, detail="ลิงก์ onboarding ไม่ถูกต้องหรือใช้ไปแล้ว")
+    if shop_row.totp_confirmed:
+        raise HTTPException(status_code=400, detail="ร้านนี้ทำ onboarding เสร็จแล้ว")
+
+    pin = (body.pin or "").strip()
+    if len(pin) < 4:
+        raise HTTPException(status_code=400, detail="PIN ต้องมีอย่างน้อย 4 ตัวอักษร")
+    if not shop_row.totp_secret:
+        raise HTTPException(status_code=400, detail="ยังไม่ได้โหลด QR กรุณาเปิดหน้านี้ใหม่")
+    if not _verify_totp(shop_row.totp_secret, body.totp_code or ""):
+        raise HTTPException(status_code=403, detail="รหัส TOTP ไม่ถูกต้อง กรุณาลองใหม่")
+
+    shop_row.admin_passcode_hash = hash_passcode(pin)
+    shop_row.totp_confirmed = True
+    shop_row.onboarding_token = None
+    db.commit()
+
+    token = create_admin_token(NAIL_ADMIN_SESSION_ID, shop_id=shop_row.id)
+    return {"ok": True, "access_token": token}
+
+
+# ── Registration — Public ─────────────────────────────────────────────────────
+
+REGISTRATION_BANK_INFO = {
+    "truemoney_phone": "0809209043",
+    "kasikorn_account": "0951443204",
+    "kasikorn_name": "ศราวุฒิ แซ่ลิม",
+    "kasikorn_bank": "ธนาคารกสิกรไทย",
+}
+
+
+@router.get("/register/plans")
+def register_list_plans(db: Session = Depends(get_db)):
+    plans = db.query(ShopPlan).filter_by(is_active=True).order_by(ShopPlan.sort_order).all()
+    result = []
+    for p in plans:
+        slots_left = None if p.total_slots is None else max(0, p.total_slots - (p.registered_count or 0))
+        result.append({
+            "id": p.id, "name": p.name, "description": p.description,
+            "price": float(p.price), "total_slots": p.total_slots,
+            "registered_count": p.registered_count or 0,
+            "slots_left": slots_left, "is_available": slots_left is None or slots_left > 0,
+            "expiry_days": p.expiry_days,
+        })
+    return result
+
+
+@router.get("/register/bank-info")
+def register_get_bank_info():
+    return REGISTRATION_BANK_INFO
+
+
+class _CheckSlug(BaseModel):
+    slug: str
+
+
+@router.post("/register/check-slug")
+def register_check_slug(body: _CheckSlug, db: Session = Depends(get_db)):
+    slug = (body.slug or "").strip().lower()
+    if not slug:
+        return {"available": False, "reason": "กรุณากรอก slug"}
+    if not re.match(r"^[a-z0-9-]+$", slug):
+        return {"available": False, "reason": "ใช้ได้เฉพาะตัวพิมพ์เล็ก ตัวเลข และ -"}
+    if len(slug) < 3:
+        return {"available": False, "reason": "slug ต้องมีอย่างน้อย 3 ตัวอักษร"}
+    if db.query(Shop).filter_by(slug=slug).first():
+        return {"available": False, "reason": "slug นี้ถูกใช้ไปแล้ว"}
+    if db.query(ShopRegistration).filter(
+        ShopRegistration.slug == slug, ShopRegistration.status == "pending"
+    ).first():
+        return {"available": False, "reason": "slug นี้มีผู้ยื่นสมัครอยู่แล้ว"}
+    return {"available": True}
+
+
+class _SubmitReg(BaseModel):
+    plan_id: int
+    shop_name: str
+    slug: str
+    owner_email: str
+    owner_line: Optional[str] = None
+    slip_image: str
+
+
+@router.post("/register/submit")
+async def register_submit(body: _SubmitReg, db: Session = Depends(get_db)):
+    """ยื่นสมัครร้านใหม่ — Slip2Go auto-verify → pending รอ superadmin approve"""
+    plan = db.query(ShopPlan).filter_by(id=body.plan_id, is_active=True).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="ไม่พบแพ็กเกจที่เลือก")
+    if plan.total_slots is not None and (plan.registered_count or 0) >= plan.total_slots:
+        raise HTTPException(status_code=409, detail="แพ็กเกจนี้เต็มแล้ว")
+
+    slug = (body.slug or "").strip().lower()
+    if not slug or not re.match(r"^[a-z0-9-]+$", slug) or len(slug) < 3:
+        raise HTTPException(status_code=400, detail="slug ไม่ถูกต้อง")
+    if db.query(Shop).filter_by(slug=slug).first():
+        raise HTTPException(status_code=409, detail="slug นี้ถูกใช้ไปแล้ว")
+    if db.query(ShopRegistration).filter(
+        ShopRegistration.slug == slug, ShopRegistration.status == "pending"
+    ).first():
+        raise HTTPException(status_code=409, detail="slug นี้มีผู้ยื่นสมัครอยู่แล้ว")
+
+    email = (body.owner_email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="อีเมลไม่ถูกต้อง")
+    if not body.slip_image or not body.slip_image.startswith("data:image"):
+        raise HTTPException(status_code=400, detail="กรุณาอัปโหลดสลิปการโอนเงิน")
+
+    reg = ShopRegistration(
+        plan_id=plan.id, shop_name=(body.shop_name or "").strip(),
+        slug=slug, owner_email=email,
+        owner_line=(body.owner_line or "").strip() or None,
+        slip_image=body.slip_image, status="pending", auto_verified=False,
+    )
+    db.add(reg)
+    db.flush()
+
+    cfg = get_settings()
+    auto_verified = False
+    if cfg.slip2go_api_key:
+        try:
+            from backend.slip_verify import verify_slip
+            result = await verify_slip(body.slip_image, cfg.slip2go_api_key, expected_amount=float(plan.price))
+            if result.get("status") == "success":
+                reg.amount_paid = result.get("amount") or float(plan.price)
+                reg.auto_verified = True
+                auto_verified = True
+        except Exception as exc:
+            logging.warning(f"[register] Slip2Go auto-verify failed: {exc}")
+
+    db.commit()
+    db.refresh(reg)
+    return {
+        "ok": True, "registration_id": reg.id, "auto_verified": auto_verified,
+        "message": (
+            "ระบบตรวจสลิปอัตโนมัติแล้ว รอ Admin อนุมัติสักครู่ครับ"
+            if auto_verified else
+            "ส่งคำขอสมัครสำเร็จ! ทีมงานจะตรวจสอบสลิปและติดต่อกลับทางอีเมลภายใน 24 ชั่วโมง"
+        ),
+    }
+
+
+# ── Registration Management (Superadmin) ──────────────────────────────────────
+
+@router.get("/superadmin/registrations")
+def superadmin_list_registrations(
+    status: Optional[str] = None,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
-    """ตั้งรหัสผ่าน Admin (/r/{slug}/admin) สำหรับร้านนั้น"""
     _check_superadmin(x_super_admin_key)
-    shop = db.query(Shop).filter_by(id=shop_id).first()
-    if not shop:
-        raise HTTPException(status_code=404, detail="ไม่พบร้าน")
-    passcode = body.new_passcode.strip()
-    if len(passcode) < 4:
-        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร")
-    shop.admin_passcode_hash = hash_passcode(passcode)
+    q = db.query(ShopRegistration)
+    if status:
+        q = q.filter(ShopRegistration.status == status)
+    regs = q.order_by(ShopRegistration.created_at.desc()).all()
+    result = []
+    for r in regs:
+        plan = db.query(ShopPlan).filter_by(id=r.plan_id).first() if r.plan_id else None
+        result.append({
+            "id": r.id, "shop_name": r.shop_name, "slug": r.slug,
+            "owner_email": r.owner_email, "owner_line": r.owner_line,
+            "status": r.status, "auto_verified": r.auto_verified,
+            "amount_paid": float(r.amount_paid) if r.amount_paid else None,
+            "slip_image": r.slip_image, "reject_reason": r.reject_reason,
+            "shop_id": r.shop_id,
+            "plan_name": plan.name if plan else None,
+            "plan_price": float(plan.price) if plan else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return result
+
+
+def _provision_shop(reg: "ShopRegistration", plan, expiry_days: Optional[int], db: Session):
+    """สร้างร้านจากคำขอสมัคร — คืน (shop_row, onboarding_token)"""
+    slug = reg.slug
+    if db.query(Shop).filter_by(slug=slug).first():
+        raise HTTPException(status_code=409, detail=f"slug '{slug}' ถูกใช้ไปแล้ว")
+
+    totp_secret = generate_totp_secret()
+    onboarding_token = secrets.token_urlsafe(32)
+    days = expiry_days if expiry_days is not None else (plan.expiry_days if plan else 30)
+
+    shop_row = Shop(
+        slug=slug, name=reg.shop_name, is_active=True,
+        auth_method="totp", totp_secret=totp_secret,
+        totp_confirmed=False, onboarding_token=onboarding_token,
+        owner_email=reg.owner_email,
+    )
+    db.add(shop_row)
+    db.flush()
+
+    settings_row = NailShopSettings(
+        shop_id=shop_row.id, shop_name=reg.shop_name,
+        shop_tagline="ทำเล็บสวย สไตล์คุณ", business_type="nail",
+        deposit_amount=200, is_active=True, max_advance_days=14,
+        slot_duration_minutes=60, accept_bank_transfer=True, accept_truemoney_angpao=True,
+    )
+    if days:
+        settings_row.expired_at = _now() + timedelta(days=max(0, days))
+    db.add(settings_row)
+    db.flush()
+
+    for i, svc in enumerate(BUSINESS_TYPE_TEMPLATES["nail"]["services"]):
+        db.add(NailService(
+            shop_id=shop_row.id, name=svc["name"],
+            duration_minutes=svc["duration_minutes"], price=svc["price"],
+            color=svc["color"], is_active=True, sort_order=i,
+        ))
+
+    try:
+        _ensure_templates_exist(db, shop_row.id)
+    except Exception as exc:
+        logging.warning(f"[provision] templates failed: {exc}")
+
+    return shop_row, onboarding_token
+
+
+class _ApproveReg(BaseModel):
+    expiry_days: Optional[int] = None
+
+
+@router.post("/superadmin/registrations/{reg_id}/approve")
+async def superadmin_approve_registration(
+    reg_id: int, body: _ApproveReg,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    """อนุมัติคำขอสมัคร → สร้างร้านอัตโนมัติ + ส่ง onboarding email"""
+    _check_superadmin(x_super_admin_key)
+    reg = db.query(ShopRegistration).filter_by(id=reg_id).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอสมัคร")
+    if reg.status != "pending":
+        raise HTTPException(status_code=400, detail=f"คำขอนี้อยู่ใน status '{reg.status}' แล้ว")
+
+    plan = db.query(ShopPlan).filter_by(id=reg.plan_id).first() if reg.plan_id else None
+
+    try:
+        shop_row, onboarding_token = _provision_shop(reg, plan, body.expiry_days, db)
+        reg.status = "approved"
+        reg.shop_id = shop_row.id
+        if plan:
+            plan.registered_count = (plan.registered_count or 0) + 1
+        db.commit()
+        db.refresh(shop_row)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logging.error(f"[superadmin] provision failed reg {reg_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail="สร้างร้านไม่สำเร็จ")
+
+    import os as _os
+    domain = _os.environ.get("REPLIT_DEV_DOMAIN", "")
+    base_url = f"https://{domain}" if domain and not domain.startswith("http") else (domain or "https://your-domain.com")
+    storefront_url = f"{base_url}/r/{shop_row.slug}"
+    admin_url = f"{base_url}/r/{shop_row.slug}/admin"
+    onboarding_url = f"{base_url}/r/{shop_row.slug}/admin/onboarding?token={onboarding_token}"
+
+    html = (
+        "<html><body style='background:#0f172a;font-family:sans-serif;padding:40px 0'>"
+        "<div style='max-width:520px;margin:0 auto;background:#1e293b;border-radius:16px;padding:36px;border:1px solid #334155'>"
+        f"<h2 style='color:#f1f5f9;margin:0 0 8px'>🎉 ยินดีต้อนรับสู่ CSC!</h2>"
+        f"<p style='color:#94a3b8;margin:0 0 20px'>ร้าน <b style='color:#e2e8f0'>{reg.shop_name}</b> ได้รับการอนุมัติแล้วครับ</p>"
+        f"<p style='color:#94a3b8;font-size:14px;margin:4px 0'>🛍️ หน้าร้าน: <a href='{storefront_url}' style='color:#a78bfa'>{storefront_url}</a></p>"
+        f"<p style='color:#94a3b8;font-size:14px;margin:4px 0 20px'>⚙️ หลังร้าน: <a href='{admin_url}' style='color:#60a5fa'>{admin_url}</a></p>"
+        "<div style='background:#1a2744;border-radius:12px;padding:20px;border:1px solid #1e3a8a'>"
+        "<p style='color:#93c5fd;font-weight:700;margin:0 0 8px'>⚡ ตั้งค่าร้านครั้งแรก (PIN + Google Authenticator)</p>"
+        f"<a href='{onboarding_url}' style='display:inline-block;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;text-decoration:none;border-radius:10px;padding:12px 24px;font-weight:700'>🚀 เริ่มตั้งค่าร้าน →</a>"
+        "<p style='color:#64748b;font-size:12px;margin:12px 0 0'>⚠️ ลิงก์ใช้ได้ครั้งเดียว อย่าแชร์ผู้อื่น</p>"
+        "</div></div></body></html>"
+    )
+    txt = f"ร้าน {reg.shop_name} ได้รับการอนุมัติ\nหน้าร้าน: {storefront_url}\nหลังร้าน: {admin_url}\nตั้งค่าร้าน: {onboarding_url}"
+
+    try:
+        await send_custom_email(reg.owner_email, f"ร้าน {reg.shop_name} ได้รับการอนุมัติแล้ว 🎉", html, txt)
+    except Exception as exc:
+        logging.warning(f"[superadmin] welcome email failed: {exc}")
+
+    return {"ok": True, "shop_id": shop_row.id, "slug": shop_row.slug, "onboarding_url": onboarding_url}
+
+
+class _RejectReg(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/superadmin/registrations/{reg_id}/reject")
+def superadmin_reject_registration(
+    reg_id: int, body: _RejectReg,
+    db: Session = Depends(get_db),
+    x_super_admin_key: Optional[str] = Header(None),
+):
+    _check_superadmin(x_super_admin_key)
+    reg = db.query(ShopRegistration).filter_by(id=reg_id).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอสมัคร")
+    if reg.status != "pending":
+        raise HTTPException(status_code=400, detail=f"คำขอนี้อยู่ใน status '{reg.status}' แล้ว")
+    reg.status = "rejected"
+    reg.reject_reason = (body.reason or "").strip() or None
     db.commit()
     return {"ok": True}
