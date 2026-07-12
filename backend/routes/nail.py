@@ -14,7 +14,7 @@ import jwt as _pyjwt
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 from sqlalchemy import text, func, case, delete
 from sqlalchemy.orm import Session
@@ -4207,6 +4207,7 @@ class _ApproveReg(BaseModel):
 @router.post("/superadmin/registrations/{reg_id}/approve")
 async def superadmin_approve_registration(
     reg_id: int, body: _ApproveReg,
+    request: Request,
     db: Session = Depends(get_db),
     x_super_admin_key: Optional[str] = Header(None),
 ):
@@ -4237,8 +4238,15 @@ async def superadmin_approve_registration(
         raise HTTPException(status_code=500, detail="สร้างร้านไม่สำเร็จ")
 
     import os as _os
-    domain = _os.environ.get("REPLIT_DEV_DOMAIN", "")
-    base_url = f"https://{domain}" if domain and not domain.startswith("http") else (domain or "https://your-domain.com")
+    # ดึง base_url จาก Request จริง — รองรับ Render (X-Forwarded-*), Replit dev, และ local
+    _scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    _host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or _os.environ.get("REPLIT_DEV_DOMAIN", "")
+        or "localhost:8000"
+    )
+    base_url = f"{_scheme}://{_host}"
     storefront_url = f"{base_url}/r/{shop_row.slug}"
     admin_url = f"{base_url}/r/{shop_row.slug}/admin"
     onboarding_url = f"{base_url}/r/{shop_row.slug}/admin/onboarding?token={onboarding_token}"

@@ -212,9 +212,9 @@ function Router() {
           <Route path="/r/:slug/announcements" component={AnnouncementPage} />
           <Route path="/r/:slug/wallet" component={WalletPage} />
           <Route path="/r/:slug/my-bookings" component={MyBookingsPage} />
+          <Route path="/r/:slug/admin/onboarding" component={OnboardingPage} />
           <Route path="/r/:slug/admin" component={NailAdminPage} />
           <Route path="/r/:slug/nail-admin" component={NailAdminPage} />
-          <Route path="/r/:slug/admin/onboarding" component={OnboardingPage} />
           <Route path="/register" component={RegisterPage} />
           <Route path="/superadmin/setup-totp" component={SuperAdminTOTPSetupPage} />
           <Route component={NotFound} />
