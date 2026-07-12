@@ -927,9 +927,14 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const refImageRef = useRef<HTMLInputElement>(null);
 
   // ใช้ ref ติดตาม hold_token, payment status และ mount state
-  const holdTokenRef = useRef<string | null>(null);
+  const holdTokenRef   = useRef<string | null>(null);
   const paymentDoneRef = useRef(false);
-  const isMountedRef = useRef(true);
+  const isMountedRef   = useRef(true);
+  // flag กันไม่ให้ release hold เมื่อ navigate ไปหน้า wallet (ไม่ใช่ abandon)
+  const navigatingToWalletRef = useRef(false);
+
+  // key ใน sessionStorage สำหรับ resume hold หลังกลับจากหน้า wallet
+  const holdResumeKey = `nail_hold_resume_${slug || "default"}`;
 
   /** ปล่อย hold กลับคืนถ้ายังไม่ได้ชำระเงิน — fire-and-forget */
   const doRelease = (token: string) => {
@@ -941,13 +946,20 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   };
 
   const releaseHold = () => {
-    if (!holdTokenRef.current || paymentDoneRef.current) return;
+    if (!holdTokenRef.current || paymentDoneRef.current || navigatingToWalletRef.current) return;
     const token = holdTokenRef.current;
     holdTokenRef.current = null;
     doRelease(token);
   };
 
   const handleBack = () => { releaseHold(); onBack(); };
+
+  /** เรียกก่อน navigate ไปหน้า wallet — เซฟ hold ไว้ resume ตอนกลับ */
+  const saveHoldForWallet = () => {
+    if (!holdData) return;
+    navigatingToWalletRef.current = true;
+    sessionStorage.setItem(holdResumeKey, JSON.stringify(holdData));
+  };
 
   const holdMutation = useMutation({
     mutationFn: () => api.hold({
@@ -967,9 +979,23 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
     onError: (e: any) => { if (isMountedRef.current) setPayError(e.message); },
   });
 
-  // เรียก hold ทันทีที่ mount + ปล่อย hold + mark unmounted เมื่อ unmount
+  // Mount: ลอง resume hold เดิม (จาก wallet top-up flow) ถ้าหมดอายุแล้วค่อยสร้างใหม่
   useEffect(() => {
     isMountedRef.current = true;
+    const saved = sessionStorage.getItem(holdResumeKey);
+    if (saved) {
+      sessionStorage.removeItem(holdResumeKey);
+      try {
+        const data = JSON.parse(saved);
+        if (new Date(data.held_until).getTime() > Date.now()) {
+          // hold ยังไม่หมดอายุ — resume โดยไม่สร้าง hold ใหม่
+          holdTokenRef.current = data.hold_token;
+          setHoldData(data);
+          return () => { isMountedRef.current = false; releaseHold(); }; // eslint-disable-line
+        }
+      } catch {}
+      // hold หมดอายุแล้ว หรือ parse ไม่ได้ — สร้างใหม่
+    }
     holdMutation.mutate();
     return () => { isMountedRef.current = false; releaseHold(); }; // eslint-disable-line
   }, []); // eslint-disable-line
@@ -1115,6 +1141,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
             </p>
             <a
               href={walletHref}
+              onClick={saveHoldForWallet}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
@@ -1125,7 +1152,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
             >
               <Wallet size={18} /> สมัคร / เติมเครดิต
             </a>
-            <p style={{ fontSize: 11, color: P.muted, marginTop: 12 }}>หลังเติมเครดิตแล้ว กลับมาจองใหม่จากหน้าหลัก</p>
+            <p style={{ fontSize: 11, color: P.muted, marginTop: 12 }}>หลังเติมเครดิตแล้ว กลับมาที่หน้านี้แล้วกด "ตรวจสอบยอดใหม่"</p>
           </div>
         ) : (
           <div style={{ background: walletSufficient ? "#F0FDF4" : "#FFFBEB", border: `1.5px solid ${walletSufficient ? "#BBF7D0" : "#FDE68A"}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
@@ -1155,6 +1182,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
                 </p>
                 <a
                   href={walletHref}
+                  onClick={saveHoldForWallet}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                     background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
