@@ -1977,6 +1977,11 @@ def admin_update_slot(
         slot.is_available = body["is_available"]
     if "max_bookings" in body:
         slot.max_bookings = body["max_bookings"]
+    # แก้เวลาเริ่ม/สิ้นสุดของสล็อตนี้ตรงๆ — อนุญาตแม้มีลูกค้าจองอยู่แล้ว ตามที่ร้านต้องการคัสตอมเวลาได้เอง
+    if "start_time" in body:
+        slot.start_time = body["start_time"]
+    if "end_time" in body:
+        slot.end_time = body["end_time"]
     db.commit()
     return {"ok": True}
 
@@ -1991,6 +1996,15 @@ def admin_delete_slot(
     slot = db.query(NailTimeSlot).filter_by(id=slot_id, shop_id=shop_id).first()
     if not slot:
         raise HTTPException(status_code=404, detail="ไม่พบ slot")
+    # ห้ามลบถ้ายังมี booking แถวไหนอ้างอิง slot นี้อยู่ (แม้สถานะจะเป็น cancelled ก็ตาม)
+    # เพราะ FOREIGN KEY constraint จะทำให้ DELETE พังกลางทาง กลายเป็น 500/"เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"
+    # ที่ฝั่งแอดมิน — เช็คก่อนแล้วตอบเป็นข้อความที่เข้าใจง่ายแทน
+    has_reference = db.query(NailBooking.id).filter(NailBooking.slot_id == slot_id).first() is not None
+    if has_reference:
+        raise HTTPException(
+            status_code=400,
+            detail="ลบสล็อตนี้ไม่ได้ เพราะมีประวัติการจอง (รวมที่ยกเลิกแล้ว) อ้างอิงอยู่ — ให้ปิดใช้งานสล็อตนี้แทน (ปุ่มเปิด/ปิด) หรือแก้ไขเวลาด้วยไอคอนดินสอ",
+        )
     db.delete(slot)
     db.commit()
     return {"ok": True}

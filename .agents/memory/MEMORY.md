@@ -19,3 +19,5 @@
 - [Wallet login tab isolation](wallet-login-tab-isolation.md) — never open a wallet login link with target="_blank"; sessionStorage isn't shared across tabs so the caller page won't see the new token
 - [Nail wallet cross-shop payment](nail-wallet-cross-shop-payment.md) — hold/pay-wallet endpoints must verify customer.shop_id == booking.shop_id; per-shop customer isolation alone doesn't stop cross-shop token misuse
 - [Superadmin rebrand & multi-shop UX](superadmin-rebrand-ux.md) — /superadmin header is now "CSC / Chain System Care"; page is tab-based with search/pagination for scaling to many shops
+- [Render ephemeral disk breaks local file uploads](render-ephemeral-disk-uploads.md) — never write user uploads to local disk on this project; store slip images as inline base64 data URI instead
+- [Controlled number input "stuck digit" bug pattern](controlled-number-input-stuck-digit.md) — never bind number inputs directly via Number(e.target.value); use a string-buffer wrapper (NumberField) so users can clear the field

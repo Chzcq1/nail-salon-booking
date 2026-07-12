@@ -92,6 +92,42 @@ function fmtDateLong(s: string) {
   return d.toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" });
 }
 
+// ช่องกรอกตัวเลข (จำนวนคิว/นาที/รับกี่คน ฯลฯ) — เก็บค่าที่พิมพ์เป็น string ระหว่างแก้ไข
+// เพื่อให้ "ลบทุกหลักจนว่าง" ได้จริง ไม่ใช่เด้งกลับเป็น 0 ทันทีจนดูเหมือนลบไม่ออก (ติดเลขตัวแรก)
+// ค่าจะถูก parse เป็นตัวเลขจริงตอนพิมพ์เสร็จ (ถ้า parse ได้) และ fallback เป็นค่าต่ำสุดตอนออกจากช่อง (blur) ถ้าปล่อยว่างไว้
+function NumberField({
+  value, onChange, min, max, step, placeholder, style,
+}: {
+  value: number; onChange: (n: number) => void;
+  min?: number; max?: number; step?: number; placeholder?: string;
+  style?: React.CSSProperties;
+}) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => { setRaw(String(value)); }, [value]);
+  return (
+    <input
+      type="number" min={min} max={max} step={step} placeholder={placeholder}
+      value={raw}
+      onChange={e => {
+        const v = e.target.value;
+        setRaw(v);
+        if (v === "" || v === "-") return; // ให้ลบว่างหรือพิมพ์ - นำหน้าได้โดยไม่ถูกบังคับ parse ทันที
+        const n = Number(v);
+        if (!Number.isNaN(n)) onChange(n);
+      }}
+      onBlur={() => {
+        const n = Number(raw);
+        if (raw === "" || Number.isNaN(n)) {
+          const fallback = min ?? 0;
+          setRaw(String(fallback));
+          onChange(fallback);
+        }
+      }}
+      style={style}
+    />
+  );
+}
+
 const statusColor: Record<string, string> = {
   held:            A.warning,
   pending_payment: A.info,
@@ -2773,17 +2809,17 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
                       </div>
                       <div>
                         <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
-                        <input type="number" min={0} value={r.rounds_count} onChange={e => updateRow(r.day_of_week, { rounds_count: Number(e.target.value) })}
+                        <NumberField min={0} value={r.rounds_count} onChange={n => updateRow(r.day_of_week, { rounds_count: n })}
                           style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                       </div>
                       <div>
                         <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาวคิว (นาที)</label>
-                        <input type="number" min={1} value={r.round_minutes} onChange={e => updateRow(r.day_of_week, { round_minutes: Number(e.target.value) })}
+                        <NumberField min={1} value={r.round_minutes} onChange={n => updateRow(r.day_of_week, { round_minutes: n })}
                           style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                       </div>
                       <div>
                         <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/คิว</label>
-                        <input type="number" min={1} value={r.max_bookings} onChange={e => updateRow(r.day_of_week, { max_bookings: Number(e.target.value) })}
+                        <NumberField min={1} value={r.max_bookings} onChange={n => updateRow(r.day_of_week, { max_bookings: n })}
                           style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                       </div>
                     </div>
@@ -2816,17 +2852,17 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
                           </div>
                           <div>
                             <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
-                            <input type="number" min={0} value={blk.rounds_count} onChange={e => updateBlock(r.day_of_week, idx, { rounds_count: Number(e.target.value) })}
+                            <NumberField min={0} value={blk.rounds_count} onChange={n => updateBlock(r.day_of_week, idx, { rounds_count: n })}
                               style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                           </div>
                           <div>
                             <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาว (นาที)</label>
-                            <input type="number" min={1} value={blk.round_minutes} onChange={e => updateBlock(r.day_of_week, idx, { round_minutes: Number(e.target.value) })}
+                            <NumberField min={1} value={blk.round_minutes} onChange={n => updateBlock(r.day_of_week, idx, { round_minutes: n })}
                               style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                           </div>
                           <div>
                             <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/คิว</label>
-                            <input type="number" min={1} value={blk.max_bookings} onChange={e => updateBlock(r.day_of_week, idx, { max_bookings: Number(e.target.value) })}
+                            <NumberField min={1} value={blk.max_bookings} onChange={n => updateBlock(r.day_of_week, idx, { max_bookings: n })}
                               style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
                           </div>
                         </div>
@@ -3025,6 +3061,26 @@ function ScheduleTab({ token }: { token: string }) {
     onError: (e: any) => setSlotDeleteError(e.message || "ลบไม่สำเร็จ"),
   });
 
+  // ── แก้เวลาเริ่ม/สิ้นสุดของสล็อตแบบเจาะจง (ไอคอนดินสอ) — แก้ได้แม้ลูกค้าจองแล้ว ──
+  const [editSlot, setEditSlot] = useState<any | null>(null);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+  const [editSlotError, setEditSlotError] = useState("");
+
+  const editSlotMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/nail/admin/slots/${editSlot.id}`, {
+        method: "PUT", headers: authH(token),
+        body: JSON.stringify({ start_time: editStart, end_time: editEnd }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+      return data;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] }); setEditSlot(null); setEditSlotError(""); },
+    onError: (e: any) => setEditSlotError(e.message || "บันทึกไม่สำเร็จ"),
+  });
+
   // สร้างสล็อต 7 วันจากเทมเพลตจริง (ไม่ใช่ hardcode แล้ว)
   const batchMutation = useMutation({
     mutationFn: async (fromDate: string) => {
@@ -3217,13 +3273,55 @@ function ScheduleTab({ token }: { token: string }) {
                     ? <Loader2 size={11} className="animate-spin" />
                     : sl.is_available ? "ปิด" : "เปิด"}
                 </button>
+                <button onClick={() => { setEditSlot(sl); setEditStart(sl.start_time); setEditEnd(sl.end_time); setEditSlotError(""); }}
+                  title="แก้ไขเวลาเริ่ม/สิ้นสุด"
+                  style={{ background: A.gray, border: "none", borderRadius: 8, padding: "5px 8px", cursor: "pointer" }}>
+                  <Edit2 size={13} color={A.sub} />
+                </button>
                 <button onClick={() => { if (sl.booked_count === 0) setDeleteSlotId(sl.id); }} disabled={sl.booked_count > 0}
+                  title={sl.booked_count > 0 ? "มีคนจองอยู่ ปิดใช้งานแทนได้" : "ลบ slot"}
                   style={{ background: A.gray, border: "none", borderRadius: 8, padding: "5px 8px", cursor: sl.booked_count > 0 ? "not-allowed" : "pointer", opacity: sl.booked_count > 0 ? 0.4 : 1 }}>
                   <Trash2 size={13} color={A.error} />
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Edit Slot Time Modal — แก้เวลาเฉพาะสล็อตนี้ ไม่ว่าจะมีคนจองแล้วหรือไม่ */}
+      {editSlot && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+          <div style={{ background: A.card, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360 }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+              <Edit2 size={16} /> แก้ไขเวลาสล็อต
+            </h3>
+            <p style={{ fontSize: 13, color: A.muted, marginBottom: 16 }}>
+              เดิม {editSlot.start_time}–{editSlot.end_time}
+              {editSlot.booked_count > 0 ? ` · มีลูกค้าจองอยู่ ${editSlot.booked_count} คน (แก้เวลาได้ตามปกติ)` : ""}
+            </p>
+            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>เริ่ม</label>
+                <input type="time" value={editStart} onChange={e => setEditStart(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${A.border}`, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>สิ้นสุด</label>
+                <input type="time" value={editEnd} onChange={e => setEditEnd(e.target.value)}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${A.border}`, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+            </div>
+            {editSlotError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {editSlotError}</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setEditSlot(null); setEditSlotError(""); }}
+                style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
+              <button onClick={() => editSlotMutation.mutate()} disabled={editSlotMutation.isPending || !editStart || !editEnd}
+                style={{ flex: 1, background: A.primary, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: !editStart || !editEnd ? 0.6 : 1 }}>
+                {editSlotMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "บันทึก"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3305,26 +3403,26 @@ function ScheduleTab({ token }: { token: string }) {
                   </div>
                   <div>
                     <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนรอบ</label>
-                    <input type="number" min={1} max={24} value={blk.rounds_count}
-                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, rounds_count: Math.max(1, parseInt(e.target.value) || 1) } : b))}
+                    <NumberField min={1} max={24} value={blk.rounds_count}
+                      onChange={n => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, rounds_count: n } : b))}
                       style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
                   </div>
                   <div>
                     <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ระยะเวลา/รอบ (นาที)</label>
-                    <input type="number" min={15} max={480} step={15} value={blk.round_minutes}
-                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, round_minutes: Math.max(15, parseInt(e.target.value) || 60) } : b))}
+                    <NumberField min={15} max={480} step={15} value={blk.round_minutes}
+                      onChange={n => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, round_minutes: n } : b))}
                       style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
                   </div>
                   <div>
                     <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ช่วงพักระหว่างรอบ (นาที)</label>
-                    <input type="number" min={0} max={120} step={5} value={blk.gap_minutes}
-                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, gap_minutes: Math.max(0, parseInt(e.target.value) || 0) } : b))}
+                    <NumberField min={0} max={120} step={5} value={blk.gap_minutes}
+                      onChange={n => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, gap_minutes: n } : b))}
                       style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
                   </div>
                   <div>
                     <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับคิวต่อรอบ</label>
-                    <input type="number" min={1} max={20} value={blk.max_bookings}
-                      onChange={e => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, max_bookings: Math.max(1, parseInt(e.target.value) || 1) } : b))}
+                    <NumberField min={1} max={20} value={blk.max_bookings}
+                      onChange={n => setDailyTplBlocks(prev => prev.map((b, i) => i === idx ? { ...b, max_bookings: n } : b))}
                       style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 8, padding: "8px 10px", fontFamily: "inherit", boxSizing: "border-box", background: A.card }} />
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-end" }}>
