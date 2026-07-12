@@ -593,7 +593,13 @@ export default function NailAdminPage() {
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 0 80px" }}>
         <AnimatePresence mode="wait">
-          <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
+          {/* หมายเหตุ: ตั้งใจไม่ใช้ animate ที่มีค่า y/x (translate) ตรงนี้ เพราะ framer-motion จะฝัง
+              inline style "transform" ค้างไว้บน div นี้ตลอด (แม้ท้ายๆจะเป็น translateY(0)) ซึ่งตาม
+              สเปก CSS จะทำให้ div นี้กลายเป็น containing block ใหม่ให้ลูกทุกตัวที่ใช้ position:fixed
+              (เช่น popup "แก้ไขเวลาสล็อต" และโมดัลอื่นๆ ในทุกแท็บ) กลายเป็นเหมือน position:absolute
+              เทียบกับ div นี้แทนที่จะเป็น full-screen overlay จริง ทำให้โมดัลดูซ้อน/ไม่คลุมทั้งหน้าจอ
+              บน iOS Safari ให้ animate เฉพาะ opacity เพื่อเลี่ยงปัญหานี้ */}
+          <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
             {tab === "dashboard" && <DashboardTab token={token} onGoBookings={() => setTab("bookings")} />}
             {tab === "bookings"  && <BookingsTab token={token} />}
             {tab === "services"  && <ServicesTab token={token} />}
@@ -2687,6 +2693,9 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates", shopKey] });
+      // การบันทึกเทมเพลตจะ sync สล็อตจริงล่วงหน้า 60 วันไปด้วยฝั่ง backend ทันที
+      // ต้อง invalidate สล็อตด้วย ไม่งั้นแท็บ "ช่วงเวลาจอง" จะยังโชว์ข้อมูลเก่าจนกว่าจะรีเฟรชหน้าเว็บ
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
     },
     onError: (e: any) => alert(`บันทึกเทมเพลตไม่สำเร็จ: ${e.message}`),
   });

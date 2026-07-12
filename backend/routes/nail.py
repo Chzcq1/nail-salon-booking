@@ -1526,18 +1526,18 @@ def admin_update_slot_templates(
     closed_dates_json = shop.closed_dates
     today = _now().date()
     sync_result = {"total_deleted": 0, "total_created": 0}
+    # ใช้ savepoint (begin_nested) ต่อวัน + commit เดียวรวมท้ายสุด แทนการ commit ทีละวัน (60 round-trip ไป Neon)
+    # ที่ทำให้การบันทึกเทมเพลตหมุนนานมาก — savepoint ยังแยก error ของแต่ละวันออกจากกันได้เหมือนเดิม
     for i in range(60):
         date_str = (today + timedelta(days=i)).isoformat()
         try:
-            r = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json)
+            with db.begin_nested():
+                r = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json, commit=False)
             sync_result["total_deleted"] += r["deleted"]
             sync_result["total_created"] += r["created"]
         except Exception as e:
             logger.warning(f"[slot-templates] sync failed for {date_str} (shop {shop_id}): {e}")
-            try:
-                db.rollback()
-            except Exception:
-                pass
+    db.commit()
     return {"ok": True, "synced": sync_result}
 
 
@@ -1607,22 +1607,21 @@ def admin_sync_future_slots_to_template(
     total_created = 0
     changed_dates = []
     errors: list = []
+    # ใช้ savepoint ต่อวัน + commit เดียวรวมท้ายสุด แทนการ commit ทีละวัน (ลด round-trip ไป Neon ลงมาก)
     for i in range(days):
         date_str = (start_date + timedelta(days=i)).isoformat()
         try:
-            result = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json)
+            with db.begin_nested():
+                result = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json, commit=False)
             total_deleted += result["deleted"]
             total_created += result["created"]
             if result["deleted"] or result["created"]:
                 changed_dates.append(date_str)
         except Exception as _day_err:
             logger.error(f"sync_future: error on {date_str}: {_day_err}", exc_info=True)
-            try:
-                db.rollback()
-            except Exception:
-                pass
             errors.append({"date": date_str, "error": str(_day_err)})
 
+    db.commit()
     if errors and not changed_dates:
         # ล้มเหลวทุกวัน — ส่ง 500 พร้อม detail เพื่อช่วย debug
         raise HTTPException(
@@ -1644,7 +1643,7 @@ class ApplyTemplateDayBody(BaseModel):
     date: str   # "YYYY-MM-DD"
 
 
-def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, closed_dates_json: Optional[str] = None) -> dict:
+def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, closed_dates_json: Optional[str] = None, commit: bool = True) -> dict:
     """
     Sync สล็อตของวันที่ระบุให้ตรงกับเทมเพลตปัจจุบัน —
     ลบสล็อตที่ว่าง (ไม่มีการจอง) แล้วเพิ่มสล็อตที่ขาดหายจากเทมเพลต
@@ -1721,7 +1720,10 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
     if closed_dates_json:
         try:
             if date_str in json.loads(closed_dates_json):
-                db.commit()
+                if commit:
+                    db.commit()
+                else:
+                    db.flush()
                 return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
         except Exception:
             pass
@@ -1729,7 +1731,10 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
     try:
         d = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         return {"deleted": deleted, "created": 0, "has_booked_slots_preserved": has_booked}
 
     tmpl = tmpl_lookup
@@ -1790,7 +1795,10 @@ def _apply_template_for_date_core(db: Session, shop_id: int, date_str: str, clos
         except Exception:
             pass
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"deleted": deleted, "created": created, "has_booked_slots_preserved": has_booked}
 
 
