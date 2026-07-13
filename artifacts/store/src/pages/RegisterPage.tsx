@@ -2,45 +2,52 @@
  * RegisterPage — หน้าสมัครร้านใหม่แบบ Self-service
  * Route: /register
  * Flow: เลือกแพ็กเกจ → กรอกข้อมูล → อัปโหลดสลิป → รอ Admin อนุมัติ → รับอีเมล + onboarding link
+ *
+ * Design: Playful Editorial (อ้างอิง Design.md)
+ * — Cream bg, Sky-blue hero, bold Syne headline, solid ink buttons
  */
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Store, CheckCircle, AlertCircle, Loader2, Upload, Eye, EyeOff,
-  QrCode, CreditCard, Copy, Check, ArrowRight, Shield,
+  Store, CheckCircle, AlertCircle, Loader2, Upload,
+  ArrowRight, Shield, Copy, Check, Zap, Clock, Users,
 } from "lucide-react";
 
 const API = "/api/nail";
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
-  bg: "#0B0F1A",
-  surface: "#131929",
-  card: "#1A2236",
-  border: "#253050",
-  accent: "#6C8EFF",
-  accentDk: "#4F72FF",
-  success: "#22C55E",
-  error: "#EF4444",
-  warning: "#F59E0B",
-  text: "#E8EAF0",
-  sub: "#9AA5C0",
-  muted: "#5A6480",
+  cream:    "#F7F3EC",   // page background
+  sky:      "#4FBBDF",   // hero + step badge
+  skyLight: "#E8F6FC",   // sky tint for selected cards
+  sun:      "#FFD84D",   // highlight / badge
+  ink:      "#1A1A1A",   // primary text + buttons
+  snow:     "#FFFFFF",   // card background
+  border:   "#E2E8F0",   // card border
+  mist:     "#64748B",   // subtext
+  cloud:    "#CBD5E1",   // placeholder / divider
+  sage:     "#16A34A",   // success
+  coral:    "#DC2626",   // error
+  amber:    "#B45309",   // warning
+  accentBg: "#F0FAFA",   // subtle sky tint bg
 } as const;
 
+// ── Shared input style ────────────────────────────────────────────────────────
 const inp: React.CSSProperties = {
-  width: "100%", background: C.card, border: `1.5px solid ${C.border}`,
-  borderRadius: 10, padding: "11px 14px", fontSize: 14, color: C.text,
-  fontFamily: "inherit", boxSizing: "border-box", outline: "none",
+  width: "100%",
+  background: C.snow,
+  border: `2px solid ${C.border}`,
+  borderRadius: 10,
+  padding: "12px 16px",
+  fontSize: 15,
+  color: C.ink,
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+  outline: "none",
+  transition: "border-color .15s",
 };
-const btn = (disabled = false): React.CSSProperties => ({
-  width: "100%", background: disabled ? C.card : `linear-gradient(135deg, ${C.accent}, ${C.accentDk})`,
-  color: disabled ? C.muted : C.text, border: "none", borderRadius: 10,
-  padding: "13px", fontSize: 15, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer",
-  fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-  opacity: disabled ? 0.5 : 1,
-});
 
-// ── compress image before upload ──────────────────────────────────────────────
+// ── Compress image before upload ──────────────────────────────────────────────
 function compressImage(file: File, maxPx = 1200, quality = 0.82): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -62,6 +69,52 @@ function compressImage(file: File, maxPx = 1200, quality = 0.82): Promise<string
   });
 }
 
+// ── Step badge ─────────────────────────────────────────────────────────────────
+function StepBadge({ n }: { n: number }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", justifyContent: "center",
+      width: 32, height: 32, borderRadius: "50%",
+      background: C.sky, color: C.snow, fontSize: 14, fontWeight: 800,
+      flexShrink: 0,
+    }}>
+      {n}
+    </span>
+  );
+}
+
+// ── Section card ──────────────────────────────────────────────────────────────
+function StepCard({ step, title, children }: { step: number; title: string; children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={{
+        background: C.snow,
+        border: `2px solid ${C.border}`,
+        borderRadius: 20,
+        padding: "28px 28px 24px",
+        marginBottom: 16,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22 }}>
+        <StepBadge n={step} />
+        <h3 style={{ color: C.ink, fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h3>
+      </div>
+      {children}
+    </motion.div>
+  );
+}
+
+// ── Form label ────────────────────────────────────────────────────────────────
+function Label({ text, required }: { text: string; required?: boolean }) {
+  return (
+    <label style={{ color: C.mist, fontSize: 13, fontWeight: 600, display: "block", margin: "14px 0 6px" }}>
+      {text}{required && <span style={{ color: C.coral, marginLeft: 3 }}>*</span>}
+    </label>
+  );
+}
+
 // ── Plan Card ─────────────────────────────────────────────────────────────────
 function PlanCard({ plan, selected, onClick }: { plan: any; selected: boolean; onClick: () => void }) {
   const slotsLeft = plan.slots_left;
@@ -69,39 +122,70 @@ function PlanCard({ plan, selected, onClick }: { plan: any; selected: boolean; o
   const urgent = slotsLeft !== null && slotsLeft <= 5 && slotsLeft > 0;
 
   return (
-    <motion.div whileHover={!isFull ? { scale: 1.01 } : undefined} onClick={!isFull ? onClick : undefined}
+    <motion.div
+      whileHover={!isFull ? { y: -2, boxShadow: "0 8px 24px rgba(0,0,0,0.10)" } : undefined}
+      whileTap={!isFull ? { scale: 0.98 } : undefined}
+      onClick={!isFull ? onClick : undefined}
       style={{
-        background: selected ? `${C.accent}18` : C.card,
-        border: `2px solid ${selected ? C.accent : isFull ? C.muted : C.border}`,
-        borderRadius: 16, padding: "20px 24px", cursor: isFull ? "not-allowed" : "pointer",
-        opacity: isFull ? 0.5 : 1, transition: "border-color .2s",
-      }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            {selected && <CheckCircle size={16} color={C.accent} />}
-            <span style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{plan.name}</span>
+        background: selected ? C.skyLight : C.snow,
+        border: `2px solid ${selected ? C.sky : isFull ? C.cloud : C.border}`,
+        borderRadius: 16,
+        padding: "20px 24px",
+        cursor: isFull ? "not-allowed" : "pointer",
+        opacity: isFull ? 0.5 : 1,
+        transition: "all .2s",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {selected && (
+        <div style={{
+          position: "absolute", top: 0, right: 0, background: C.sky,
+          padding: "4px 14px 4px 18px", borderBottomLeftRadius: 12,
+          fontSize: 11, fontWeight: 700, color: C.snow,
+        }}>
+          ✓ เลือกแล้ว
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+            <span style={{ color: C.ink, fontWeight: 800, fontSize: 17 }}>{plan.name}</span>
             {urgent && (
-              <span style={{ background: `${C.warning}22`, color: C.warning, borderRadius: 100, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>
+              <span style={{ background: C.sun, color: C.ink, borderRadius: 100, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
                 เหลือ {slotsLeft} ที่!
               </span>
             )}
             {isFull && (
-              <span style={{ background: `${C.error}22`, color: C.error, borderRadius: 100, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>เต็มแล้ว</span>
+              <span style={{ background: "#FEE2E2", color: C.coral, borderRadius: 100, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
+                เต็มแล้ว
+              </span>
             )}
           </div>
-          <p style={{ color: C.sub, fontSize: 13, margin: 0, lineHeight: 1.5 }}>{plan.description}</p>
+          <p style={{ color: C.mist, fontSize: 14, margin: 0, lineHeight: 1.6 }}>{plan.description}</p>
           {plan.expiry_days && (
-            <p style={{ color: C.muted, fontSize: 12, margin: "6px 0 0" }}>
-              ใช้งานได้ {plan.expiry_days} วัน
+            <p style={{ color: C.cloud, fontSize: 12, margin: "8px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
+              <Clock size={11} /> ใช้งานได้ {plan.expiry_days} วัน
             </p>
           )}
-        </div>
-        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
-          <div style={{ color: C.accent, fontSize: 22, fontWeight: 800 }}>฿{plan.price.toFixed(0)}</div>
           {plan.total_slots && (
-            <div style={{ color: C.muted, fontSize: 12 }}>{plan.registered_count}/{plan.total_slots} ที่</div>
+            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4, color: C.cloud, fontSize: 12 }}>
+              <Users size={11} />
+              {plan.registered_count}/{plan.total_slots} ร้านค้า
+              <div style={{ flex: 1, height: 4, background: "#F1F5F9", borderRadius: 2, marginLeft: 4, maxWidth: 80, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${Math.min(100, (plan.registered_count / plan.total_slots) * 100)}%`,
+                  background: urgent ? C.sun : C.sky,
+                  borderRadius: 2,
+                }} />
+              </div>
+            </div>
           )}
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ color: C.ink, fontSize: 28, fontWeight: 800, lineHeight: 1 }}>฿{plan.price.toFixed(0)}</div>
+          <div style={{ color: C.mist, fontSize: 12, marginTop: 2 }}>ต่อร้าน</div>
         </div>
       </div>
     </motion.div>
@@ -116,32 +200,66 @@ function BankBox({ bankInfo, price }: { bankInfo: any; price: number }) {
   };
 
   const Row = ({ label, value, copyKey }: { label: string; value: string; copyKey: string }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
-      <span style={{ color: C.muted, fontSize: 13 }}>{label}</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ color: C.text, fontWeight: 600, fontSize: 14 }}>{value}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
+      <span style={{ color: C.mist, fontSize: 13 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: C.ink, fontWeight: 600, fontSize: 14 }}>{value}</span>
         <button onClick={() => copy(value, copyKey)}
-          style={{ background: "none", border: "none", cursor: "pointer", color: copied === copyKey ? C.success : C.muted, padding: 2 }}>
-          {copied === copyKey ? <Check size={14} /> : <Copy size={14} />}
+          style={{ background: copied === copyKey ? "#DCFCE7" : "#F1F5F9", border: "none", borderRadius: 6, cursor: "pointer", color: copied === copyKey ? C.sage : C.mist, padding: "4px 8px", display: "flex", alignItems: "center", gap: 3, fontSize: 12, fontWeight: 600, transition: "all .15s" }}>
+          {copied === copyKey ? <><Check size={12} /> คัดลอกแล้ว</> : <><Copy size={12} /> คัดลอก</>}
         </button>
       </div>
     </div>
   );
 
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: "16px 20px", marginBottom: 20 }}>
-      <p style={{ color: C.sub, fontSize: 13, fontWeight: 700, margin: "0 0 12px", textTransform: "uppercase", letterSpacing: 1 }}>
+    <div style={{ background: C.cream, border: `2px solid ${C.border}`, borderRadius: 16, padding: "20px 24px", marginBottom: 20 }}>
+      <p style={{ color: C.mist, fontSize: 12, fontWeight: 700, margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1 }}>
         💳 โอนเงินมาที่
       </p>
       <Row label="ธนาคาร" value={bankInfo.kasikorn_bank} copyKey="bank" />
       <Row label="เลขบัญชี" value={bankInfo.kasikorn_account} copyKey="account" />
       <Row label="ชื่อบัญชี" value={bankInfo.kasikorn_name} copyKey="name" />
       <Row label="TrueMoney" value={bankInfo.truemoney_phone} copyKey="tm" />
-      <div style={{ marginTop: 12, padding: "10px 14px", background: `${C.accent}12`, borderRadius: 10, textAlign: "center" }}>
-        <span style={{ color: C.accent, fontWeight: 700, fontSize: 18 }}>฿{price.toFixed(0)}</span>
-        <span style={{ color: C.sub, fontSize: 13 }}> — ยอดที่ต้องโอน</span>
+      <div style={{ marginTop: 14, padding: "12px 16px", background: C.sky, borderRadius: 10, textAlign: "center" }}>
+        <span style={{ color: C.snow, fontWeight: 800, fontSize: 22 }}>฿{price.toFixed(0)}</span>
+        <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 14 }}> — ยอดที่ต้องโอน</span>
       </div>
     </div>
+  );
+}
+
+// ── Trust badges ──────────────────────────────────────────────────────────────
+function TrustBar() {
+  const items = [
+    { icon: <Shield size={14} />, text: "ข้อมูลปลอดภัย" },
+    { icon: <Clock size={14} />, text: "อนุมัติภายใน 24 ชม." },
+    { icon: <Zap size={14} />, text: "ตั้งค่าเองได้ทันที" },
+  ];
+  return (
+    <div style={{ display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap", marginTop: 20, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, color: C.mist, fontSize: 13 }}>
+          {item.icon} {item.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Decorative geometric shapes for hero ────────────────────────────────────
+function HeroDecorations() {
+  return (
+    <>
+      {/* Large circle top-right */}
+      <div style={{ position: "absolute", top: -40, right: -40, width: 180, height: 180, borderRadius: "50%", background: "rgba(255,255,255,0.12)", pointerEvents: "none" }} />
+      {/* Medium circle bottom-left */}
+      <div style={{ position: "absolute", bottom: -20, left: 30, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.10)", pointerEvents: "none" }} />
+      {/* Small rotated square */}
+      <div style={{ position: "absolute", top: 30, right: 120, width: 28, height: 28, background: C.sun, transform: "rotate(18deg)", borderRadius: 4, opacity: 0.85, pointerEvents: "none" }} />
+      {/* Tiny circle accent */}
+      <div style={{ position: "absolute", bottom: 28, right: 60, width: 14, height: 14, borderRadius: "50%", background: C.snow, opacity: 0.5, pointerEvents: "none" }} />
+    </>
   );
 }
 
@@ -151,7 +269,6 @@ export default function RegisterPage() {
   const [bankInfo, setBankInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // form state
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [shopName, setShopName] = useState("");
   const [slug, setSlug] = useState("");
@@ -197,8 +314,7 @@ export default function RegisterPage() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ slug: val }),
         });
-        const d = await res.json();
-        setSlugStatus(d);
+        setSlugStatus(await res.json());
       } catch { setSlugStatus({ available: false, reason: "ตรวจสอบไม่ได้" }); }
       finally { setSlugChecking(false); }
     }, 600);
@@ -216,8 +332,7 @@ export default function RegisterPage() {
     if (!file.type.startsWith("image/")) { setError("กรุณาอัปโหลดไฟล์รูปภาพ"); return; }
     setSlipName(file.name);
     try {
-      const compressed = await compressImage(file);
-      setSlipFile(compressed);
+      setSlipFile(await compressImage(file));
       setError("");
     } catch { setError("อ่านไฟล์รูปไม่ได้ กรุณาลองใหม่"); }
     e.target.value = "";
@@ -253,24 +368,31 @@ export default function RegisterPage() {
     } finally { setSubmitting(false); }
   };
 
+  const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap');`;
+
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Loader2 size={32} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
-        <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+      <div style={{ minHeight: "100vh", background: C.cream, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <style>{FONTS}</style>
+        <div style={{ width: 48, height: 48, borderRadius: "50%", border: `4px solid ${C.border}`, borderTopColor: C.sky, animation: "spin 0.8s linear infinite" }} />
+        <p style={{ color: C.mist, fontSize: 14, fontFamily: "'Prompt', sans-serif" }}>กำลังโหลด…</p>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     );
   }
 
+  // ── Fetch error ────────────────────────────────────────────────────────────
   if (fetchError) {
     return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700&display=swap');`}</style>
-        <div style={{ background: C.surface, border: `1px solid ${C.error}40`, borderRadius: 16, padding: 32, maxWidth: 400, textAlign: "center" }}>
-          <AlertCircle size={40} color={C.error} style={{ marginBottom: 12 }} />
-          <p style={{ color: C.text, fontSize: 15, marginBottom: 8 }}>ไม่สามารถโหลดข้อมูลได้</p>
-          <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>{fetchError}</p>
-          <button onClick={() => window.location.reload()} style={{ background: `linear-gradient(135deg, ${C.accent}, ${C.accentDk})`, color: C.text, border: "none", borderRadius: 10, padding: "11px 24px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+      <div style={{ minHeight: "100vh", background: C.cream, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
+        <style>{FONTS}</style>
+        <div style={{ background: C.snow, border: `2px solid #FEE2E2`, borderRadius: 20, padding: 36, maxWidth: 400, textAlign: "center" }}>
+          <AlertCircle size={40} color={C.coral} style={{ marginBottom: 12 }} />
+          <p style={{ color: C.ink, fontSize: 16, fontWeight: 700, marginBottom: 8 }}>ไม่สามารถโหลดข้อมูลได้</p>
+          <p style={{ color: C.mist, fontSize: 14, marginBottom: 24 }}>{fetchError}</p>
+          <button onClick={() => window.location.reload()}
+            style={{ background: C.ink, color: C.snow, border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
             รีเฟรชหน้า
           </button>
         </div>
@@ -278,182 +400,263 @@ export default function RegisterPage() {
     );
   }
 
+  // ── Success ────────────────────────────────────────────────────────────────
   if (success) {
     return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');`}</style>
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-          style={{ background: C.surface, border: `1px solid ${success.auto_verified ? C.success : C.warning}`, borderRadius: 20, padding: 40, maxWidth: 460, width: "100%", textAlign: "center" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>{success.auto_verified ? "🎉" : "📬"}</div>
-          <h2 style={{ color: C.text, fontSize: 22, fontWeight: 700, margin: "0 0 12px" }}>
-            {success.auto_verified ? "ส่งคำขอสำเร็จ!" : "รับคำขอแล้ว!"}
+      <div style={{ minHeight: "100vh", background: success.auto_verified ? C.sun : C.cream, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
+        <style>{FONTS}</style>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", stiffness: 300, damping: 24 }}
+          style={{ background: C.snow, border: `2px solid ${C.border}`, borderRadius: 24, padding: "48px 40px", maxWidth: 480, width: "100%", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.10)" }}
+        >
+          <div style={{ fontSize: 64, marginBottom: 20 }}>{success.auto_verified ? "🎉" : "📬"}</div>
+          <h2 style={{ color: C.ink, fontSize: 28, fontWeight: 800, margin: "0 0 14px", fontFamily: "'Syne', sans-serif" }}>
+            {success.auto_verified ? "สมัครสำเร็จแล้ว!" : "รับคำขอเรียบร้อย!"}
           </h2>
-          <p style={{ color: C.sub, fontSize: 15, lineHeight: 1.6, margin: 0 }}>{success.message}</p>
+          <p style={{ color: C.mist, fontSize: 16, lineHeight: 1.7, margin: 0 }}>{success.message}</p>
           {!success.auto_verified && (
-            <p style={{ color: C.muted, fontSize: 13, marginTop: 16 }}>
-              📧 เราจะส่งลิงก์ตั้งค่าร้านไปยัง <strong style={{ color: C.sub }}>{email}</strong> เมื่ออนุมัติแล้ว
+            <p style={{ color: C.mist, fontSize: 14, marginTop: 20, padding: "14px 16px", background: C.cream, borderRadius: 10 }}>
+              📧 เราจะส่งลิงก์ตั้งค่าร้านไปยัง <strong style={{ color: C.ink }}>{email}</strong> เมื่ออนุมัติแล้ว
             </p>
           )}
+          <button onClick={() => window.location.reload()}
+            style={{ marginTop: 28, background: C.ink, color: C.snow, border: "none", borderRadius: 12, padding: "14px 32px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            กลับหน้าหลัก
+          </button>
         </motion.div>
       </div>
     );
   }
 
+  // ── Main form ──────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Prompt', sans-serif", padding: "40px 16px" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
-        input:focus,textarea:focus{border-color:${C.accent}!important;}`}</style>
+    <div style={{ minHeight: "100vh", background: C.cream, fontFamily: "'Prompt', sans-serif" }}>
+      <style>{`
+        ${FONTS}
+        input:focus, textarea:focus { border-color: ${C.sky} !important; box-shadow: 0 0 0 3px ${C.skyLight}; }
+        @keyframes spin { to { transform: rotate(360deg) } }
+        * { box-sizing: border-box; }
+      `}</style>
 
-      <div style={{ maxWidth: 600, margin: "0 auto" }}>
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 10, background: `${C.accent}15`, border: `1px solid ${C.accent}30`, borderRadius: 100, padding: "8px 20px", marginBottom: 20 }}>
-            <Store size={16} color={C.accent} />
-            <span style={{ color: C.accent, fontSize: 14, fontWeight: 600 }}>CSC — Chain System Care</span>
+      {/* ── Hero Band ────────────────────────────────────────────────────── */}
+      <div style={{ background: C.sky, padding: "52px 24px 64px", position: "relative", overflow: "hidden" }}>
+        <HeroDecorations />
+        <div style={{ maxWidth: 600, margin: "0 auto", position: "relative", zIndex: 1 }}>
+          {/* Brand pill */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.22)", borderRadius: 100, padding: "6px 16px", marginBottom: 24 }}>
+            <Store size={14} color={C.snow} />
+            <span style={{ color: C.snow, fontSize: 13, fontWeight: 700, letterSpacing: 0.3 }}>CSC — Chain System Care</span>
           </div>
-          <h1 style={{ color: C.text, fontSize: 28, fontWeight: 800, margin: "0 0 8px" }}>สมัครเปิดร้าน</h1>
-          <p style={{ color: C.sub, fontSize: 15, margin: 0 }}>ระบบจองคิวสำหรับร้านของคุณ — ตั้งค่าเองได้เลยหลังอนุมัติ</p>
-        </motion.div>
 
+          {/* Headline */}
+          <h1 style={{ color: C.snow, fontSize: "clamp(36px, 7vw, 56px)", fontWeight: 800, fontFamily: "'Syne', 'Prompt', sans-serif", lineHeight: 1.1, margin: "0 0 16px", letterSpacing: -0.5 }}>
+            เปิดร้านของคุณ<br />กับ CSC
+          </h1>
+          <p style={{ color: "rgba(255,255,255,0.88)", fontSize: 18, lineHeight: 1.65, margin: "0 0 32px", maxWidth: 480 }}>
+            ระบบจองคิวครบวงจรสำหรับร้านนวด สปา ทำเล็บ และอื่นๆ<br />
+            ตั้งค่าเองได้ทันทีหลังอนุมัติ
+          </p>
+
+          {/* Step pills */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {["① เลือกแพ็กเกจ", "② ข้อมูลร้าน", "③ ชำระเงิน"].map((s, i) => (
+              <span key={i} style={{ background: "rgba(255,255,255,0.18)", color: C.snow, borderRadius: 100, padding: "6px 14px", fontSize: 13, fontWeight: 600 }}>{s}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Form body ─────────────────────────────────────────────────────── */}
+      <div style={{ maxWidth: 600, margin: "0 auto", padding: "32px 20px 60px" }}>
         <form onSubmit={handleSubmit}>
-          {/* Step 1: Choose plan */}
-          <Section title="1. เลือกแพ็กเกจ">
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+          {/* Step 1: Plan */}
+          <StepCard step={1} title="เลือกแพ็กเกจ">
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {plans.map(p => (
                 <PlanCard key={p.id} plan={p} selected={selectedPlan?.id === p.id} onClick={() => setSelectedPlan(p)} />
               ))}
               {plans.length === 0 && (
-                <p style={{ color: C.muted, textAlign: "center", padding: 20 }}>ยังไม่มีแพ็กเกจที่เปิดรับสมัคร</p>
+                <div style={{ textAlign: "center", padding: "32px 20px", color: C.mist }}>
+                  <Store size={32} style={{ marginBottom: 10, opacity: 0.4 }} />
+                  <p style={{ margin: 0 }}>ยังไม่มีแพ็กเกจที่เปิดรับสมัคร</p>
+                </div>
               )}
             </div>
-          </Section>
+          </StepCard>
 
           {selectedPlan && (
             <>
               {/* Step 2: Shop info */}
-              <Section title="2. ข้อมูลร้าน">
-                <Label text="ชื่อร้าน *" />
-                <input style={inp} placeholder="เช่น ร้านทำเล็บสาวสวย" value={shopName} onChange={e => setShopName(e.target.value)} />
+              <StepCard step={2} title="ข้อมูลร้านของคุณ">
+                <Label text="ชื่อร้าน" required />
+                <input style={inp} placeholder="เช่น ร้านสาวสวยทำเล็บ" value={shopName} onChange={e => setShopName(e.target.value)} />
 
-                <Label text="ชื่อย่อ URL (slug) *" />
+                <Label text="ชื่อย่อ URL (slug)" required />
                 <div style={{ position: "relative" }}>
-                  <input style={{ ...inp, paddingRight: 36 }} placeholder="เช่น my-nail-shop"
-                    value={slug} onChange={e => onSlugChange(e.target.value)} />
+                  <input
+                    style={{ ...inp, paddingRight: 40 }}
+                    placeholder="เช่น my-nail-shop (ตัวอักษร a-z, 0-9, -)"
+                    value={slug}
+                    onChange={e => onSlugChange(e.target.value)}
+                  />
                   {slugChecking && (
-                    <Loader2 size={14} color={C.muted} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", animation: "spin 1s linear infinite" }} />
+                    <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 16, height: 16, borderRadius: "50%", border: `2px solid ${C.border}`, borderTopColor: C.sky, animation: "spin 0.8s linear infinite" }} />
                   )}
                 </div>
                 {slug && (
-                  <p style={{ color: C.muted, fontSize: 12, margin: "4px 0 0" }}>
-                    URL ร้านของคุณ: <span style={{ color: C.sub }}>yoursite.com/r/<strong>{slug}</strong></span>
+                  <p style={{ color: C.cloud, fontSize: 12, margin: "5px 0 0" }}>
+                    URL ของคุณ: <span style={{ color: C.mist }}>yoursite.com/r/<strong>{slug}</strong></span>
                   </p>
                 )}
                 {slugStatus && (
-                  <p style={{ color: slugStatus.available ? C.success : C.error, fontSize: 13, margin: "4px 0 0", display: "flex", alignItems: "center", gap: 4 }}>
-                    {slugStatus.available ? <CheckCircle size={13} /> : <AlertCircle size={13} />}
-                    {slugStatus.available ? "slug นี้ว่างอยู่ ใช้ได้เลย" : slugStatus.reason}
+                  <p style={{ color: slugStatus.available ? C.sage : C.coral, fontSize: 13, margin: "6px 0 0", display: "flex", alignItems: "center", gap: 5 }}>
+                    {slugStatus.available
+                      ? <><CheckCircle size={14} /> slug นี้ว่างอยู่ ใช้ได้เลย</>
+                      : <><AlertCircle size={14} /> {slugStatus.reason}</>}
                   </p>
                 )}
 
-                <Label text="อีเมล *" />
+                <Label text="อีเมล" required />
                 <input style={inp} type="email" placeholder="email@example.com" value={email} onChange={e => setEmail(e.target.value)} />
 
-                <Label text="Line ID (ไม่บังคับ)" />
-                <input style={inp} placeholder="@lineid" value={line} onChange={e => setLine(e.target.value)} />
-              </Section>
+                <Label text="Line ID" />
+                <input style={inp} placeholder="@lineid (ไม่บังคับ)" value={line} onChange={e => setLine(e.target.value)} />
+              </StepCard>
 
-              {/* Step 3: Payment method */}
-              <Section title="3. ชำระเงินค่าสมัคร">
-                {/* Method selector */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                  {([["slip", "🏦 โอนสลิป"], ["truemoney", "🧧 อั่งเปา TrueMoney"]] as const).map(([m, label]) => (
-                    <button key={m} type="button" onClick={() => setPayMethod(m)} style={{
-                      flex: 1, border: `1.5px solid ${payMethod === m ? C.accent : C.border}`,
-                      background: payMethod === m ? `${C.accent}18` : C.card,
-                      borderRadius: 10, padding: "10px 6px", cursor: "pointer",
-                      fontFamily: "inherit", fontSize: 13, fontWeight: 600,
-                      color: payMethod === m ? C.accent : C.sub,
-                    }}>{label}</button>
+              {/* Step 3: Payment */}
+              <StepCard step={3} title="ชำระเงินค่าสมัคร">
+                {/* Method toggle */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 20, background: C.cream, borderRadius: 12, padding: 4 }}>
+                  {([["slip", "🏦 โอนสลิปธนาคาร"], ["truemoney", "🧧 TrueMoney อั่งเปา"]] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setPayMethod(m)}
+                      style={{
+                        flex: 1,
+                        border: "none",
+                        background: payMethod === m ? C.snow : "transparent",
+                        borderRadius: 9,
+                        padding: "10px 8px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: 14,
+                        fontWeight: payMethod === m ? 700 : 500,
+                        color: payMethod === m ? C.ink : C.mist,
+                        boxShadow: payMethod === m ? "0 1px 6px rgba(0,0,0,0.08)" : "none",
+                        transition: "all .15s",
+                      }}
+                    >
+                      {label}
+                    </button>
                   ))}
                 </div>
 
-                {payMethod === "slip" ? (
-                  <>
-                    {bankInfo && <BankBox bankInfo={bankInfo} price={selectedPlan.price} />}
-                    <div onClick={() => fileInputRef.current?.click()} style={{
-                      border: `2px dashed ${slipFile ? C.success : C.border}`, borderRadius: 12,
-                      padding: "24px 20px", textAlign: "center", cursor: "pointer",
-                      background: slipFile ? `${C.success}08` : "transparent", transition: "all .2s",
-                    }}>
-                      {slipFile ? (
-                        <>
-                          <CheckCircle size={28} color={C.success} style={{ marginBottom: 8 }} />
-                          <p style={{ color: C.success, fontWeight: 600, margin: "0 0 4px" }}>อัปโหลดสลิปแล้ว</p>
-                          <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>{slipName}</p>
-                          <p style={{ color: C.muted, fontSize: 12, margin: "4px 0 0" }}>กดเพื่อเปลี่ยนรูป</p>
-                        </>
-                      ) : (
-                        <>
-                          <Upload size={28} color={C.muted} style={{ marginBottom: 8 }} />
-                          <p style={{ color: C.sub, fontWeight: 600, margin: "0 0 4px" }}>กดเพื่ออัปโหลดสลิป</p>
-                          <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>รองรับ JPG, PNG (ไม่เกิน 10MB)</p>
-                        </>
-                      )}
-                    </div>
-                    <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
-                  </>
-                ) : (
-                  <div>
-                    <div style={{ background: `${C.warning}12`, border: `1px solid ${C.warning}40`, borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
-                      <p style={{ color: C.warning, fontSize: 13, fontWeight: 600, margin: "0 0 6px" }}>💰 ยอดที่ต้องโอน ฿{selectedPlan.price.toFixed(0)}</p>
-                      <p style={{ color: C.sub, fontSize: 12, margin: 0 }}>ส่งซองอั่งเปา TrueMoney มูลค่าเท่ากับหรือมากกว่า ฿{selectedPlan.price.toFixed(0)}</p>
-                    </div>
-                    <input
-                      type="text"
-                      value={voucher}
-                      onChange={e => setVoucher(e.target.value)}
-                      placeholder="https://gift.truemoney.com/campaign/?v=... หรือรหัสซอง"
-                      style={{ ...inp }}
-                    />
-                    <p style={{ color: C.muted, fontSize: 12, margin: "6px 0 0" }}>
-                      วางลิงก์ซอง TrueMoney Gift จาก TrueMoney Wallet App — ระบบจะแลกอัตโนมัติ
-                    </p>
-                  </div>
-                )}
-              </Section>
+                <AnimatePresence mode="wait">
+                  {payMethod === "slip" ? (
+                    <motion.div key="slip" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      {bankInfo && <BankBox bankInfo={bankInfo} price={selectedPlan.price} />}
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                          border: `2px dashed ${slipFile ? C.sage : C.cloud}`,
+                          borderRadius: 14,
+                          padding: "28px 20px",
+                          textAlign: "center",
+                          cursor: "pointer",
+                          background: slipFile ? "#F0FDF4" : C.cream,
+                          transition: "all .2s",
+                        }}
+                      >
+                        {slipFile ? (
+                          <>
+                            <CheckCircle size={32} color={C.sage} style={{ marginBottom: 10 }} />
+                            <p style={{ color: C.sage, fontWeight: 700, fontSize: 15, margin: "0 0 4px" }}>อัปโหลดสลิปแล้ว ✓</p>
+                            <p style={{ color: C.mist, fontSize: 13, margin: 0 }}>{slipName}</p>
+                            <p style={{ color: C.cloud, fontSize: 12, margin: "6px 0 0" }}>กดเพื่อเปลี่ยนรูป</p>
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={32} color={C.cloud} style={{ marginBottom: 10 }} />
+                            <p style={{ color: C.ink, fontWeight: 600, fontSize: 15, margin: "0 0 6px" }}>กดเพื่ออัปโหลดสลิป</p>
+                            <p style={{ color: C.mist, fontSize: 13, margin: 0 }}>รองรับ JPG, PNG (ไม่เกิน 10MB)</p>
+                          </>
+                        )}
+                      </div>
+                      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
+                    </motion.div>
+                  ) : (
+                    <motion.div key="truemoney" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                      <div style={{ background: "#FEF3C7", border: `2px solid #FDE68A`, borderRadius: 12, padding: "14px 18px", marginBottom: 16 }}>
+                        <p style={{ color: C.amber, fontSize: 14, fontWeight: 700, margin: "0 0 4px" }}>💰 ยอดที่ต้องโอน ฿{selectedPlan.price.toFixed(0)}</p>
+                        <p style={{ color: "#92400E", fontSize: 13, margin: 0 }}>ส่งซองอั่งเปา TrueMoney มูลค่าเท่ากับหรือมากกว่า</p>
+                      </div>
+                      <input
+                        type="text"
+                        value={voucher}
+                        onChange={e => setVoucher(e.target.value)}
+                        placeholder="https://gift.truemoney.com/campaign/?v=... หรือรหัสซอง"
+                        style={inp}
+                      />
+                      <p style={{ color: C.mist, fontSize: 12, margin: "8px 0 0" }}>
+                        วางลิงก์ซอง TrueMoney Gift จาก TrueMoney Wallet App — ระบบจะแลกอัตโนมัติ
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </StepCard>
+
+              {/* Error */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{ background: "#FEF2F2", border: `2px solid #FECACA`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}
+                >
+                  <AlertCircle size={18} color={C.coral} />
+                  <span style={{ color: C.coral, fontSize: 14, fontWeight: 600 }}>{error}</span>
+                </motion.div>
+              )}
 
               {/* Submit */}
-              {error && (
-                <div style={{ background: `${C.error}15`, border: `1px solid ${C.error}40`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
-                  <AlertCircle size={16} color={C.error} />
-                  <span style={{ color: C.error, fontSize: 14 }}>{error}</span>
-                </div>
-              )}
-              <button type="submit" disabled={submitting || !selectedPlan} style={btn(submitting || !selectedPlan)}>
-                {submitting ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> กำลังส่งคำขอ…</> : <><ArrowRight size={16} /> ยื่นสมัครร้าน</>}
-              </button>
-              <p style={{ color: C.muted, fontSize: 12, textAlign: "center", marginTop: 12 }}>
-                <Shield size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                ข้อมูลของคุณปลอดภัย — ทีมงานจะติดต่อกลับทางอีเมลภายใน 24 ชั่วโมง
-              </p>
+              <motion.button
+                type="submit"
+                disabled={submitting || !selectedPlan}
+                whileHover={!submitting && selectedPlan ? { scale: 1.01 } : undefined}
+                whileTap={!submitting && selectedPlan ? { scale: 0.99 } : undefined}
+                style={{
+                  width: "100%",
+                  background: submitting || !selectedPlan ? C.cloud : C.ink,
+                  color: C.snow,
+                  border: "none",
+                  borderRadius: 14,
+                  padding: "16px",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  cursor: submitting || !selectedPlan ? "not-allowed" : "pointer",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  transition: "background .2s",
+                  letterSpacing: 0.2,
+                }}
+              >
+                {submitting
+                  ? <><div style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid rgba(255,255,255,0.3)`, borderTopColor: C.snow, animation: "spin 0.8s linear infinite" }} /> กำลังส่งคำขอ…</>
+                  : <><ArrowRight size={18} /> ยื่นสมัครร้าน</>
+                }
+              </motion.button>
+
+              <TrustBar />
             </>
           )}
         </form>
       </div>
     </div>
   );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, marginBottom: 16 }}>
-      <h3 style={{ color: C.sub, fontSize: 13, fontWeight: 700, margin: "0 0 16px", textTransform: "uppercase", letterSpacing: 1 }}>{title}</h3>
-      {children}
-    </motion.div>
-  );
-}
-
-function Label({ text }: { text: string }) {
-  return <label style={{ color: C.sub, fontSize: 13, display: "block", margin: "12px 0 5px" }}>{text}</label>;
 }

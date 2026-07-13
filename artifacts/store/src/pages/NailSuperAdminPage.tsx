@@ -19,20 +19,20 @@ import {
   Copy, Key, Link, Trash2, Pencil, X,
 } from "lucide-react";
 
-// ── Design tokens (distinct dark-blue theme) ─────────────────────────────────
+// ── Design tokens (formal light theme) ───────────────────────────────────────
 const S = {
-  bg:       "#0F1117",
-  surface:  "#1A1D27",
-  card:     "#21263A",
-  border:   "#2D3552",
-  accent:   "#6C8EFF",
-  accentDk: "#4F72FF",
-  success:  "#22C55E",
-  error:    "#EF4444",
-  warning:  "#F59E0B",
-  text:     "#E8EAF0",
-  sub:      "#A0A8C0",
-  muted:    "#6A7090",
+  bg:       "#F1F5F9",   // slate-100 — page background
+  surface:  "#FFFFFF",   // white — card / panel surface
+  card:     "#F8FAFC",   // slate-50 — inner card
+  border:   "#E2E8F0",   // slate-200 — border
+  accent:   "#1E40AF",   // blue-800 — primary action
+  accentDk: "#1E3A8A",   // blue-900 — hover / pressed
+  success:  "#16A34A",   // green-600
+  error:    "#DC2626",   // red-600
+  warning:  "#B45309",   // amber-700 (darker for light bg readability)
+  text:     "#0F172A",   // slate-900 — primary text
+  sub:      "#475569",   // slate-600 — secondary text
+  muted:    "#94A3B8",   // slate-400 — muted / placeholder
 } as const;
 
 const LOCAL_KEY = "nail_superadmin_key";
@@ -55,11 +55,11 @@ function saFetch(url: string, key: string, opts?: RequestInit) {
 
 function statusBadge(status: string) {
   const map: Record<string, [string, string, string]> = {
-    pending:  ["รอตรวจสอบ",    S.warning, "#2A2010"],
-    approved: ["อนุมัติแล้ว",  S.success, "#0F2014"],
-    rejected: ["ปฏิเสธ",       S.error,   "#200F0F"],
+    pending:  ["รอตรวจสอบ",    S.warning, "#FEF3C7"],
+    approved: ["อนุมัติแล้ว",  S.success, "#DCFCE7"],
+    rejected: ["ปฏิเสธ",       S.error,   "#FEE2E2"],
   };
-  const [label, color, bg] = map[status] ?? [status, S.muted, S.surface];
+  const [label, color, bg] = map[status] ?? [status, S.muted, S.card];
   return (
     <span style={{ background: bg, color, borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 600 }}>
       {label}
@@ -188,17 +188,30 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
     }
   };
 
+  // Shared solid button style for auth
+  const authBtn = (disabled: boolean): React.CSSProperties => ({
+    width: "100%", background: disabled ? S.card : S.accent,
+    color: disabled ? S.muted : "#FFFFFF", border: "none", borderRadius: 10,
+    padding: "13px", fontSize: 15, fontWeight: 700,
+    cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+    opacity: disabled ? 0.6 : 1, transition: "background .15s",
+  });
+
   return (
-    <div style={{ minHeight: "100vh", background: S.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-        style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 20, padding: 36, width: "100%", maxWidth: 400 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
-          <div style={{ background: `${S.accent}22`, borderRadius: 12, padding: 10 }}>
-            <Shield size={24} color={S.accent} />
+    <div style={{ minHeight: "100vh", background: S.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&display=swap'); @keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+        style={{ background: S.surface, border: `1px solid ${S.border}`, borderRadius: 20, padding: 36, width: "100%", maxWidth: 400, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 28, paddingBottom: 24, borderBottom: `1px solid ${S.border}` }}>
+          <div style={{ background: S.accent, borderRadius: 12, padding: 10, display: "flex" }}>
+            <Shield size={22} color="#FFFFFF" />
           </div>
           <div>
             <h1 style={{ color: S.text, fontSize: 18, fontWeight: 700, margin: 0 }}>CSC Super Admin</h1>
-            <p style={{ color: S.muted, fontSize: 13, margin: 0 }}>
+            <p style={{ color: S.muted, fontSize: 13, margin: "2px 0 0" }}>
               {totpEnabled ? "🔐 Google Authenticator" : "💬 Telegram OTP"}
             </p>
           </div>
@@ -206,8 +219,8 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
 
         {step === "pin" && (
           <form onSubmit={handlePin}>
-            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส PIN</label>
-            <div style={{ position: "relative", marginBottom: 12 }}>
+            <label style={{ color: S.sub, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัส PIN</label>
+            <div style={{ position: "relative", marginBottom: 16 }}>
               <input
                 type={show ? "text" : "password"}
                 name="superadmin-pin"
@@ -223,16 +236,15 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
                 {show ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-            <button type="submit" disabled={!pin || loading || totpEnabled === null}
-              style={{ width: "100%", background: loading || !pin || totpEnabled === null ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: !pin || loading || totpEnabled === null ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: !pin || totpEnabled === null ? 0.5 : 1 }}>
-              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "#FEF2F2", borderRadius: 8 }}>{err}</p>}
+            <button type="submit" disabled={!pin || loading || totpEnabled === null} style={authBtn(!pin || loading || totpEnabled === null)}>
+              {loading ? <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} /> : <Shield size={16} />}
               {totpEnabled === null ? "กำลังโหลด…" : loading ? "กำลังตรวจสอบ…" : totpEnabled ? "ต่อไป →" : "ส่ง OTP ไปยัง Telegram"}
             </button>
             {totpEnabled === false && (
               <p style={{ color: S.muted, fontSize: 12, marginTop: 16, textAlign: "center" }}>
                 ต้องการเปลี่ยนมาใช้ Google Authenticator?{" "}
-                <a href="/superadmin/setup-totp" style={{ color: S.accent }}>ตั้งค่า TOTP</a>
+                <a href="/superadmin/setup-totp" style={{ color: S.accent, fontWeight: 600 }}>ตั้งค่า TOTP</a>
               </p>
             )}
           </form>
@@ -240,31 +252,21 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
 
         {step === "totp" && (
           <form onSubmit={handleTOTP}>
-            <p style={{ color: S.sub, fontSize: 14, marginBottom: 4 }}>เปิด Google Authenticator</p>
-            <p style={{ color: S.muted, fontSize: 12, marginBottom: 16 }}>กรอกรหัส 6 หลักจากแอป Google Authenticator</p>
+            <p style={{ color: S.sub, fontSize: 14, fontWeight: 600, marginBottom: 4 }}>เปิด Google Authenticator</p>
+            <p style={{ color: S.muted, fontSize: 13, marginBottom: 16 }}>กรอกรหัส 6 หลักจากแอป</p>
             <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              autoComplete="one-time-code"
-              value={code}
-              onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
-              placeholder="000000"
-              autoFocus
-              style={{
-                width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
-                borderRadius: 10, padding: "12px 14px", fontSize: 22, letterSpacing: 8, textAlign: "center", color: S.text,
-                fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 12,
-              }}
+              type="text" inputMode="numeric" maxLength={6} autoComplete="one-time-code"
+              value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000" autoFocus
+              style={{ width: "100%", background: S.card, border: `2px solid ${err ? S.error : S.border}`, borderRadius: 10, padding: "14px", fontSize: 28, letterSpacing: 12, textAlign: "center", color: S.text, fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 14, fontWeight: 700 }}
             />
-            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-            <button type="submit" disabled={code.length !== 6 || loading}
-              style={{ width: "100%", background: loading || code.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: code.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: code.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
-              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "#FEF2F2", borderRadius: 8 }}>{err}</p>}
+            <button type="submit" disabled={code.length !== 6 || loading} style={{ ...authBtn(code.length !== 6 || loading), marginBottom: 10 }}>
+              {loading ? <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} /> : <Shield size={16} />}
               {loading ? "กำลังตรวจสอบ…" : "เข้าสู่ระบบ"}
             </button>
             <button type="button" onClick={() => { setStep("pin"); setCode(""); setErr(""); }}
-              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "8px" }}>
               ← กลับไปกรอก PIN ใหม่
             </button>
           </form>
@@ -272,32 +274,21 @@ function AuthScreen({ onAuth }: { onAuth: (token: string) => void }) {
 
         {step === "otp" && (
           <form onSubmit={verifyOtp}>
-            {info && <p style={{ color: S.success, fontSize: 13, marginBottom: 12 }}>{info}</p>}
-            <label style={{ color: S.sub, fontSize: 13, display: "block", marginBottom: 6 }}>รหัส OTP (6 หลัก จาก Telegram)</label>
+            {info && <p style={{ color: S.success, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "#DCFCE7", borderRadius: 8 }}>{info}</p>}
+            <label style={{ color: S.sub, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>รหัส OTP (6 หลัก จาก Telegram)</label>
             <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              name="superadmin-otp"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
-              placeholder="000000"
-              autoFocus
-              style={{
-                width: "100%", background: S.card, border: `1.5px solid ${err ? S.error : S.border}`,
-                borderRadius: 10, padding: "12px 14px", fontSize: 20, letterSpacing: 6, textAlign: "center", color: S.text,
-                fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 12,
-              }}
+              type="text" inputMode="numeric" maxLength={6} name="superadmin-otp" autoComplete="one-time-code"
+              value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000" autoFocus
+              style={{ width: "100%", background: S.card, border: `2px solid ${err ? S.error : S.border}`, borderRadius: 10, padding: "14px", fontSize: 28, letterSpacing: 12, textAlign: "center", color: S.text, fontFamily: "inherit", boxSizing: "border-box", outline: "none", marginBottom: 14, fontWeight: 700 }}
             />
-            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12 }}>{err}</p>}
-            <button type="submit" disabled={code.length !== 6 || loading}
-              style={{ width: "100%", background: loading || code.length !== 6 ? S.card : `linear-gradient(135deg, ${S.accent}, ${S.accentDk})`, color: S.text, border: "none", borderRadius: 10, padding: "13px", fontSize: 15, fontWeight: 700, cursor: code.length !== 6 || loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: code.length !== 6 ? 0.5 : 1, marginBottom: 10 }}>
-              {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+            {err && <p style={{ color: S.error, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: "#FEF2F2", borderRadius: 8 }}>{err}</p>}
+            <button type="submit" disabled={code.length !== 6 || loading} style={{ ...authBtn(code.length !== 6 || loading), marginBottom: 10 }}>
+              {loading ? <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} /> : <Shield size={16} />}
               {loading ? "กำลังตรวจสอบ…" : "ยืนยันเข้าสู่ระบบ"}
             </button>
             <button type="button" onClick={() => { setStep("pin"); setCode(""); setErr(""); setInfo(""); }}
-              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ width: "100%", background: "none", border: "none", color: S.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "8px" }}>
               ← กลับไปกรอก PIN ใหม่
             </button>
           </form>
@@ -1622,34 +1613,35 @@ export default function NailSuperAdminPage() {
   const pendingCount = (renewals as any[]).filter(r => r.status === "pending").length;
 
   return (
-    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: "'Sarabun', 'Noto Sans Thai', sans-serif", color: S.text }}>
+    <div style={{ minHeight: "100vh", background: S.bg, fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif", color: S.text }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700&display=swap'); @keyframes spin{to{transform:rotate(360deg)}}`}</style>
       {/* Header */}
-      <div style={{ background: S.surface, borderBottom: `1px solid ${S.border}`, padding: "14px 20px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ background: `${S.accent}22`, borderRadius: 10, padding: 8 }}>
-          <Shield size={20} color={S.accent} />
+      <div style={{ background: S.surface, borderBottom: `1px solid ${S.border}`, padding: "0 20px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 100, height: 58 }}>
+        <div style={{ background: S.accent, borderRadius: 8, padding: "6px 8px", display: "flex" }}>
+          <Shield size={18} color="#FFFFFF" />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>CSC Super Admin</div>
-          <div style={{ color: S.muted, fontSize: 12 }}>Chain System Care</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: S.text }}>CSC Super Admin</div>
+          <div style={{ color: S.muted, fontSize: 11 }}>Chain System Care</div>
         </div>
         {pendingCount > 0 && (
-          <span style={{ background: S.warning, color: "#000", borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
+          <span style={{ background: "#FEF3C7", color: S.warning, border: `1px solid #FDE68A`, borderRadius: 100, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
             {pendingCount} รอดำเนินการ
           </span>
         )}
         <button onClick={() => { if (confirm("ออกจากระบบ?")) { fetch(`${API}/superadmin/logout`, { method: "POST", headers: { "X-Super-Admin-Key": sKey!, "Content-Type": "application/json" } }).catch(() => {}); localStorage.removeItem(LOCAL_KEY); setSKey(null); } }}
-          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", color: S.muted }}>
-          <LogOut size={16} />
+          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 7, padding: "7px 10px", cursor: "pointer", color: S.muted }}>
+          <LogOut size={15} />
         </button>
         <button onClick={() => { refetchStatus(); refetchRenewals(); }}
-          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", color: S.muted }}>
-          <RefreshCw size={15} />
+          style={{ background: "none", border: `1px solid ${S.border}`, borderRadius: 7, padding: "7px 10px", cursor: "pointer", color: S.muted }}>
+          <RefreshCw size={14} />
         </button>
       </div>
 
-      {/* Tab nav — แยกหน้าจอเป็นส่วนๆ กันเลื่อนยาวเกินไปเมื่อร้านเยอะขึ้น */}
-      <div style={{ background: S.surface, borderBottom: `1px solid ${S.border}`, position: "sticky", top: 57, zIndex: 90, overflowX: "auto" }}>
-        <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px", display: "flex", gap: 4 }}>
+      {/* Tab nav */}
+      <div style={{ background: S.surface, borderBottom: `1px solid ${S.border}`, position: "sticky", top: 58, zIndex: 90, overflowX: "auto" }}>
+        <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 16px", display: "flex", gap: 2 }}>
           {(([
             { id: "shops", label: "ร้านทั้งหมด", icon: Store, badge: allShops.length, badgeColor: undefined },
             { id: "status", label: "สถานะร้าน", icon: Crown, badge: 0, badgeColor: undefined },
@@ -1663,9 +1655,9 @@ export default function NailSuperAdminPage() {
             return (
               <button key={t.id} onClick={() => setTab(t.id)}
                 style={{
-                  background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
-                  padding: "12px 10px", display: "flex", alignItems: "center", gap: 6,
-                  color: active ? S.accent : S.muted, fontSize: 13, fontWeight: active ? 700 : 500,
+                  background: active ? "#EFF6FF" : "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+                  padding: "11px 10px", display: "flex", alignItems: "center", gap: 6,
+                  color: active ? S.accent : S.sub, fontSize: 13, fontWeight: active ? 700 : 500,
                   borderBottom: `2px solid ${active ? S.accent : "transparent"}`, whiteSpace: "nowrap",
                 }}>
                 <Icon size={14} /> {t.label}
