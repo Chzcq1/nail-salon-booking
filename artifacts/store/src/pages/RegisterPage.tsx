@@ -263,6 +263,79 @@ function HeroDecorations() {
   );
 }
 
+// ── FAQ Section (reused in error state + main form) ───────────────────────────
+const FAQ_ITEMS = [
+  {
+    q: "หลังสมัครต้องรอนานแค่ไหน?",
+    a: "ทีมงานตรวจสลิปและเปิดระบบให้ภายใน 1–2 ชั่วโมง (วันทำการ 9:00–20:00 น.) เมื่อเปิดแล้วจะได้รับอีเมลพร้อมลิงก์ตั้งค่าร้านทันที",
+  },
+  {
+    q: "ต้องติดตั้งแอปไหม? ใช้ยากไหม?",
+    a: "ไม่ต้องติดตั้งอะไรเลย เปิดผ่านเบราว์เซอร์บนมือถือหรือคอมพิวเตอร์ได้เลย ตั้งค่าร้านเสร็จภายใน 10 นาที",
+  },
+  {
+    q: "ลูกค้าจองคิวผ่านช่องทางไหน?",
+    a: "ร้านจะได้รับลิงก์จองคิวเฉพาะของตัวเอง เช่น /r/ชื่อร้าน ส่งให้ลูกค้าผ่าน LINE, IG หรือ Facebook ได้เลย ลูกค้าไม่ต้องโหลดแอปเพิ่ม",
+  },
+  {
+    q: "จัดการตารางเวลาทำอะไรได้บ้าง?",
+    a: "ตั้งตารางรายสัปดาห์ กำหนดวันหยุดพิเศษ เพิ่มบล็อกเวลาพิเศษ และล็อกจำนวนรับสูงสุดต่อสล็อตได้ ระบบสร้างสล็อตจองล่วงหน้าอัตโนมัติ 60 วัน",
+  },
+  {
+    q: "ข้อมูลลูกค้าของร้านจะถูกเก็บอย่างไร?",
+    a: "ข้อมูลของแต่ละร้านแยกเป็นอิสระจากกันอย่างสมบูรณ์ ร้านอื่นไม่มีทางเข้าถึงข้อมูลลูกค้าของคุณได้",
+  },
+];
+
+function FaqSection() {
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "0 20px 80px" }}>
+      {/* Divider + heading */}
+      <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 52, marginBottom: 36 }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{
+            background: C.sun, color: C.ink, fontSize: 11, fontWeight: 800,
+            letterSpacing: 1.2, textTransform: "uppercase" as const, borderRadius: 6,
+            padding: "4px 10px",
+          }}>FAQ</span>
+        </div>
+        <h2 style={{
+          color: C.ink, fontSize: "clamp(22px, 5vw, 28px)", fontWeight: 800,
+          fontFamily: "'Syne', 'Prompt', sans-serif",
+          margin: "0 0 6px", letterSpacing: -0.3, lineHeight: 1.2,
+        }}>
+          คำถามที่พบบ่อย
+        </h2>
+        <p style={{ color: C.mist, fontSize: 14, margin: 0, lineHeight: 1.6 }}>
+          สงสัยเรื่องอื่นเพิ่มเติม? ทักหาทีมงานได้เลยครับ
+        </p>
+      </div>
+
+      {FAQ_ITEMS.map((item, i) => (
+        <div key={i} style={{ borderTop: `1.5px solid ${C.border}`, padding: "24px 0" }}>
+          <p style={{
+            color: C.ink, fontSize: 16, fontWeight: 700,
+            margin: "0 0 8px", lineHeight: 1.45,
+            display: "flex", alignItems: "flex-start", gap: 10,
+          }}>
+            <span style={{
+              flexShrink: 0, width: 22, height: 22, borderRadius: "50%",
+              background: C.sky, color: C.snow,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              fontSize: 11, fontWeight: 800, marginTop: 1,
+            }}>Q</span>
+            {item.q}
+          </p>
+          <p style={{ color: C.mist, fontSize: 15, margin: "0 0 0 32px", lineHeight: 1.75 }}>
+            {item.a}
+          </p>
+        </div>
+      ))}
+      <div style={{ borderTop: `1.5px solid ${C.border}` }} />
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function RegisterPage() {
   const [plans, setPlans] = useState<any[]>([]);
@@ -382,20 +455,40 @@ export default function RegisterPage() {
     );
   }
 
-  // ── Fetch error ────────────────────────────────────────────────────────────
+  // ── Fetch error — show hero + error card + FAQ so content is still useful ──
   if (fetchError) {
     return (
-      <div style={{ minHeight: "100vh", background: C.cream, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Prompt', sans-serif" }}>
-        <style>{FONTS}</style>
-        <div style={{ background: C.snow, border: `2px solid #FEE2E2`, borderRadius: 20, padding: 36, maxWidth: 400, textAlign: "center" }}>
-          <AlertCircle size={40} color={C.coral} style={{ marginBottom: 12 }} />
-          <p style={{ color: C.ink, fontSize: 16, fontWeight: 700, marginBottom: 8 }}>ไม่สามารถโหลดข้อมูลได้</p>
-          <p style={{ color: C.mist, fontSize: 14, marginBottom: 24 }}>{fetchError}</p>
-          <button onClick={() => window.location.reload()}
-            style={{ background: C.ink, color: C.snow, border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-            รีเฟรชหน้า
-          </button>
+      <div style={{ minHeight: "100vh", background: C.cream, fontFamily: "'Prompt', sans-serif" }}>
+        <style>{`${FONTS} @keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box}`}</style>
+        {/* Hero */}
+        <div style={{ background: C.sky, padding: "52px 24px 64px", position: "relative", overflow: "hidden" }}>
+          <HeroDecorations />
+          <div style={{ maxWidth: 600, margin: "0 auto", position: "relative", zIndex: 1 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.22)", borderRadius: 100, padding: "6px 16px", marginBottom: 24 }}>
+              <Store size={14} color={C.snow} />
+              <span style={{ color: C.snow, fontSize: 13, fontWeight: 700, letterSpacing: 0.3 }}>CSC — Chain System Care</span>
+            </div>
+            <h1 style={{ color: C.snow, fontSize: "clamp(36px, 7vw, 56px)", fontWeight: 800, fontFamily: "'Syne', 'Prompt', sans-serif", lineHeight: 1.1, margin: "0 0 16px", letterSpacing: -0.5 }}>
+              เปิดร้านของคุณ<br />กับ CSC
+            </h1>
+            <p style={{ color: "rgba(255,255,255,0.88)", fontSize: 18, lineHeight: 1.65, margin: 0, maxWidth: 480 }}>
+              ระบบจองคิวครบวงจรสำหรับร้านนวด สปา ทำเล็บ และอื่นๆ
+            </p>
+          </div>
         </div>
+        {/* Error card */}
+        <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 20px 0" }}>
+          <div style={{ background: C.snow, border: `2px solid #FEE2E2`, borderRadius: 20, padding: 32, textAlign: "center" }}>
+            <AlertCircle size={36} color={C.coral} style={{ marginBottom: 10 }} />
+            <p style={{ color: C.ink, fontSize: 16, fontWeight: 700, margin: "0 0 6px" }}>ไม่สามารถโหลดข้อมูลได้</p>
+            <p style={{ color: C.mist, fontSize: 14, margin: "0 0 20px" }}>{fetchError}</p>
+            <button onClick={() => window.location.reload()}
+              style={{ background: C.ink, color: C.snow, border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              รีเฟรชหน้า
+            </button>
+          </div>
+        </div>
+        <FaqSection />
       </div>
     );
   }
@@ -657,6 +750,9 @@ export default function RegisterPage() {
           )}
         </form>
       </div>
+
+      <FaqSection />
+
     </div>
   );
 }
