@@ -845,9 +845,6 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* FAQ — above the wizard */}
-          <FaqSection />
-
           {/* Form body */}
           <div
             className="reg-form"
@@ -1052,6 +1049,9 @@ export default function RegisterPage() {
               )}
             </AnimatePresence>
           </div>
+
+          {/* FAQ — below the wizard */}
+          <FaqSection />
         </div>
       </div>
     </div>
