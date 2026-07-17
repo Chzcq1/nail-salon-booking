@@ -11,7 +11,7 @@ import {
   CheckCircle, AlertCircle, Upload, ArrowRight, ArrowLeft,
   ShieldCheck, Clock, Zap, Copy, Check, Lock, CreditCard,
   Smartphone, Calendar, Bell, Palette, BarChart2, Users, Wifi,
-  Store, Loader2,
+  Store, Loader2, ChevronDown,
 } from "lucide-react";
 
 const API = "/api/nail";
@@ -255,6 +255,120 @@ function HeroPanel() {
 
         <div className="reg-hero-copy" style={{ color: "rgba(255,255,255,0.22)", fontSize: 11, fontFamily: "'Inter',sans-serif" }}>
           © 2025 Chain System Care. All rights reserved.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FAQ ───────────────────────────────────────────────────────────────────────
+const FAQ_ITEMS = [
+  {
+    q: "ค่าบริการเท่าไหร่ มีค่าใช้จ่ายแอบแฝงไหม?",
+    a: "ขณะนี้ ฿99/เดือน สำหรับ 20 ร้านแรกที่สมัครเข้ามา — ราคานี้อาจปรับสูงขึ้นในอนาคต ไม่มีค่า setup ไม่มีค่าคอมมิชชัน และไม่มีสัญญาระยะยาวผูกมัด",
+  },
+  {
+    q: "ชำระผ่านช่องทางไหนได้บ้าง?",
+    a: "โอนผ่านธนาคาร หรือส่งซอง TrueMoney Gift ระบบจะตรวจสอบยอดให้อัตโนมัติ",
+  },
+  {
+    q: "ยกเลิกได้ไหม ถ้าไม่อยากใช้ต่อ?",
+    a: "ยกเลิกได้ทุกเวลา ไม่มีสัญญาผูกมัด ไม่มีค่าปรับ",
+  },
+  {
+    q: "หลังสมัครแล้วต้องรอนานไหมกว่าจะใช้งานได้?",
+    a: "ทีมงานตรวจสอบสลิปและเปิดร้านให้ภายใน 24 ชั่วโมง หลังจากนั้นคุณตั้งค่าร้านได้เลยทันที",
+  },
+  {
+    q: "ต้องมีความรู้ด้าน IT หรือคอมพิวเตอร์ไหม?",
+    a: "ไม่ต้องเลย ใช้งานผ่านมือถือได้ทุกขั้นตอน หน้าจอออกแบบมาเพื่อให้เจ้าของร้านใช้ได้ง่ายที่สุด",
+  },
+  {
+    q: "ลูกค้าของเราจองผ่านช่องทางไหน?",
+    a: "ร้านของคุณจะได้ลิงก์ส่วนตัว เช่น csc.app/ชื่อร้าน ลูกค้าเปิดจากมือถือแล้วจองได้เลย ไม่ต้องโหลดแอปใดๆ",
+  },
+  {
+    q: "รองรับหลายสาขาไหม?",
+    a: "1 บัญชีใช้สำหรับ 1 สาขา ถ้าต้องการหลายสาขาสมัครแยกได้ หรือติดต่อทีมงานเพื่อสอบถามแพ็กเกจพิเศษ",
+  },
+  {
+    q: "ข้อมูลลูกค้าและการจองปลอดภัยไหม? ต้องการความช่วยเหลือเพิ่มเติมได้ที่ไหน?",
+    a: "ข้อมูลทั้งหมดเข้ารหัสและเก็บบนเซิร์ฟเวอร์ที่ปลอดภัย เจ้าของร้านเท่านั้นที่เข้าถึงข้อมูลร้านตัวเองได้ สอบถามเพิ่มเติมหรือขอความช่วยเหลือได้ที่ Facebook: CSC Connect-System-Customer",
+  },
+];
+
+function FaqSection() {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <div style={{ width: "100%", background: C.grayLight, borderBottom: `1px solid ${C.border}`, padding: "52px 24px 60px" }}>
+      <div style={{ maxWidth: 520, margin: "0 auto" }}>
+        {/* Header */}
+        <p style={{
+          fontSize: 10.5, fontWeight: 600, letterSpacing: "0.12em",
+          color: C.muted, textTransform: "uppercase",
+          fontFamily: "'Inter',sans-serif", margin: "0 0 8px",
+        }}>
+          คำถามที่พบบ่อย
+        </p>
+        <h2 style={{
+          fontFamily: "'Instrument Serif',Georgia,serif",
+          fontSize: 28, fontWeight: 400, color: C.ink,
+          margin: "0 0 32px", letterSpacing: "-0.6px", lineHeight: 1.2,
+        }}>
+          มีข้อสงสัยก่อนสมัคร?
+        </h2>
+
+        {/* Accordion */}
+        <div>
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={i} style={{ borderTop: `1px solid ${C.border}`, ...(i === FAQ_ITEMS.length - 1 ? { borderBottom: `1px solid ${C.border}` } : {}) }}>
+              <button
+                onClick={() => setOpen(open === i ? null : i)}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between",
+                  alignItems: "flex-start", padding: "18px 2px",
+                  background: "transparent", border: "none", cursor: "pointer",
+                  textAlign: "left", gap: 14,
+                }}
+              >
+                <span style={{
+                  fontSize: 14, fontWeight: 600, color: C.ink,
+                  fontFamily: "'Inter',sans-serif", lineHeight: 1.45,
+                }}>
+                  {item.q}
+                </span>
+                <ChevronDown
+                  size={17}
+                  color={C.gray}
+                  style={{
+                    flexShrink: 0, marginTop: 2,
+                    transition: "transform 0.22s ease",
+                    transform: open === i ? "rotate(180deg)" : "rotate(0deg)",
+                  }}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {open === i && (
+                  <motion.div
+                    key="body"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: "easeInOut" }}
+                    style={{ overflow: "hidden" }}
+                  >
+                    <p style={{
+                      fontSize: 13.5, color: C.gray,
+                      fontFamily: "'Inter',sans-serif", lineHeight: 1.72,
+                      margin: "0 2px 18px", paddingRight: 28,
+                    }}>
+                      {item.a}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -730,6 +844,9 @@ export default function RegisterPage() {
               <Lock size={11} /> ปลอดภัย SSL
             </div>
           </div>
+
+          {/* FAQ — above the wizard */}
+          <FaqSection />
 
           {/* Form body */}
           <div
