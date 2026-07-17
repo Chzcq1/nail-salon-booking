@@ -12,7 +12,7 @@ import {
   Phone, User, AlertCircle, Upload, ChevronRight, TrendingUp,
   Banknote, Users, ArrowLeft, Edit2, Save, X, Ban, RotateCcw,
   MessageCircle, Package, Crown, ChevronLeft, Palette, ChevronUp, ChevronDown,
-  Wallet, CreditCard,
+  Wallet, CreditCard, Bell, Settings2, AlertTriangle,
 } from "lucide-react";
 import { BRAND_THEMES, getTheme, injectThemeCss } from "@/theme";
 import { useShopSlug } from "@/lib/shopSlugContext";
@@ -56,7 +56,7 @@ const A = {
   bg:      "var(--b-bg)",
 } as const;
 
-type Tab = "dashboard" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal" | "accounts";
+type Tab = "dashboard" | "inbox" | "bookings" | "services" | "schedule" | "gallery" | "settings" | "staff" | "renewal" | "accounts";
 
 // คำนวณเวลาสล็อตที่จะถูกสร้างจากเทมเพลต (ใช้แสดง preview ก่อนบันทึก)
 function computeSlotTimes(startTime: string, count: number, roundMin: number, gapMin: number): string[] {
@@ -125,6 +125,57 @@ function NumberField({
       }}
       style={style}
     />
+  );
+}
+
+/** TimeSelect — ตัวเลือกเวลาแบบ select ชั่วโมง + นาที แยกกัน
+ *  ใช้แทน <input type="time"> เพราะ iOS Safari บางรุ่นไม่แสดง minute wheel */
+const MINUTE_STEPS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+function TimeSelect({
+  value, onChange, style,
+}: {
+  value: string; onChange: (v: string) => void; style?: React.CSSProperties;
+}) {
+  const parts = (value || "00:00").split(":");
+  const hh = parseInt(parts[0] ?? "0", 10);
+  const mm = parseInt(parts[1] ?? "0", 10);
+  // round mm down to nearest 5
+  const mmSnapped = MINUTE_STEPS.reduce((prev, cur) => Math.abs(cur - mm) < Math.abs(prev - mm) ? cur : prev, 0);
+
+  const selStyle: React.CSSProperties = {
+    border: "1px solid var(--b-border)",
+    borderRadius: 8,
+    padding: "7px 4px",
+    fontFamily: "inherit",
+    fontSize: 13,
+    background: "#fff",
+    appearance: "auto" as const,
+    WebkitAppearance: "menulist" as const,
+    cursor: "pointer",
+    ...style,
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <select
+        value={hh}
+        onChange={e => onChange(`${String(+e.target.value).padStart(2, "0")}:${String(mmSnapped).padStart(2, "0")}`)}
+        style={{ ...selStyle, flex: 1, minWidth: 0 }}
+      >
+        {Array.from({ length: 24 }, (_, i) => (
+          <option key={i} value={i}>{String(i).padStart(2, "0")}</option>
+        ))}
+      </select>
+      <span style={{ fontSize: 14, fontWeight: 700, color: "var(--b-primary)", flexShrink: 0 }}>:</span>
+      <select
+        value={mmSnapped}
+        onChange={e => onChange(`${String(hh).padStart(2, "0")}:${String(+e.target.value).padStart(2, "0")}`)}
+        style={{ ...selStyle, flex: 1, minWidth: 0 }}
+      >
+        {MINUTE_STEPS.map(m => (
+          <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -255,12 +306,14 @@ export default function NailAdminPage() {
     data: rentalGate,
     isLoading: rentalGateLoading,
     isError: rentalGateError,
+    error: rentalGateErrorObj,
   } = useQuery<any>({
     queryKey: ["nail-admin-rental-status", shopKeyForGate],
     queryFn: () =>
       fetch("/api/nail/admin/rental-status", {
         headers: { Authorization: `Bearer ${token}` },
       }).then(r => {
+        if (r.status === 401 || r.status === 403) throw new Error("UNAUTHORIZED");
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       }),
@@ -271,6 +324,29 @@ export default function NailAdminPage() {
     retry: 1,
     retryDelay: 2000,
   });
+
+  // Auto-logout when token is expired/invalid (401/403 from rental-status)
+  useEffect(() => {
+    if (rentalGateError && (rentalGateErrorObj as Error)?.message === "UNAUTHORIZED") {
+      localStorage.removeItem(storageKey);
+      setToken("");
+    }
+  }, [rentalGateError, rentalGateErrorObj, storageKey]);
+
+  // ── Pending inbox count — for the badge on the inbox tab ─────────────────
+  // Must be here (before early returns) to satisfy Rules of Hooks
+  const { data: inboxBookings = [] } = useQuery<any[]>({
+    queryKey: ["nail-admin-inbox-count", slug ?? "default"],
+    queryFn: () =>
+      fetch(`/api/nail/admin/bookings?status=pending_payment&limit=500`, {
+        headers: authH(token),
+      }).then(r => r.json()),
+    enabled: !!token,
+    refetchInterval: 20000,
+    staleTime: 10000,
+    retry: 1,
+  });
+  const inboxCount = Array.isArray(inboxBookings) ? inboxBookings.length : 0;
 
   const [newBookingAlert, setNewBookingAlert] = useState(false);
   const knownBookingIds = useRef<Set<number>>(new Set());
@@ -557,8 +633,9 @@ export default function NailAdminPage() {
     );
   }
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const tabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: "dashboard", label: "ภาพรวม",    icon: <LayoutDashboard size={17} /> },
+    { id: "inbox",     label: "สลิป",       icon: <Bell size={17} />, badge: inboxCount },
     { id: "bookings",  label: "คิว",        icon: <Calendar size={17} /> },
     { id: "services",  label: "บริการ",     icon: <Scissors size={17} /> },
     { id: "schedule",  label: "ตารางเวลา",  icon: <Clock size={17} /> },
@@ -643,9 +720,24 @@ export default function NailAdminPage() {
               color: tab === t.id ? A.primary : A.muted, whiteSpace: "nowrap",
               borderBottom: `3px solid ${tab === t.id ? A.primary : "transparent"}`,
               fontSize: 11, fontWeight: tab === t.id ? 700 : 400, fontFamily: "inherit",
-              transition: "color 0.2s",
+              transition: "color 0.2s", position: "relative",
             }}>
-            {t.icon}{t.label}
+            <div style={{ position: "relative" }}>
+              {t.icon}
+              {(t.badge ?? 0) > 0 && (
+                <span style={{
+                  position: "absolute", top: -6, right: -8,
+                  background: "#EF4444", color: "#fff",
+                  borderRadius: 100, minWidth: 16, height: 16,
+                  fontSize: 9, fontWeight: 800, lineHeight: "16px",
+                  textAlign: "center", padding: "0 3px", boxSizing: "border-box",
+                  border: "1.5px solid #fff", boxShadow: "0 1px 4px rgba(239,68,68,0.5)",
+                }}>
+                  {(t.badge ?? 0) > 99 ? "99+" : t.badge}
+                </span>
+              )}
+            </div>
+            {t.label}
           </button>
         ))}
       </div>
@@ -660,6 +752,7 @@ export default function NailAdminPage() {
               บน iOS Safari ให้ animate เฉพาะ opacity เพื่อเลี่ยงปัญหานี้ */}
           <motion.div key={tab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
             {tab === "dashboard" && <DashboardTab token={token} onGoBookings={() => setTab("bookings")} />}
+            {tab === "inbox"     && <InboxTab token={token} />}
             {tab === "bookings"  && <BookingsTab token={token} />}
             {tab === "services"  && <ServicesTab token={token} />}
             {tab === "schedule"  && <ScheduleTab token={token} />}
@@ -816,6 +909,252 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
   );
 }
 
+// ─── Inbox — ศูนย์ตรวจสลิปรวม ────────────────────────────────────────────────
+function InboxTab({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const shopKey = useShopSlug() ?? "default";
+  const [confirmRejectId, setConfirmRejectId] = useState<number | null>(null);
+  const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
+
+  const { data: rawPending = [], isLoading, refetch, isFetching } = useQuery<any[]>({
+    queryKey: ["nail-admin-inbox", shopKey],
+    queryFn: () =>
+      fetch("/api/nail/admin/bookings?status=pending_payment&limit=500", {
+        headers: authH(token),
+      }).then(r => r.json()),
+    refetchInterval: 20000,
+    staleTime: 10000,
+    retry: 1,
+  });
+
+  // filter out locally-completed items until next refetch (เพื่อ UX ลื่น)
+  const pending = rawPending.filter((b: any) => !doneIds.has(b.id));
+
+  const confirmMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/nail/admin/bookings/${id}`, {
+        method: "PUT", headers: authH(token),
+        body: JSON.stringify({ status: "confirmed" }),
+      }).then(r => r.json()),
+    onSuccess: (_data: any, id: number) => {
+      setDoneIds(prev => new Set([...prev, id]));
+      qc.invalidateQueries({ queryKey: ["nail-admin-inbox", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-inbox-count", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-dashboard", shopKey] });
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`/api/nail/admin/bookings/${id}/refund`, {
+        method: "POST", headers: authH(token),
+      }).then(r => r.json()),
+    onSuccess: (_data: any, id: number) => {
+      setDoneIds(prev => new Set([...prev, id]));
+      setConfirmRejectId(null);
+      qc.invalidateQueries({ queryKey: ["nail-admin-inbox", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-inbox-count", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-bookings", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-dashboard", shopKey] });
+    },
+  });
+
+  // Group by slot_date
+  const todayStr = toISO(new Date());
+  const yd = new Date(); yd.setDate(yd.getDate() - 1);
+  const yesterdayStr = toISO(yd);
+
+  const groups = pending.reduce((acc: Record<string, any[]>, b: any) => {
+    (acc[b.slot_date] = acc[b.slot_date] || []).push(b);
+    return acc;
+  }, {});
+  const sortedDates = Object.keys(groups).sort();
+
+  const dateLabel = (d: string): { text: string; overdue: boolean } => {
+    if (d === todayStr) return { text: "📅 วันนี้", overdue: false };
+    if (d === yesterdayStr) return { text: "⚠️ เมื่อวาน", overdue: true };
+    if (d < todayStr) return { text: "🔴 เลยกำหนด", overdue: true };
+    return { text: "📅", overdue: false };
+  };
+
+  return (
+    <div style={{ padding: "16px 14px 40px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 800, color: A.text, margin: 0 }}>ศูนย์ตรวจสลิป</h2>
+          <p style={{ fontSize: 12, color: A.muted, margin: "3px 0 0" }}>
+            {pending.length === 0 ? "ยืนยันครบแล้ว ✅" : `รอตรวจ ${pending.length} รายการ — ทุกวันรวมกัน`}
+          </p>
+        </div>
+        <button onClick={() => refetch()}
+          style={{ background: A.gray, border: `1px solid ${A.grayBorder}`, borderRadius: 10, padding: "7px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: isFetching ? A.primary : A.sub, fontFamily: "inherit" }}>
+          <RefreshCw size={13} style={{ animation: isFetching ? "spin 1s linear infinite" : "none" }} /> รีเฟรช
+        </button>
+      </div>
+
+      {/* Loading */}
+      {isLoading && (
+        <div style={{ textAlign: "center", padding: "40px 0" }}>
+          <Loader2 size={28} style={{ animation: "spin 1s linear infinite", color: A.primary }} />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && pending.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 20px" }}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: A.success, marginBottom: 8 }}>ยืนยันครบแล้ว!</div>
+          <div style={{ fontSize: 13, color: A.muted }}>ไม่มีสลิปค้างรอตรวจสอบ — ระบบจะแจ้งเมื่อมีสลิปใหม่</div>
+        </div>
+      )}
+
+      {/* Grouped by date */}
+      {sortedDates.map(date => {
+        const { text: dlabel, overdue } = dateLabel(date);
+        const items = groups[date];
+        return (
+          <div key={date} style={{ marginBottom: 26 }}>
+            {/* Date header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{
+                background: overdue ? A.errorBg : A.pale,
+                border: `1.5px solid ${overdue ? A.error + "44" : A.border}`,
+                borderRadius: 100, padding: "5px 14px",
+                fontSize: 12, fontWeight: 700,
+                color: overdue ? A.error : A.primary,
+                flexShrink: 0,
+              }}>
+                {dlabel}{date !== todayStr && date !== yesterdayStr ? ` — ${fmtDate(date)}` : ` — ${fmtDate(date)}`}
+              </div>
+              <div style={{ flex: 1, height: 1, background: A.grayBorder }} />
+              <div style={{
+                background: overdue ? A.error : A.primary,
+                color: "#fff", borderRadius: 100, padding: "3px 10px",
+                fontSize: 11, fontWeight: 700, flexShrink: 0,
+              }}>
+                {items.length} รายการ
+              </div>
+            </div>
+
+            {/* Cards */}
+            {items.map((b: any) => (
+              <div key={b.id} style={{
+                background: A.card,
+                border: `1.5px solid ${overdue ? A.error + "44" : A.grayBorder}`,
+                borderRadius: 16, marginBottom: 12, overflow: "hidden",
+                boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+              }}>
+                {/* Info */}
+                <div style={{ padding: "14px 14px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const, marginBottom: 5 }}>
+                      <span style={{ fontWeight: 800, fontSize: 13, color: A.primary, fontFamily: "monospace", letterSpacing: 1 }}>
+                        {b.booking_ref}
+                      </span>
+                      <span style={{ background: "#FEF3C7", color: "#92400E", borderRadius: 100, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>
+                        ⏳ รอตรวจสลิป
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 3 }}>{b.customer_name}</div>
+                    <div style={{ fontSize: 12, color: A.sub, display: "flex", flexWrap: "wrap" as const, gap: "2px 12px" }}>
+                      <span>🕐 {b.start_time}{b.end_time ? `–${b.end_time}` : ""}</span>
+                      {b.service_name && <span>💅 {b.service_name}</span>}
+                      {b.customer_phone && <span>📞 {b.customer_phone}</span>}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: A.primary }}>฿{(b.deposit_total ?? 0).toFixed(2)}</div>
+                    <div style={{ fontSize: 11, color: A.muted }}>มัดจำ</div>
+                  </div>
+                </div>
+
+                {/* Slip image */}
+                {b.payment_proof && (
+                  <div style={{ padding: "0 14px 12px" }}>
+                    <div style={{ fontSize: 11, color: A.muted, marginBottom: 5, fontWeight: 600 }}>📎 สลิปการชำระเงิน</div>
+                    {(b.payment_proof.startsWith("http") || b.payment_proof.startsWith("data:image/")) ? (
+                      <img src={b.payment_proof} alt="slip"
+                        style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 12, border: `1px solid ${A.grayBorder}`, background: A.gray, cursor: b.payment_proof.startsWith("http") ? "pointer" : "default", display: "block" }}
+                        onClick={() => b.payment_proof.startsWith("http") && window.open(b.payment_proof, "_blank")}
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    ) : (
+                      <div style={{ background: A.gray, borderRadius: 10, padding: "8px 12px", fontSize: 12, color: A.sub, wordBreak: "break-all" as const }}>
+                        {b.payment_proof}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!b.payment_proof && (
+                  <div style={{ padding: "0 14px 12px" }}>
+                    <div style={{ background: "#FFF8E1", border: "1px solid #FFD54F55", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#E65100" }}>
+                      ⚠️ ยังไม่มีสลิป — รอลูกค้าอัปโหลด
+                    </div>
+                  </div>
+                )}
+
+                {/* Reference / Brief Image */}
+                {b.ref_image && (
+                  <div style={{ padding: "0 14px 12px" }}>
+                    <div style={{ fontSize: 11, color: "#7C3AED", marginBottom: 5, fontWeight: 700 }}>🎨 รูปอ้างอิงแบบงาน (Brief)</div>
+                    <img src={b.ref_image} alt="ref brief"
+                      style={{ width: "100%", maxHeight: 280, objectFit: "contain", borderRadius: 12, border: "1.5px solid #DDD6FE", background: "#F5F3FF", display: "block" }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div style={{ borderTop: `1px solid ${A.grayBorder}`, padding: "10px 14px", display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => confirmMutation.mutate(b.id)}
+                    disabled={confirmMutation.isPending}
+                    style={{ flex: 1, background: A.successBg, border: `1.5px solid ${A.success}44`, borderRadius: 12, padding: "11px 8px", cursor: "pointer", color: A.success, fontWeight: 700, fontSize: 13, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <CheckCircle size={15} /> ยืนยันสลิป ✓
+                  </button>
+                  <button
+                    onClick={() => setConfirmRejectId(b.id)}
+                    style={{ flex: 1, background: A.errorBg, border: `1.5px solid ${A.error}44`, borderRadius: 12, padding: "11px 8px", cursor: "pointer", color: A.error, fontWeight: 700, fontSize: 13, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    <XCircle size={15} /> ปฏิเสธ
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {/* Reject confirm dialog */}
+      {confirmRejectId !== null && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.52)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={() => setConfirmRejectId(null)}>
+          <div
+            style={{ background: A.card, borderRadius: 20, padding: 24, maxWidth: 340, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: A.text, marginBottom: 10 }}>ปฏิเสธสลิปนี้?</h3>
+            <p style={{ fontSize: 13, color: A.sub, lineHeight: 1.7, marginBottom: 20 }}>
+              สลิปจะถูกปฏิเสธ และมัดจำจะถูกคืนให้ลูกค้า (หากชำระผ่าน Wallet จะได้รับเงินคืนทันที)
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmRejectId(null)}
+                style={{ flex: 1, background: A.gray, border: `1px solid ${A.grayBorder}`, borderRadius: 12, padding: "11px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, color: A.sub, fontSize: 13 }}>
+                ยกเลิก
+              </button>
+              <button
+                onClick={() => rejectMutation.mutate(confirmRejectId)}
+                disabled={rejectMutation.isPending}
+                style={{ flex: 1, background: A.error, border: "none", borderRadius: 12, padding: "11px", cursor: "pointer", color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: "inherit" }}>
+                {rejectMutation.isPending ? "กำลังดำเนินการ…" : "ยืนยัน ปฏิเสธ"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Bookings ─────────────────────────────────────────────────────────────────
 function BookingsTab({ token }: { token: string }) {
   const shopKey = useShopSlug() ?? "default";
@@ -948,8 +1287,8 @@ function BookingsTab({ token }: { token: string }) {
   return (
     <div style={{ padding: 16 }}>
       {pendingCount > 0 && (
-        <div style={{ background: A.infoBg, border: `1px solid ${A.info}44`, borderRadius: 12, padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, color: A.info, fontSize: 13, fontWeight: 600 }}>
-          <AlertCircle size={16} /> มี {pendingCount} รายการรอตรวจสลิป
+        <div style={{ background: "#FFFBEB", border: "2px solid #F59E0B", borderRadius: 12, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, color: "#92400E", fontSize: 14, fontWeight: 700, boxShadow: "0 2px 8px #F59E0B33" }}>
+          <AlertCircle size={18} color="#F59E0B" /> 🔔 มี {pendingCount} รายการรอตรวจสลิป — กรุณายืนยันด้วย
         </div>
       )}
 
@@ -1103,17 +1442,17 @@ function BookingsTab({ token }: { token: string }) {
                   {b.payment_proof && (
                     <div style={{ marginTop: 10 }}>
                       <p style={{ fontSize: 12, color: A.sub, marginBottom: 6 }}>หลักฐานการชำระ:</p>
-                      {b.payment_proof.startsWith("http") ? (
+                      {(b.payment_proof.startsWith("http") || b.payment_proof.startsWith("data:image/")) ? (
                         <div>
-                          <a href={b.payment_proof} target="_blank" rel="noopener noreferrer"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: A.primary, fontWeight: 600, textDecoration: "none", background: A.pale, borderRadius: 8, padding: "5px 12px", border: `1px solid ${A.border}`, marginBottom: 6 }}>
-                            🔗 เปิดลิงก์สลิป
-                          </a>
-                          <a href={b.payment_proof} target="_blank" rel="noopener noreferrer">
-                            <img src={b.payment_proof} alt="slip"
-                              style={{ display: "block", maxWidth: "100%", maxHeight: 200, borderRadius: 10, border: `1px solid ${A.border}`, objectFit: "contain" }}
-                              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                          </a>
+                          {b.payment_proof.startsWith("http") && (
+                            <a href={b.payment_proof} target="_blank" rel="noopener noreferrer"
+                              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: A.primary, fontWeight: 600, textDecoration: "none", background: A.pale, borderRadius: 8, padding: "5px 12px", border: `1px solid ${A.border}`, marginBottom: 6 }}>
+                              🔗 เปิดลิงก์สลิป
+                            </a>
+                          )}
+                          <img src={b.payment_proof} alt="slip"
+                            style={{ display: "block", maxWidth: "100%", maxHeight: 260, borderRadius: 10, border: `1px solid ${A.border}`, objectFit: "contain" }}
+                            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                         </div>
                       ) : (
                         <p style={{ fontSize: 12, color: A.sub, background: A.gray, borderRadius: 8, padding: "6px 12px", wordBreak: "break-all" }}>{b.payment_proof}</p>
@@ -1221,7 +1560,7 @@ function BookingsTab({ token }: { token: string }) {
                 )}
               </>
             )}
-            {rescheduleError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10 }}>⚠️ {rescheduleError}</p>}
+            {rescheduleError && <p style={{ color: A.error, fontSize: 13, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={13} /> {rescheduleError}</p>}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setRescheduleTarget(null); setRescheduleDate(""); setRescheduleSlotId(null); setRescheduleError(""); }}
                 style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>ยกเลิก</button>
@@ -1253,7 +1592,7 @@ function BookingsTab({ token }: { token: string }) {
             <motion.div initial={{ scale: 0.9, y: 10, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
               onClick={e => e.stopPropagation()}
               style={{ background: A.card, borderRadius: 20, padding: 26, maxWidth: 340, width: "100%", boxShadow: "0 16px 48px rgba(136,14,79,0.3)", fontFamily: "'Prompt', sans-serif" }}>
-              <div style={{ width: 54, height: 54, borderRadius: "50%", background: A.errorBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", fontSize: 26 }}>🗑️</div>
+              <div style={{ width: 54, height: 54, borderRadius: "50%", background: A.errorBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}><Trash2 size={26} color={A.error} /></div>
               <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 6, textAlign: "center" }}>
                 {deleteTarget.id === -1 ? "ล้างข้อมูลยกเลิกทั้งหมด?" : "ลบรายการถาวร?"}
               </h3>
@@ -1347,6 +1686,7 @@ function ServicesTab({ token }: { token: string }) {
   const [price, setPrice] = useState("0");
   const [dur, setDur] = useState("60");
   const [deposit, setDeposit] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
 
   const { data: services = [] } = useQuery<any[]>({
     queryKey: ["nail-admin-services", shopKey],
@@ -1355,14 +1695,15 @@ function ServicesTab({ token }: { token: string }) {
     retry: 1,
   });
 
-  const openAdd = () => { setEditId(null); setName(""); setDesc(""); setPrice("0"); setDur("60"); setDeposit(""); setShow(true); };
-  const openEdit = (s: any) => { setEditId(s.id); setName(s.name); setDesc(s.description || ""); setPrice(String(s.price)); setDur(String(s.duration_minutes)); setDeposit(s.deposit_amount != null ? String(s.deposit_amount) : ""); setShow(true); };
+  const openAdd = () => { setEditId(null); setName(""); setDesc(""); setPrice("0"); setDur("60"); setDeposit(""); setImageUrl(""); setShow(true); };
+  const openEdit = (s: any) => { setEditId(s.id); setName(s.name); setDesc(s.description || ""); setPrice(String(s.price)); setDur(String(s.duration_minutes)); setDeposit(s.deposit_amount != null ? String(s.deposit_amount) : ""); setImageUrl(s.image_url || ""); setShow(true); };
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const body = JSON.stringify({
         name, description: desc, price: parseFloat(price), duration_minutes: parseInt(dur),
         deposit_amount: deposit.trim() === "" ? null : parseFloat(deposit),
+        image_url: imageUrl.trim() || null,
       });
       if (editId) {
         return fetch(`/api/nail/admin/services/${editId}`, { method: "PUT", headers: authH(token), body }).then(r => r.json());
@@ -1390,7 +1731,10 @@ function ServicesTab({ token }: { token: string }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {services.map((s: any) => (
           <div key={s.id} style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: `${s.color}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>💅</div>
+            {s.image_url
+              ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}><img src={s.image_url} alt={s.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>
+              : <div style={{ width: 44, height: 44, borderRadius: 12, background: `${s.color}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>💅</div>
+            }
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, color: A.text, fontSize: 15 }}>{s.name}</div>
               {s.description && <div style={{ fontSize: 13, color: A.sub }}>{s.description}</div>}
@@ -1430,6 +1774,7 @@ function ServicesTab({ token }: { token: string }) {
               { label: "ราคา (฿)", val: price, set: setPrice, ph: "350", type: "number" },
               { label: "ระยะเวลา (นาที)", val: dur, set: setDur, ph: "90", type: "number" },
               { label: "ค่ามัดจำ (฿) — เว้นว่าง = ใช้ค่าเริ่มต้นของร้าน", val: deposit, set: setDeposit, ph: "เช่น 100", type: "number" },
+              { label: "URL รูปตัวอย่าง (ไม่บังคับ) — แนะนำใช้ postimages.org", val: imageUrl, set: setImageUrl, ph: "https://...", type: "text" },
             ].map(f => (
               <div key={f.label} style={{ marginBottom: 12 }}>
                 <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>{f.label}</label>
@@ -2721,16 +3066,21 @@ function AdminBillingBlock({
 }
 
 // ─── Weekly recurring slot template ──────────────────────────────────────────
-const DAY_NAMES_TH = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
+const DAY_NAMES_TH  = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
+const DAY_SHORT_TH  = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
+const DOW_HEADER_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+const MONTH_TH_FULL = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+                        "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
 
 function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenerated: () => void }) {
   const shopKey = useShopSlug() ?? "default";
-
   const qc = useQueryClient();
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [genResult, setGenResult] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(true);
+
+  const [rows, setRows]       = useState<any[] | null>(null);
+  const [selDay, setSelDay]   = useState<number | null>(null);
+  const [saved, setSaved]     = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [showAdv, setShowAdv] = useState(false);
 
   const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["nail-admin-slot-templates", shopKey],
@@ -2744,54 +3094,49 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
   });
 
   useEffect(() => {
-    if (Array.isArray(data) && !rows) setRows(data.map((d: any) => ({
-      ...d,
-      extra_blocks: (() => { try { return JSON.parse(d.extra_blocks || "[]"); } catch { return []; } })()
-    })));
+    if (Array.isArray(data) && !rows)
+      setRows(data.map((d: any) => ({
+        ...d,
+        extra_blocks: (() => { try { return JSON.parse(d.extra_blocks || "[]"); } catch { return []; } })()
+      })));
   }, [data]);
 
+  // บันทึก template แล้ว auto-sync 30 วันข้างหน้าในครั้งเดียว
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch("/api/nail/admin/slot-templates", {
+      const r1 = await fetch("/api/nail/admin/slot-templates", {
         method: "PUT",
         headers: authH(token),
         body: JSON.stringify({ templates: rows!.map(r => ({ ...r, extra_blocks: JSON.stringify(r.extra_blocks || []) })) }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
-      return data;
-    },
-    onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates", shopKey] });
-      // การบันทึกเทมเพลตจะ sync สล็อตจริงล่วงหน้า 60 วันไปด้วยฝั่ง backend ทันที
-      // ต้อง invalidate สล็อตด้วย ไม่งั้นแท็บ "ช่วงเวลาจอง" จะยังโชว์ข้อมูลเก่าจนกว่าจะรีเฟรชหน้าเว็บ
-      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
-    },
-    onError: (e: any) => alert(`บันทึกเทมเพลตไม่สำเร็จ: ${e.message}`),
-  });
-
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch("/api/nail/admin/slot-templates/generate", {
+      const d1 = await r1.json();
+      if (!r1.ok) throw new Error(d1?.detail ?? `HTTP ${r1.status}`);
+      // auto-sync 30 วันข้างหน้าทันที
+      const r2 = await fetch("/api/nail/admin/slot-templates/sync-future", {
         method: "POST",
         headers: authH(token),
         body: JSON.stringify({ days: 30 }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
-      return data;
+      const d2 = await r2.json();
+      if (!r2.ok) throw new Error(d2?.detail ?? `HTTP ${r2.status}`);
+      return d2;
     },
     onSuccess: (d: any) => {
-      setGenResult(`สร้างสล็อตให้แล้ว ${d.generated_count} วัน (จาก 30 วันข้างหน้า)`);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+      qc.invalidateQueries({ queryKey: ["nail-admin-slot-templates", shopKey] });
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
       onGenerated();
-      setTimeout(() => setGenResult(null), 4000);
+      if (d.changed_dates?.length > 0)
+        setSyncMsg(`อัปเดตตารางแล้ว ${d.changed_dates.length} วัน (สล็อตที่มีการจองไม่ถูกแตะ)`);
+      else
+        setSyncMsg("ตารางทุกวันตรงกับเทมเพลตแล้ว");
+      setTimeout(() => setSyncMsg(null), 5000);
     },
-    onError: (e: any) => alert(`สร้างสล็อตไม่สำเร็จ: ${e.message}`),
+    onError: (e: any) => alert(`บันทึกไม่สำเร็จ: ${e.message}`),
   });
 
-  // Sync สล็อตที่มีอยู่แล้วให้ตรงกับเทมเพลตล่าสุด (ต่างจาก generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน)
+  // (ขั้นสูง) Sync เฉพาะเจาะจง
   const syncMutation = useMutation({
     mutationFn: async () => {
       const r = await fetch("/api/nail/admin/slot-templates/sync-future", {
@@ -2804,192 +3149,266 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
       return data;
     },
     onSuccess: (d: any) => {
-      setGenResult(
-        d.changed_dates.length > 0
-          ? `ซิงค์แล้ว ${d.changed_dates.length} วัน (ลบสล็อตว่างเก่า ${d.total_deleted} • สร้างใหม่ ${d.total_created} • สล็อตที่มีคนจองแล้วไม่ถูกแตะต้อง)`
-          : "ทุกวันตรงกับเทมเพลตล่าสุดอยู่แล้ว ไม่มีอะไรต้องแก้"
-      );
+      qc.invalidateQueries({ queryKey: ["nail-admin-slots", shopKey] });
       onGenerated();
-      setTimeout(() => setGenResult(null), 6000);
+      setSyncMsg(
+        d.changed_dates?.length > 0
+          ? `Sync แล้ว ${d.changed_dates.length} วัน (สร้างใหม่ ${d.total_created} • ลบเก่า ${d.total_deleted})`
+          : "ทุกวันตรงกับเทมเพลตล่าสุดอยู่แล้ว"
+      );
+      setTimeout(() => setSyncMsg(null), 5000);
     },
-    onError: (e: any) => alert(`ซิงค์สล็อตไม่สำเร็จ: ${e.message}`),
+    onError: (e: any) => alert(`Sync ไม่สำเร็จ: ${e.message}`),
   });
 
-  const updateRow = (day_of_week: number, patch: object) => {
-    setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? { ...r, ...patch } : r));
+  const updateRow = (dow: number, patch: object) =>
+    setRows(prev => prev!.map(r => r.day_of_week === dow ? { ...r, ...patch } : r));
+  const addBlock = (dow: number, defRow: any) => {
+    // คำนวณ start_time ของบล็อกใหม่ = end time ของบล็อกล่าสุด (main row หรือ extra block สุดท้าย)
+    const blockEnd = (start: string, count: number, mins: number, gap: number) => {
+      const [sh, sm] = start.split(":").map(Number);
+      const total = sh * 60 + sm + count * (mins + gap) - gap;
+      return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    };
+    setRows(prev => prev!.map(r => {
+      if (r.day_of_week !== dow) return r;
+      const extras = r.extra_blocks || [];
+      const last = extras.length > 0 ? extras[extras.length - 1] : r;
+      const autoStart = blockEnd(
+        last.start_time,
+        last.rounds_count,
+        last.round_minutes ?? defRow.round_minutes,
+        last.gap_minutes ?? defRow.gap_minutes ?? 0,
+      );
+      return {
+        ...r, extra_blocks: [...extras,
+          { start_time: autoStart, rounds_count: 2, round_minutes: defRow.round_minutes, gap_minutes: defRow.gap_minutes || 0, max_bookings: defRow.max_bookings }],
+      };
+    }));
   };
-  const addBlock = (day_of_week: number, defRow: any) => {
-    setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? {
-      ...r,
-      extra_blocks: [...(r.extra_blocks || []), { start_time: "13:00", rounds_count: 2, round_minutes: defRow.round_minutes, gap_minutes: defRow.gap_minutes || 0, max_bookings: defRow.max_bookings }]
-    } : r));
-  };
-  const removeBlock = (day_of_week: number, idx: number) => {
-    setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? {
+  const removeBlock = (dow: number, idx: number) =>
+    setRows(prev => prev!.map(r => r.day_of_week === dow ? {
       ...r, extra_blocks: (r.extra_blocks || []).filter((_: any, i: number) => i !== idx)
     } : r));
-  };
-  const updateBlock = (day_of_week: number, idx: number, patch: object) => {
-    setRows(prev => prev!.map(r => r.day_of_week === day_of_week ? {
+  const updateBlock = (dow: number, idx: number, patch: object) =>
+    setRows(prev => prev!.map(r => r.day_of_week === dow ? {
       ...r, extra_blocks: (r.extra_blocks || []).map((b: any, i: number) => i === idx ? { ...b, ...patch } : b)
     } : r));
-  };
 
-  if (isError) {
-    return (
-      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-        <p style={{ color: A.error, fontSize: 13, textAlign: "center", margin: 0 }}>⚠️ โหลดเทมเพลตไม่สำเร็จ — กรุณา Refresh หรือล็อกอินใหม่</p>
-      </div>
-    );
-  }
+  if (isError) return (
+    <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+      <p style={{ color: A.error, fontSize: 13, textAlign: "center", margin: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <AlertTriangle size={14} /> โหลดเทมเพลตไม่สำเร็จ — กรุณา Refresh หรือล็อกอินใหม่
+      </p>
+    </div>
+  );
+  if (isLoading || !rows) return (
+    <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16, textAlign: "center" }}>
+      <Loader2 size={20} color={A.primary} className="animate-spin" />
+    </div>
+  );
 
-  if (isLoading || !rows) {
-    return (
-      <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16, textAlign: "center" }}>
-        <Loader2 size={20} color={A.primary} className="animate-spin" />
-      </div>
-    );
-  }
+  const selectedRow = selDay !== null ? rows.find(r => r.day_of_week === selDay) : null;
+  const openRows    = rows.filter(r => r.is_open);
 
   return (
     <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-      <button onClick={() => setExpanded(e => !e)} style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "inherit" }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-          <Calendar size={16} color={A.primary} /> เทมเพลตสล็อตประจำสัปดาห์
-        </h3>
-        {expanded ? <ChevronUp size={18} color={A.muted} /> : <ChevronDown size={18} color={A.muted} />}
-      </button>
-      <p style={{ color: A.sub, fontSize: 12, marginTop: 8, marginBottom: expanded ? 12 : 0 }}>
-        ตั้งค่าครั้งเดียว ระบบจะสร้างสล็อตให้อัตโนมัติทุกสัปดาห์ตามวัน — ถ้าวันไหนแก้เองแล้วจะไม่ถูกเขียนทับ
+      <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, margin: "0 0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+        <Calendar size={15} color={A.primary} /> เวลาทำการประจำสัปดาห์
+      </h3>
+      <p style={{ color: A.muted, fontSize: 12, margin: "0 0 14px" }}>
+        กดวันที่ต้องการตั้งเวลา — บันทึกแล้วระบบอัปเดตตาราง 30 วันข้างหน้าให้อัตโนมัติ
       </p>
 
-      {expanded && (
-        <>
-          {rows.every(r => !r.is_open) && (
-            <div style={{ background: A.infoBg, border: `1px solid ${A.info}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: A.info }}>
-              💡 ยังไม่ได้เปิดวันใดเลย — ติ๊ก <b>เปิดร้าน</b> ในวันที่ต้องการรับลูกค้า ตั้งเวลา แล้วกด <b>บันทึกเทมเพลต</b> และ <b>สร้างสล็อตล่วงหน้า</b>
-            </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-            {rows.map(r => (
-              <div key={r.day_of_week} style={{ border: `1.5px solid ${r.is_open ? A.border : A.grayBorder}`, borderRadius: 12, padding: 12, background: r.is_open ? A.pale : A.gray }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: r.is_open ? 10 : 0 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: A.text }}>วัน{DAY_NAMES_TH[r.day_of_week]}</span>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: A.sub }}>
-                    <input type="checkbox" checked={r.is_open} onChange={e => updateRow(r.day_of_week, { is_open: e.target.checked })} />
-                    เปิดร้าน
-                  </label>
-                </div>
-                {r.is_open && (
-                  <>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-                      <div>
-                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่มกี่โมง</label>
-                        <input type="time" value={r.start_time} onChange={e => updateRow(r.day_of_week, { start_time: e.target.value })}
-                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
-                        <NumberField min={0} value={r.rounds_count} onChange={n => updateRow(r.day_of_week, { rounds_count: n })}
-                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาวคิว (นาที)</label>
-                        <NumberField min={1} value={r.round_minutes} onChange={n => updateRow(r.day_of_week, { round_minutes: n })}
-                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/คิว</label>
-                        <NumberField min={1} value={r.max_bookings} onChange={n => updateRow(r.day_of_week, { max_bookings: n })}
-                          style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                      </div>
-                    </div>
-                    {/* Preview บล็อกหลัก */}
-                    {(() => {
-                      const times = computeSlotTimes(r.start_time, r.rounds_count, r.round_minutes, r.gap_minutes ?? 0);
-                      if (times.length === 0) return null;
-                      return (
-                        <div style={{ background: A.bg, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, color: A.sub }}>
-                          <span style={{ fontWeight: 600, color: A.primary, marginRight: 6 }}>บล็อก 1:</span>
-                          {times.slice(0, 12).join("  •  ")}
-                          {r.rounds_count > 12 && <span style={{ color: A.muted }}> … +{r.rounds_count - 12} เพิ่มเติม</span>}
-                        </div>
-                      );
-                    })()}
+      {/* ── Day pills ── */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {rows.map(r => {
+          const active = selDay === r.day_of_week;
+          return (
+            <button key={r.day_of_week}
+              onClick={() => setSelDay(active ? null : r.day_of_week)}
+              style={{
+                border: `2px solid ${active ? A.primary : r.is_open ? A.border : A.grayBorder}`,
+                borderRadius: 10, padding: "8px 14px", cursor: "pointer",
+                fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                background: active ? A.pale : r.is_open ? A.card : A.gray,
+                color: active ? A.primary : r.is_open ? A.text : A.muted,
+                position: "relative",
+              }}>
+              {DAY_SHORT_TH[r.day_of_week]}
+              {r.is_open && (
+                <span style={{ position: "absolute", top: -5, right: -5, background: A.primary, borderRadius: "50%", width: 8, height: 8, border: `2px solid ${A.card}`, display: "block" }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-                    {/* Extra Blocks */}
-                    {(r.extra_blocks || []).map((blk: any, idx: number) => (
-                      <div key={idx} style={{ border: `1.5px dashed ${A.primary}55`, borderRadius: 10, padding: 10, marginTop: 8, background: A.pale }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: A.primary }}>+ บล็อก {idx + 2}</span>
-                          <button onClick={() => removeBlock(r.day_of_week, idx)}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: A.error, fontSize: 12, padding: "2px 6px", borderRadius: 6, fontFamily: "inherit" }}>✕ ลบ</button>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-                          <div>
-                            <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่มกี่โมง</label>
-                            <input type="time" value={blk.start_time} onChange={e => updateBlock(r.day_of_week, idx, { start_time: e.target.value })}
-                              style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
-                            <NumberField min={0} value={blk.rounds_count} onChange={n => updateBlock(r.day_of_week, idx, { rounds_count: n })}
-                              style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาว (นาที)</label>
-                            <NumberField min={1} value={blk.round_minutes} onChange={n => updateBlock(r.day_of_week, idx, { round_minutes: n })}
-                              style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับ/คิว</label>
-                            <NumberField min={1} value={blk.max_bookings} onChange={n => updateBlock(r.day_of_week, idx, { max_bookings: n })}
-                              style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.bg }} />
-                          </div>
-                        </div>
-                        {(() => {
-                          const times = computeSlotTimes(blk.start_time, blk.rounds_count, blk.round_minutes, blk.gap_minutes ?? 0);
-                          if (times.length === 0) return null;
-                          return (
-                            <div style={{ background: A.bg, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, color: A.sub, marginTop: 6 }}>
-                              <span style={{ fontWeight: 600, color: A.primary, marginRight: 6 }}>ตัวอย่าง:</span>
-                              {times.slice(0, 12).join("  •  ")}
-                              {blk.rounds_count > 12 && <span style={{ color: A.muted }}> … +{blk.rounds_count - 12}</span>}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ))}
-                    <button onClick={() => addBlock(r.day_of_week, r)}
-                      style={{ width: "100%", marginTop: 8, background: "none", border: `1px dashed ${A.primary}77`, borderRadius: 8, padding: "7px", cursor: "pointer", color: A.primary, fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
-                      + เพิ่มช่วงเวลา (บล็อก {(r.extra_blocks?.length || 0) + 2})
-                    </button>
-                  </>
-                )}
+      {/* ── Selected day config panel ── */}
+      {selectedRow && (
+        <div style={{ border: `1.5px solid ${A.border}`, borderRadius: 12, padding: 14, marginBottom: 14, background: A.pale }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, color: A.text }}>วัน{DAY_NAMES_TH[selectedRow.day_of_week]}</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <span style={{ fontSize: 12, color: A.sub }}>{selectedRow.is_open ? "เปิดร้าน" : "ปิดร้าน"}</span>
+              {/* toggle switch */}
+              <div onClick={() => updateRow(selectedRow.day_of_week, { is_open: !selectedRow.is_open })}
+                style={{ width: 36, height: 20, borderRadius: 10, background: selectedRow.is_open ? A.primary : A.grayBorder, position: "relative", cursor: "pointer", flexShrink: 0 }}>
+                <div style={{ position: "absolute", top: 2, left: selectedRow.is_open ? 18 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
               </div>
-            ))}
+            </label>
           </div>
 
-          <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
-            style={{ width: "100%", background: saved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "11px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
-            {saveMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : saved ? <><CheckCircle size={15} /> บันทึกแล้ว</> : <><Save size={15} /> บันทึกเทมเพลต</>}
-          </button>
+          {selectedRow.is_open && (
+            <>
+              {/* 3-col: เริ่ม / จำนวนคิว / รับต่อคิว */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่มกี่โมง</label>
+                  <TimeSelect value={selectedRow.start_time} onChange={v => updateRow(selectedRow.day_of_week, { start_time: v })} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
+                  <NumberField min={0} value={selectedRow.rounds_count} onChange={n => updateRow(selectedRow.day_of_week, { rounds_count: n })}
+                    style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "7px 8px", fontFamily: "inherit", fontSize: 13, boxSizing: "border-box", background: A.card }} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับต่อคิว</label>
+                  <NumberField min={1} value={selectedRow.max_bookings} onChange={n => updateRow(selectedRow.day_of_week, { max_bookings: n })}
+                    style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "7px 8px", fontFamily: "inherit", fontSize: 13, boxSizing: "border-box", background: A.card }} />
+                </div>
+              </div>
+              {/* ความยาวคิว — แถวแยก ป้องกัน overflow */}
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาวต่อคิว (นาที)</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <NumberField min={1} value={selectedRow.round_minutes} onChange={n => updateRow(selectedRow.day_of_week, { round_minutes: n })}
+                    style={{ width: 80, border: `1px solid ${A.border}`, borderRadius: 8, padding: "7px 8px", fontFamily: "inherit", fontSize: 13, boxSizing: "border-box", background: A.card }} />
+                  <span style={{ fontSize: 12, color: A.muted }}>นาที / คิว</span>
+                </div>
+              </div>
+              {/* Live preview */}
+              {(() => {
+                const times = computeSlotTimes(selectedRow.start_time, selectedRow.rounds_count, selectedRow.round_minutes, selectedRow.gap_minutes ?? 0);
+                if (!times.length) return null;
+                return (
+                  <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 8, padding: "8px 12px", marginBottom: showAdv ? 10 : 0 }}>
+                    <span style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 4 }}>ตัวอย่างเวลา</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {times.slice(0, 8).map(t => (
+                        <span key={t} style={{ fontSize: 11, background: A.pale, color: A.primary, borderRadius: 6, padding: "3px 8px", fontWeight: 600 }}>{t}</span>
+                      ))}
+                      {selectedRow.rounds_count > 8 && <span style={{ fontSize: 11, color: A.muted }}>+{selectedRow.rounds_count - 8} เพิ่มเติม</span>}
+                    </div>
+                  </div>
+                );
+              })()}
 
-          <button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}
-            style={{ width: "100%", background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 8 }}>
-            {generateMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "สร้างสล็อตล่วงหน้า 30 วันตามเทมเพลตทันที (เฉพาะวันที่ยังไม่มีสล็อต)"}
-          </button>
+              {/* Extra blocks (advanced) */}
+              {showAdv && (selectedRow.extra_blocks || []).map((blk: any, idx: number) => (
+                <div key={idx} style={{ border: `1.5px dashed ${A.primary}55`, borderRadius: 10, padding: 10, marginTop: 8, background: A.pale }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: A.primary }}>บล็อก {idx + 2}</span>
+                    <button onClick={() => removeBlock(selectedRow.day_of_week, idx)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: A.error, fontSize: 12, padding: "2px 8px", borderRadius: 6, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4 }}>
+                      <X size={12} /> ลบ
+                    </button>
+                  </div>
+                  {/* 3-col: เริ่ม / จำนวนคิว / รับต่อคิว */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 6 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>เริ่มกี่โมง</label>
+                      <TimeSelect value={blk.start_time} onChange={v => updateBlock(selectedRow.day_of_week, idx, { start_time: v })} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>จำนวนคิว</label>
+                      <NumberField min={0} value={blk.rounds_count} onChange={n => updateBlock(selectedRow.day_of_week, idx, { rounds_count: n })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.card }} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>รับต่อคิว</label>
+                      <NumberField min={1} value={blk.max_bookings} onChange={n => updateBlock(selectedRow.day_of_week, idx, { max_bookings: n })}
+                        style={{ width: "100%", border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.card }} />
+                    </div>
+                  </div>
+                  {/* ความยาวต่อคิว — แถวแยก เหมือนบล็อกหลัก */}
+                  <div style={{ marginBottom: 6 }}>
+                    <label style={{ fontSize: 11, color: A.muted, display: "block", marginBottom: 3 }}>ความยาวต่อคิว (นาที)</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <NumberField min={1} value={blk.round_minutes ?? selectedRow.round_minutes} onChange={n => updateBlock(selectedRow.day_of_week, idx, { round_minutes: n })}
+                        style={{ width: 72, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 8px", fontFamily: "inherit", fontSize: 12, boxSizing: "border-box", background: A.card }} />
+                      <span style={{ fontSize: 11, color: A.muted }}>นาที / คิว</span>
+                    </div>
+                  </div>
+                  {(() => {
+                    const times = computeSlotTimes(blk.start_time, blk.rounds_count, blk.round_minutes ?? selectedRow.round_minutes, blk.gap_minutes ?? 0);
+                    if (!times.length) return null;
+                    return (
+                      <div style={{ background: A.card, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", fontSize: 11, color: A.sub }}>
+                        <span style={{ fontWeight: 600, color: A.primary, marginRight: 6 }}>ตัวอย่าง:</span>
+                        {times.slice(0, 6).join("  •  ")}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ))}
+              {showAdv && (
+                <button onClick={() => addBlock(selectedRow.day_of_week, selectedRow)}
+                  style={{ width: "100%", marginTop: 8, background: "none", border: `1px dashed ${A.primary}77`, borderRadius: 8, padding: "7px", cursor: "pointer", color: A.primary, fontSize: 12, fontWeight: 600, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <Plus size={13} /> เพิ่มช่วงเวลา (บล็อก {(selectedRow.extra_blocks?.length || 0) + 2})
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
-          <button onClick={() => {
-              if (confirm("ซิงค์สล็อต 30 วันข้างหน้าให้ตรงกับเทมเพลตล่าสุด?\n\nระบบจะลบสล็อตว่าง (ยังไม่มีคนจอง) ที่ไม่ตรงกับเทมเพลตปัจจุบัน แล้วสร้างใหม่ให้ตรง — สล็อตที่มีคนจองแล้วจะไม่ถูกแตะต้องเด็ดขาด")) {
-                syncMutation.mutate();
-              }
-            }} disabled={syncMutation.isPending}
-            style={{ width: "100%", background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-            {syncMutation.isPending ? <Loader2 size={14} className="animate-spin" style={{ display: "inline" }} /> : "ซิงค์สล็อตให้ตรงเทมเพลตล่าสุด (ใช้เมื่อแก้เทมเพลตแล้ววันในอนาคตยังเป็นเวลาเก่า)"}
+      {/* ── Summary (no day selected) ── */}
+      {selDay === null && (
+        <div style={{ background: A.successBg, border: `1px solid ${A.success}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: A.success, fontWeight: 700, marginBottom: openRows.length ? 6 : 0, display: "flex", alignItems: "center", gap: 6 }}>
+            <CheckCircle size={13} /> เปิด {openRows.length} วัน / สัปดาห์
+            {openRows.length === 0 && <span style={{ color: A.muted, fontWeight: 400 }}>— กดวันด้านบนเพื่อตั้งค่า</span>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {openRows.map(r => (
+              <div key={r.day_of_week} style={{ fontSize: 12, color: A.sub, display: "flex", justifyContent: "space-between" }}>
+                <span>วัน{DAY_NAMES_TH[r.day_of_week]}</span>
+                <span style={{ color: A.muted }}>{r.start_time} · {r.rounds_count} คิว · {r.round_minutes} น./คิว</span>
+              </div>
+            ))}
+            {rows.filter(r => !r.is_open).length > 0 && (
+              <div style={{ fontSize: 11, color: A.muted, marginTop: 2 }}>
+                ปิด: {rows.filter(r => !r.is_open).map(r => `วัน${DAY_NAMES_TH[r.day_of_week]}`).join(", ")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ONE save button ── */}
+      <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+        style={{ width: "100%", background: saved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+        {saveMutation.isPending ? <><Loader2 size={16} className="animate-spin" /> กำลังบันทึก & อัปเดตตาราง…</> : saved ? <><CheckCircle size={16} /> บันทึกแล้ว!</> : <><Save size={16} /> บันทึก & อัปเดตตาราง</>}
+      </button>
+
+      {syncMsg && <p style={{ textAlign: "center", color: A.success, fontSize: 12, margin: "0 0 8px" }}>{syncMsg}</p>}
+
+      {/* ── Advanced (collapsed) ── */}
+      <button onClick={() => setShowAdv(v => !v)}
+        style={{ width: "100%", background: "none", border: "none", cursor: "pointer", color: A.muted, fontSize: 12, padding: "4px 0", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <Settings2 size={13} /> ตัวเลือกขั้นสูง (เพิ่มบล็อกเวลา / sync เฉพาะเจาะจง) {showAdv ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+      {showAdv && (
+        <div style={{ border: `1px dashed ${A.grayBorder}`, borderRadius: 10, padding: 12, marginTop: 8, background: A.gray }}>
+          <p style={{ fontSize: 12, color: A.muted, margin: "0 0 10px" }}>
+            เพิ่มบล็อกเวลา — กดวันด้านบนก่อน แล้วบล็อกเพิ่มเติมจะปรากฏในแผงตั้งค่าวัน
+          </p>
+          <button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}
+            style={{ width: "100%", background: A.card, color: A.muted, border: `1px solid ${A.grayBorder}`, borderRadius: 8, padding: "8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            {syncMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <><RefreshCw size={13} /> Sync เฉพาะวันที่มีสล็อตเก่าอยู่แล้ว (ไม่บันทึก template)</>}
           </button>
-          {genResult && <p style={{ textAlign: "center", color: A.success, fontSize: 12, marginTop: 8 }}>{genResult}</p>}
-        </>
+        </div>
       )}
     </div>
   );
@@ -3007,7 +3426,11 @@ function ScheduleTab({ token }: { token: string }) {
   const [closedDates, setClosedDates] = useState<string[]>([]);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
-  // ── Daily template (เทมเพลตเฉพาะวัน) ──
+  // ── Calendar state for closed-dates picker ──
+  const [calYear, setCalYear]   = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth()); // 0-based
+
+  // ── Daily template (เทมเพลตเฉพาะวัน — ยังเก็บไว้ใน "เพิ่มสล็อต" modal) ──
   const [showDailyTpl, setShowDailyTpl] = useState(false);
   const [dailyTplBlocks, setDailyTplBlocks] = useState<any[]>([
     { start_time: "09:00", rounds_count: 4, round_minutes: 60, gap_minutes: 0, max_bookings: 1 },
@@ -3058,30 +3481,11 @@ function ScheduleTab({ token }: { token: string }) {
     const dow = (new Date(selDate + "T00:00:00").getDay() + 6) % 7; // 0=จันทร์
     const tmpl = templates.find((t: any) => t.day_of_week === dow);
     if (!tmpl || !tmpl.is_open) return null;
-
-    // คำนวณ start_times ที่คาดหวังจากเทมเพลต (ทั้ง main block และ extra_blocks)
-    // computeSlotTimes คืนค่า "HH:MM–HH:MM" ต้องตัดเฉพาะส่วน start ออกมาเปรียบเทียบ
-    const expectedStarts = new Set<string>();
-    computeSlotTimes(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes ?? 0)
-      .forEach(range => { const s = range.split("–")[0]; if (s) expectedStarts.add(s); });
-    // รวม extra_blocks ด้วย
-    if (tmpl.extra_blocks) {
-      try {
-        const blocks: any[] = JSON.parse(tmpl.extra_blocks);
-        blocks.forEach(blk => {
-          computeSlotTimes(blk.start_time, blk.rounds_count, blk.round_minutes, blk.gap_minutes ?? 0)
-            .forEach(range => { const s = range.split("–")[0]; if (s) expectedStarts.add(s); });
-        });
-      } catch { /* ignore */ }
-    }
-
+    const expected = new Set(computeSlotTimes(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes ?? 0));
     const actual = new Set(slots.map((s: any) => s.start_time));
-    if (expectedStarts.size === 0) return null;
-    // ตรวจว่า start_times ที่คาดหวังทั้งหมดมีอยู่จริงในสล็อตปัจจุบัน
-    const allExpectedPresent = [...expectedStarts].every(t => actual.has(t));
-    // ตรวจว่าไม่มีสล็อตเกินที่ไม่ได้อยู่ในเทมเพลต
-    const noExtra = [...actual].every(t => expectedStarts.has(t));
-    return allExpectedPresent && noExtra ? "match" : "mismatch";
+    if (expected.size === 0) return null;
+    const matches = expected.size === actual.size && [...expected].every(t => actual.has(t));
+    return matches ? "match" : "mismatch";
   })();
 
   const saveClosedDates = useMutation({
@@ -3226,43 +3630,84 @@ function ScheduleTab({ token }: { token: string }) {
 
   const isClosed = closedDates.includes(selDate);
 
-  // Generate next 30 days for closed date picker
-  const next30 = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return toISO(d);
-  });
+  // ── Calendar helpers ──
+  const todayISO = toISO(new Date());
+  const calFirstDow = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const calDaysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const calISO = (d: number) =>
+    `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const prevCalMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); };
+  const nextCalMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); };
 
   return (
     <div style={{ padding: 16 }}>
-      {/* Closed Days Section */}
+      {/* ── Closed Days Section — calendar grid ── */}
       <div style={{ background: A.card, border: `1.5px solid ${A.border}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-          <Ban size={16} color={A.error} /> วันปิดร้าน
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: A.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+          <Ban size={15} color={A.error} /> วันปิดร้าน
         </h3>
-        <p style={{ color: A.sub, fontSize: 12, marginBottom: 12 }}>เลือกวันที่ต้องการปิดร้าน ลูกค้าจะจองคิวไม่ได้ในวันนั้น</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-          {next30.map(d => {
-            const isCl = closedDates.includes(d);
-            const dateObj = new Date(d + "T00:00:00");
+        <p style={{ color: A.muted, fontSize: 12, margin: "0 0 14px" }}>กดวันที่ต้องการปิด — กดซ้ำเพื่อยกเลิก</p>
+
+        {/* Month navigation */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <button onClick={prevCalMonth} style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: A.primary, display: "flex", alignItems: "center" }}>
+            <ChevronLeft size={16} />
+          </button>
+          <span style={{ fontWeight: 700, fontSize: 14, color: A.text }}>
+            {MONTH_TH_FULL[calMonth]} {calYear + 543}
+          </span>
+          <button onClick={nextCalMonth} style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: A.primary, display: "flex", alignItems: "center" }}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* DOW headers */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
+          {DOW_HEADER_TH.map(h => (
+            <div key={h} style={{ textAlign: "center", fontSize: 11, color: A.muted, fontWeight: 600, padding: "3px 0" }}>{h}</div>
+          ))}
+        </div>
+
+        {/* Calendar cells */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 12 }}>
+          {Array(calFirstDow).fill(null).map((_, i) => <div key={`e-${i}`} />)}
+          {Array.from({ length: calDaysInMonth }, (_, i) => i + 1).map(d => {
+            const key   = calISO(d);
+            const isCl  = closedDates.includes(key);
+            const isPast = key < todayISO;
+            const isToday = key === todayISO;
             return (
-              <button key={d} onClick={() => toggleClosedDate(d)}
+              <button key={key}
+                onClick={() => { if (!isPast) toggleClosedDate(key); }}
+                disabled={isPast}
                 style={{
-                  border: `1.5px solid ${isCl ? A.error : A.border}`,
-                  borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit",
-                  background: isCl ? A.errorBg : A.bg, color: isCl ? A.error : A.sub,
-                  fontWeight: isCl ? 700 : 400,
+                  border: `1.5px solid ${isCl ? A.error : isToday ? A.primary : A.grayBorder}`,
+                  borderRadius: 8, padding: "7px 2px", cursor: isPast ? "default" : "pointer",
+                  background: isCl ? A.errorBg : isToday ? A.pale : A.card,
+                  color: isCl ? A.error : isPast ? A.grayBorder : isToday ? A.primary : A.text,
+                  fontWeight: isCl || isToday ? 700 : 400, fontSize: 13,
+                  fontFamily: "inherit", textAlign: "center", opacity: isPast ? 0.4 : 1,
+                  position: "relative",
                 }}>
-                {dateObj.toLocaleDateString("th-TH", { day: "numeric", month: "short" })}
+                {d}
+                {isCl && <span style={{ position: "absolute", bottom: 1, left: "50%", transform: "translateX(-50%)", fontSize: 7, color: A.error, lineHeight: 1 }}>✕</span>}
               </button>
             );
           })}
         </div>
-        {closedDates.length > 0 && (
-          <div style={{ marginBottom: 12, fontSize: 12, color: A.error }}>
-            ปิดทั้งหมด {closedDates.length} วัน: {closedDates.sort().map(d => fmtDate(d)).join(", ")}
+
+        {/* Summary */}
+        {closedDates.length > 0 ? (
+          <div style={{ background: A.errorBg, border: `1px solid ${A.error}33`, borderRadius: 10, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: A.error }}>
+            <span style={{ fontWeight: 700 }}>ปิด {closedDates.length} วัน: </span>
+            {closedDates.sort().map(d => fmtDate(d)).join(", ")}
+          </div>
+        ) : (
+          <div style={{ background: A.successBg, border: `1px solid ${A.success}33`, borderRadius: 10, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: A.success, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+            <CheckCircle size={13} /> ไม่มีวันปิดร้านในเดือนนี้
           </div>
         )}
+
         <button onClick={() => saveClosedDates.mutate()}
           style={{ width: "100%", background: settingsSaved ? A.success : `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "11px", cursor: "pointer", fontWeight: 700, fontFamily: "inherit", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           {saveClosedDates.isPending ? <Loader2 size={15} className="animate-spin" /> : settingsSaved ? <><CheckCircle size={15} /> บันทึกแล้ว</> : <><Save size={15} /> บันทึกวันปิดร้าน</>}
@@ -3295,50 +3740,29 @@ function ScheduleTab({ token }: { token: string }) {
           title="วันถัดไป">
           <ChevronRight size={16} />
         </button>
-        <button onClick={() => setShowDailyTpl(true)}
-          title="เพิ่มสล็อตหลายช่วงเวลาพร้อมกัน โดยกำหนดบล็อกเวลา"
-          style={{ background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>
-          📋 หลายสล็อต
-        </button>
         <button onClick={() => setShowAdd(true)}
           style={{ background: A.primary, color: "#fff", border: "none", borderRadius: 10, padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>
-          <Plus size={15} /> เพิ่ม
+          <Plus size={15} /> เพิ่มสล็อต
         </button>
       </div>
 
       {isClosed && (
-        <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13, fontWeight: 600 }}>
-          🚫 วันนี้ตั้งเป็นวันปิดร้าน ลูกค้าจองไม่ได้
+        <div style={{ background: A.errorBg, border: `1px solid ${A.error}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.error, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          <Ban size={14} /> วันนี้ตั้งเป็นวันปิดร้าน ลูกค้าจองไม่ได้
         </div>
       )}
 
       {!isClosed && templateSyncStatus === "mismatch" && (
-        <div style={{ background: A.warningBg ?? "#FFF6E5", border: `1px solid ${A.warning}66`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.warning, fontSize: 12, fontWeight: 600 }}>
-          ⚠️ สล็อตวันนี้ไม่ตรงกับเทมเพลตล่าสุดแล้ว (อาจเป็นเพราะแก้เทมเพลตทีหลัง) — กด "🔄 รีเซ็ตวันนี้" ด้านล่าง หรือใช้ปุ่ม "ซิงค์สล็อตให้ตรงเทมเพลตล่าสุด" ในส่วนเทมเพลตด้านบนเพื่อแก้ทีเดียวหลายวัน
+        <div style={{ background: A.warningBg ?? "#FFF6E5", border: `1px solid ${A.warning}66`, borderRadius: 10, padding: "10px 14px", marginBottom: 10, color: A.warning, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <AlertTriangle size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+          สล็อตวันนี้ไม่ตรงกับเทมเพลตล่าสุด — กด "รีเซ็ตวันนี้" ด้านล่าง หรือบันทึกเทมเพลตใหม่เพื่ออัปเดตทีเดียวหลายวัน
         </div>
       )}
       {!isClosed && templateSyncStatus === "match" && (
-        <div style={{ color: A.success, fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
-          ✅ สล็อตวันนี้ตรงกับเทมเพลตล่าสุด
+        <div style={{ color: A.success, fontSize: 12, fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+          <CheckCircle size={13} /> สล็อตวันนี้ตรงกับเทมเพลตล่าสุด
         </div>
       )}
-
-      {/* ปุ่มสร้าง 7 วัน — ใช้เทมเพลตจริงของร้าน */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-        <button onClick={() => batchMutation.mutate(selDate)} disabled={batchMutation.isPending}
-          style={{ flex: 1, background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
-          {batchMutation.isPending ? <Loader2 size={13} className="animate-spin" style={{ display: "inline" }} /> : "📅 สร้างสล็อต 7 วัน (จากเทมเพลต)"}
-        </button>
-        <button onClick={() => {
-          if (confirm(`รีเซ็ตสล็อตวันที่ ${selDate} ให้ตรงกับเทมเพลต?\n(สล็อตที่ยังว่างจะถูกลบและสร้างใหม่ — สล็อตที่มีการจองจะเก็บไว้)`)) {
-            applyTemplateMutation.mutate(selDate);
-          }
-        }} disabled={applyTemplateMutation.isPending}
-          style={{ background: A.pale, color: A.primary, border: `1px solid ${A.border}`, borderRadius: 10, padding: "9px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
-          title="ล้างสล็อตว่างวันนี้และสร้างใหม่จากเทมเพลต">
-          {applyTemplateMutation.isPending ? <Loader2 size={13} className="animate-spin" style={{ display: "inline" }} /> : "🔄 รีเซ็ตวันนี้"}
-        </button>
-      </div>
 
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 32 }}><Loader2 size={24} color={A.primary} className="animate-spin" /></div>
@@ -3351,7 +3775,7 @@ function ScheduleTab({ token }: { token: string }) {
               onClick={() => applyTemplateMutation.mutate(selDate)}
               disabled={applyTemplateMutation.isPending}
               style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 8 }}>
-              {applyTemplateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : "🔄"} สร้างสล็อตจากเทมเพลต
+              {applyTemplateMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} สร้างสล็อตจากเทมเพลต
             </button>
           )}
         </div>
@@ -3389,6 +3813,17 @@ function ScheduleTab({ token }: { token: string }) {
         </div>
       )}
 
+      {/* รีเซ็ตวันนี้ — แสดงเมื่อมีสล็อตอยู่แล้ว */}
+      {slots.length > 0 && !isClosed && (
+        <button onClick={() => {
+          if (confirm(`รีเซ็ตสล็อตวันที่ ${selDate} ให้ตรงกับเทมเพลต?\n(สล็อตว่างจะถูกลบและสร้างใหม่ — สล็อตที่มีการจองจะเก็บไว้)`))
+            applyTemplateMutation.mutate(selDate);
+        }} disabled={applyTemplateMutation.isPending}
+          style={{ width: "100%", marginTop: 10, background: "none", border: `1px solid ${A.grayBorder}`, borderRadius: 8, padding: "7px", cursor: "pointer", fontSize: 12, color: A.muted, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          {applyTemplateMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} รีเซ็ตวันนี้ให้ตรงกับเทมเพลต
+        </button>
+      )}
+
       {/* Edit Slot Time Modal — แก้เวลาเฉพาะสล็อตนี้ ไม่ว่าจะมีคนจองแล้วหรือไม่ */}
       {editSlot && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
@@ -3403,16 +3838,14 @@ function ScheduleTab({ token }: { token: string }) {
             <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>เริ่ม</label>
-                <input type="time" value={editStart} onChange={e => setEditStart(e.target.value)}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${A.border}`, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" }} />
+                <TimeSelect value={editStart} onChange={setEditStart} />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 12, color: A.sub, display: "block", marginBottom: 4 }}>สิ้นสุด</label>
-                <input type="time" value={editEnd} onChange={e => setEditEnd(e.target.value)}
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${A.border}`, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" }} />
+                <TimeSelect value={editEnd} onChange={setEditEnd} />
               </div>
             </div>
-            {editSlotError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {editSlotError}</p>}
+            {editSlotError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle size={13} /> {editSlotError}</p>}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setEditSlot(null); setEditSlotError(""); }}
                 style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
@@ -3429,10 +3862,10 @@ function ScheduleTab({ token }: { token: string }) {
       {deleteSlotId !== null && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
           <div style={{ background: A.card, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360, textAlign: "center" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Trash2 size={36} color={A.error} /></div>
             <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 8 }}>ยืนยันลบ Slot?</h3>
             <p style={{ fontSize: 14, color: A.sub, marginBottom: 20 }}>ไม่สามารถกู้คืนได้หลังลบแล้ว</p>
-            {slotDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {slotDeleteError}</p>}
+            {slotDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12, display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><AlertTriangle size={13} /> {slotDeleteError}</p>}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setDeleteSlotId(null); setSlotDeleteError(""); }}
                 style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
@@ -3477,10 +3910,10 @@ function ScheduleTab({ token }: { token: string }) {
       {showDailyTpl && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 9999 }}>
           <motion.div initial={{ y: 120 }} animate={{ y: 0 }} style={{ background: A.card, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto" }}>
-            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, color: A.text }}>📋 เทมเพลตเฉพาะวัน</h3>
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 4, color: A.text, display: "flex", alignItems: "center", gap: 8 }}><Calendar size={17} color={A.primary} /> เทมเพลตเฉพาะวัน</h3>
             <p style={{ fontSize: 12, color: A.sub, marginBottom: 14 }}>
               {fmtDateLong(selDate)} — กำหนดหลายบล็อกเวลาแล้วสร้างพร้อมกัน<br />
-              <span style={{ color: A.warning, fontWeight: 600 }}>⚠️ สล็อตที่ว่างของวันนี้จะถูกลบแล้วสร้างใหม่ตามที่กำหนด (สล็อตที่มีการจองอยู่แล้วจะถูกเก็บไว้)</span>
+              <span style={{ color: A.warning, fontWeight: 600, display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}><AlertTriangle size={12} /> สล็อตที่ว่างของวันนี้จะถูกลบแล้วสร้างใหม่ตามที่กำหนด (สล็อตที่มีการจองอยู่แล้วจะถูกเก็บไว้)</span>
             </p>
 
             {dailyTplBlocks.map((blk: any, idx: number) => (
@@ -3658,10 +4091,10 @@ function GalleryTab({ token }: { token: string }) {
       {deleteGalleryId !== null && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
           <div style={{ background: A.card, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360, textAlign: "center" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Trash2 size={36} color={A.error} /></div>
             <h3 style={{ fontSize: 17, fontWeight: 700, color: A.text, marginBottom: 8 }}>ลบรูปผลงานนี้?</h3>
             <p style={{ fontSize: 14, color: A.sub, marginBottom: 20 }}>รูปจะหายไปจากแกลเลอรีทันที</p>
-            {galleryDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12 }}>⚠️ {galleryDeleteError}</p>}
+            {galleryDeleteError && <p style={{ color: A.error, fontSize: 13, marginBottom: 12, display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}><AlertTriangle size={13} /> {galleryDeleteError}</p>}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setDeleteGalleryId(null); setGalleryDeleteError(""); }}
                 style={{ flex: 1, background: A.gray, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>ยกเลิก</button>
@@ -3789,6 +4222,24 @@ function SettingsTab({ token }: { token: string }) {
             />
           </>
         )}
+      </div>
+
+      <Section title="ข้อมูลสำหรับลูกค้าที่จอง" />
+      <div style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: A.primary }}>
+        💡 ข้อมูลนี้จะแสดงใน popup หลังลูกค้าจ่ายมัดจำสำเร็จ และในหน้าตรวจสอบสถานะการจอง
+      </div>
+      {F("location_url", "ลิงก์ Google Maps / ที่อยู่ร้าน", "url", "https://maps.app.goo.gl/...")}
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 13, color: A.sub, fontWeight: 500, display: "block", marginBottom: 5 }}>
+          ข้อความต้อนรับ / แจ้งลูกค้า <span style={{ color: A.muted, fontWeight: 400 }}>(ปล่อยว่าง = ไม่แสดง)</span>
+        </label>
+        <textarea
+          value={form?.booking_note ?? ""}
+          onChange={e => setForm((p: any) => ({ ...p, booking_note: e.target.value || null }))}
+          placeholder={"เช่น มาถึงแจ้งที่เคาน์เตอร์ชั้น 1 ได้เลยนะคะ\nจอดรถได้ที่ลานจอดรถหน้าห้าง ฟรี 2 ชั่วโมง"}
+          rows={3}
+          style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: A.bg, resize: "vertical" }}
+        />
       </div>
 
       <Section title="โซเชียลมีเดีย" />
