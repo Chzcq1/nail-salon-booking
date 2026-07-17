@@ -18,7 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, 
 from pydantic import BaseModel
 from sqlalchemy import text, func, case, delete
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from backend.config import get_settings
 from backend.database import get_db
@@ -1532,6 +1532,168 @@ def admin_get_slot_templates(db: Session = Depends(get_db), authorization: str =
     ]
 
 
+def _batch_sync_slots_to_templates(
+    db: Session,
+    shop_id: int,
+    start_date,          # date object
+    days: int,
+    closed_dates_json: Optional[str] = None,
+) -> dict:
+    """
+    Sync สล็อตหลายวันให้ตรงกับเทมเพลตด้วย batch SQL — แทนการ loop ทีละวัน
+    ลดจาก ~300 SQL round-trip เหลือ ~5 statements เพื่อไม่ให้ timeout บน Neon/Render
+
+    กฎที่ยังคงเหมือนเดิม:
+    - สล็อตที่มี booking อ้างอิง (แม้ cancelled) จะไม่ถูกลบ (FK safety)
+    - สล็อตที่มีคนจองจะถูกเก็บ start_time เดิมไว้ — แต่ max_bookings/staff_id อัปเดตตามเทมเพลตล่าสุด
+    - สล็อตใหม่จะถูกสร้างเฉพาะที่ยังไม่มี start_time ซ้ำกับสล็อตที่เหลืออยู่ (surviving)
+    - วันปิดร้าน (closed_dates) จะข้ามการสร้างสล็อตใหม่ แต่จะยังลบสล็อตว่างออก
+    """
+    # ── 0. Build date list ────────────────────────────────────────────────────
+    closed_set: set = set()
+    if closed_dates_json:
+        try:
+            closed_set = set(json.loads(closed_dates_json))
+        except Exception:
+            pass
+
+    all_dates = [(start_date + timedelta(days=i)).isoformat() for i in range(days)]
+
+    # ── 1. Load all templates (7 rows max) — ONE query ───────────────────────
+    all_tmpls = db.query(NailSlotTemplate).filter_by(shop_id=shop_id).all()
+    tmpl_by_dow: dict[int, "NailSlotTemplate"] = {t.day_of_week: t for t in all_tmpls}
+
+    # ── 2. Load ALL existing slots for the date range — ONE query ─────────────
+    existing_slots = (
+        db.query(NailTimeSlot)
+        .filter(NailTimeSlot.shop_id == shop_id, NailTimeSlot.slot_date.in_(all_dates))
+        .all()
+    )
+    slot_ids = [sl.id for sl in existing_slots]
+
+    # ── 3. Load ALL booking counts — ONE query ────────────────────────────────
+    any_counts: dict[int, int] = {}
+    if slot_ids:
+        rows = (
+            db.query(
+                NailBooking.slot_id,
+                func.count(NailBooking.id).label("total"),
+            )
+            .filter(NailBooking.slot_id.in_(slot_ids))
+            .group_by(NailBooking.slot_id)
+            .all()
+        )
+        any_counts = {slot_id: int(total or 0) for slot_id, total in rows}
+
+    # ── 4. Classify: delete list vs surviving — pure Python ──────────────────
+    ids_to_delete: list[int] = []
+    # surviving_by_date: วันที่ → set of start_times ที่ยังมี booking อ้างอิง (ห้ามสร้างซ้ำ)
+    surviving_by_date: dict[str, set] = {}
+    # ORM objects that survive: อัปเดต capacity ทีหลัง
+    surviving_orm: list = []
+
+    for sl in existing_slots:
+        if any_counts.get(sl.id, 0) > 0:
+            surviving_by_date.setdefault(sl.slot_date, set()).add(sl.start_time)
+            surviving_orm.append(sl)
+        else:
+            ids_to_delete.append(sl.id)
+
+    # ── 5. Batch DELETE slots with no booking references — ONE query ──────────
+    total_deleted = 0
+    if ids_to_delete:
+        total_deleted = (
+            db.query(NailTimeSlot)
+            .filter(NailTimeSlot.id.in_(ids_to_delete))
+            .delete(synchronize_session=False)
+        )
+
+    # ── 6. Update surviving slots' capacity from latest template ─────────────
+    for sl in surviving_orm:
+        try:
+            dow = datetime.strptime(sl.slot_date, "%Y-%m-%d").weekday()
+            tmpl = tmpl_by_dow.get(dow)
+            if tmpl and tmpl.is_open:
+                sl.max_bookings = max(1, tmpl.max_bookings or 1)
+                sl.staff_id = tmpl.staff_id
+        except Exception:
+            pass
+
+    # ── 7. Build new NailTimeSlot objects — pure Python ───────────────────────
+    new_slots: list = []
+
+    def _slots_from_block(date_str: str, start_time_str: str, rounds: int,
+                          round_min: int, gap_min: int, max_b: int, staff_id_: Any,
+                          surviving: set) -> list:
+        result = []
+        try:
+            cur = datetime.strptime(start_time_str, "%H:%M")
+        except ValueError:
+            return result
+        for i in range(rounds):
+            s = cur + timedelta(minutes=i * (round_min + gap_min))
+            e = s + timedelta(minutes=round_min)
+            s_str = s.strftime("%H:%M")
+            if s_str not in surviving:
+                result.append(NailTimeSlot(
+                    shop_id=shop_id,
+                    slot_date=date_str,
+                    start_time=s_str,
+                    end_time=e.strftime("%H:%M"),
+                    max_bookings=max(1, max_b or 1),
+                    staff_id=staff_id_,
+                    is_available=True,
+                ))
+        return result
+
+    for date_str in all_dates:
+        try:
+            dow = datetime.strptime(date_str, "%Y-%m-%d").weekday()
+        except ValueError:
+            continue
+        tmpl = tmpl_by_dow.get(dow)
+        if not tmpl or not tmpl.is_open or tmpl.rounds_count <= 0:
+            continue
+        # วันปิดร้าน: ข้ามการสร้างสล็อตใหม่ (สล็อตว่างถูกลบไปแล้วในขั้น 5)
+        if date_str in closed_set:
+            continue
+
+        surviving = surviving_by_date.get(date_str, set())
+
+        # Main block
+        new_slots.extend(_slots_from_block(
+            date_str, tmpl.start_time, tmpl.rounds_count,
+            tmpl.round_minutes, tmpl.gap_minutes or 0,
+            tmpl.max_bookings or 1, tmpl.staff_id, surviving,
+        ))
+
+        # Extra blocks
+        if tmpl.extra_blocks:
+            try:
+                for blk in json.loads(tmpl.extra_blocks):
+                    blk_start = blk.get("start_time", "")
+                    blk_count = int(blk.get("rounds_count", 0))
+                    blk_min = int(blk.get("round_minutes", 60))
+                    blk_gap = int(blk.get("gap_minutes", 0))
+                    blk_max = int(blk.get("max_bookings", 1))
+                    if not blk_start or blk_count <= 0 or blk_min <= 0:
+                        continue
+                    new_slots.extend(_slots_from_block(
+                        date_str, blk_start, blk_count, blk_min, blk_gap,
+                        blk_max, tmpl.staff_id, surviving,
+                    ))
+            except Exception:
+                pass
+
+    # ── 8. Batch INSERT all new slots — db.add_all → ONE INSERT ──────────────
+    total_created = len(new_slots)
+    if new_slots:
+        db.add_all(new_slots)
+
+    db.commit()
+    return {"total_deleted": total_deleted, "total_created": total_created}
+
+
 @router.put("/admin/slot-templates")
 def admin_update_slot_templates(
     body: SlotTemplateBulkBody,
@@ -1539,8 +1701,9 @@ def admin_update_slot_templates(
     authorization: str = Header(None),
 ):
     """บันทึกเทมเพลตประจำสัปดาห์ แล้ว sync สล็อตล่วงหน้า 60 วันให้ตรงกับเทมเพลตใหม่ทันที —
-    ลบสล็อตเก่าที่ยังไม่มีคนจอง แล้วสร้างสล็อตใหม่ตามเทมเพลต (สล็อตที่มีคนจองแล้วจะไม่ถูกแก้/ลบ)
-    ป้องกันปัญหาสล็อตเก่าตกค้าง (เช่น 10:30, 14:30 ที่มาจากเทมเพลตเดิมก่อนแก้ไข) ค้างอยู่ในระบบ"""
+    ใช้ batch SQL (ไม่กี่ statements ต่อ operation ทั้งหมด แทนที่จะ loop 60 วัน × N queries)
+    เพื่อลด latency กับ Neon และหลีกเลี่ยง Render request timeout
+    สล็อตที่มีคนจองจะไม่ถูกแก้/ลบ — เพิ่มเฉพาะสล็อตที่ขาดหาย ลบเฉพาะสล็อตว่างที่ไม่ตรงเทมเพลต"""
     shop_id = _check_admin(authorization)
     for item in body.templates:
         if not (0 <= item.day_of_week <= 6):
@@ -1559,23 +1722,10 @@ def admin_update_slot_templates(
         row.extra_blocks = item.extra_blocks or "[]"
     db.commit()
 
-    # sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตใหม่ทันที (ไม่ต้องรอแอดมินกดปุ่มแยก)
     shop = _get_shop(db, shop_id)
-    closed_dates_json = shop.closed_dates
-    today = _now().date()
-    sync_result = {"total_deleted": 0, "total_created": 0}
-    # ใช้ savepoint (begin_nested) ต่อวัน + commit เดียวรวมท้ายสุด แทนการ commit ทีละวัน (60 round-trip ไป Neon)
-    # ที่ทำให้การบันทึกเทมเพลตหมุนนานมาก — savepoint ยังแยก error ของแต่ละวันออกจากกันได้เหมือนเดิม
-    for i in range(60):
-        date_str = (today + timedelta(days=i)).isoformat()
-        try:
-            with db.begin_nested():
-                r = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json, commit=False)
-            sync_result["total_deleted"] += r["deleted"]
-            sync_result["total_created"] += r["created"]
-        except Exception as e:
-            logger.warning(f"[slot-templates] sync failed for {date_str} (shop {shop_id}): {e}")
-    db.commit()
+    sync_result = _batch_sync_slots_to_templates(
+        db, shop_id, _now().date(), 60, shop.closed_dates
+    )
     return {"ok": True, "synced": sync_result}
 
 
@@ -1627,7 +1777,7 @@ def admin_sync_future_slots_to_template(
     authorization: str = Header(None),
 ):
     """Sync สล็อตล่วงหน้าให้ตรงกับเทมเพลตปัจจุบันทุกวัน (ต่างจาก /generate ที่ข้ามวันที่มีสล็อตอยู่แล้วทั้งวัน) —
-    ใช้ตอนแก้เทมเพลตแล้วต้องการให้มีผลกับวันที่เคย generate สล็อตไปแล้วด้วย
+    ใช้ batch SQL เพื่อลด latency กับ Neon และหลีกเลี่ยง Render request timeout
     สล็อตที่มีคนจองไว้แล้วจะถูกเก็บไว้เสมอ ไม่ถูกลบหรือแก้เวลา"""
     shop_id = _check_admin(authorization)
     shop = _get_shop(db, shop_id)
@@ -1640,40 +1790,19 @@ def admin_sync_future_slots_to_template(
         start_date = _now().date()
     days = max(1, min(body.days, 90))
 
-    closed_dates_json = shop.closed_dates
-    total_deleted = 0
-    total_created = 0
-    changed_dates = []
-    errors: list = []
-    # ใช้ savepoint ต่อวัน + commit เดียวรวมท้ายสุด แทนการ commit ทีละวัน (ลด round-trip ไป Neon ลงมาก)
-    for i in range(days):
-        date_str = (start_date + timedelta(days=i)).isoformat()
-        try:
-            with db.begin_nested():
-                result = _apply_template_for_date_core(db, shop_id, date_str, closed_dates_json, commit=False)
-            total_deleted += result["deleted"]
-            total_created += result["created"]
-            if result["deleted"] or result["created"]:
-                changed_dates.append(date_str)
-        except Exception as _day_err:
-            logger.error(f"sync_future: error on {date_str}: {_day_err}", exc_info=True)
-            errors.append({"date": date_str, "error": str(_day_err)})
-
-    db.commit()
-    if errors and not changed_dates:
-        # ล้มเหลวทุกวัน — ส่ง 500 พร้อม detail เพื่อช่วย debug
-        raise HTTPException(
-            status_code=500,
-            detail=f"ซิงค์ไม่สำเร็จทุกวัน: {errors[0]['error']}",
+    try:
+        result = _batch_sync_slots_to_templates(
+            db, shop_id, start_date, days, shop.closed_dates
         )
+    except Exception as e:
+        logger.error(f"sync_future batch failed (shop {shop_id}): {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"ซิงค์ไม่สำเร็จ: {e}")
 
     return {
         "ok": True,
         "days_scanned": days,
-        "changed_dates": changed_dates,
-        "total_deleted": total_deleted,
-        "total_created": total_created,
-        "errors": errors,
+        "total_deleted": result["total_deleted"],
+        "total_created": result["total_created"],
     }
 
 

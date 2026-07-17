@@ -3058,11 +3058,30 @@ function ScheduleTab({ token }: { token: string }) {
     const dow = (new Date(selDate + "T00:00:00").getDay() + 6) % 7; // 0=จันทร์
     const tmpl = templates.find((t: any) => t.day_of_week === dow);
     if (!tmpl || !tmpl.is_open) return null;
-    const expected = new Set(computeSlotTimes(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes ?? 0));
+
+    // คำนวณ start_times ที่คาดหวังจากเทมเพลต (ทั้ง main block และ extra_blocks)
+    // computeSlotTimes คืนค่า "HH:MM–HH:MM" ต้องตัดเฉพาะส่วน start ออกมาเปรียบเทียบ
+    const expectedStarts = new Set<string>();
+    computeSlotTimes(tmpl.start_time, tmpl.rounds_count, tmpl.round_minutes, tmpl.gap_minutes ?? 0)
+      .forEach(range => { const s = range.split("–")[0]; if (s) expectedStarts.add(s); });
+    // รวม extra_blocks ด้วย
+    if (tmpl.extra_blocks) {
+      try {
+        const blocks: any[] = JSON.parse(tmpl.extra_blocks);
+        blocks.forEach(blk => {
+          computeSlotTimes(blk.start_time, blk.rounds_count, blk.round_minutes, blk.gap_minutes ?? 0)
+            .forEach(range => { const s = range.split("–")[0]; if (s) expectedStarts.add(s); });
+        });
+      } catch { /* ignore */ }
+    }
+
     const actual = new Set(slots.map((s: any) => s.start_time));
-    if (expected.size === 0) return null;
-    const matches = expected.size === actual.size && [...expected].every(t => actual.has(t));
-    return matches ? "match" : "mismatch";
+    if (expectedStarts.size === 0) return null;
+    // ตรวจว่า start_times ที่คาดหวังทั้งหมดมีอยู่จริงในสล็อตปัจจุบัน
+    const allExpectedPresent = [...expectedStarts].every(t => actual.has(t));
+    // ตรวจว่าไม่มีสล็อตเกินที่ไม่ได้อยู่ในเทมเพลต
+    const noExtra = [...actual].every(t => expectedStarts.has(t));
+    return allExpectedPresent && noExtra ? "match" : "mismatch";
   })();
 
   const saveClosedDates = useMutation({
