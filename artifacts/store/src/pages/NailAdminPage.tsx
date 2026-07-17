@@ -3371,12 +3371,25 @@ function WeeklyTemplateSection({ token, onGenerated }: { token: string; onGenera
             {openRows.length === 0 && <span style={{ color: A.muted, fontWeight: 400 }}>— กดวันด้านบนเพื่อตั้งค่า</span>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {openRows.map(r => (
-              <div key={r.day_of_week} style={{ fontSize: 12, color: A.sub, display: "flex", justifyContent: "space-between" }}>
-                <span>วัน{DAY_NAMES_TH[r.day_of_week]}</span>
-                <span style={{ color: A.muted }}>{r.start_time} · {r.rounds_count} คิว · {r.round_minutes} น./คิว</span>
-              </div>
-            ))}
+            {openRows.map(r => {
+              const extras = r.extra_blocks || [];
+              const allBlocks = [
+                { start_time: r.start_time, rounds_count: r.rounds_count, round_minutes: r.round_minutes },
+                ...extras,
+              ];
+              return (
+                <div key={r.day_of_week} style={{ fontSize: 12, color: A.sub, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ flexShrink: 0 }}>วัน{DAY_NAMES_TH[r.day_of_week]}</span>
+                  <span style={{ color: A.muted, textAlign: "right" }}>
+                    {allBlocks.map((blk, i) => (
+                      <span key={i} style={{ display: "block" }}>
+                        {blk.start_time} · {blk.rounds_count} คิว · {blk.round_minutes} น./คิว
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              );
+            })}
             {rows.filter(r => !r.is_open).length > 0 && (
               <div style={{ fontSize: 11, color: A.muted, marginTop: 2 }}>
                 ปิด: {rows.filter(r => !r.is_open).map(r => `วัน${DAY_NAMES_TH[r.day_of_week]}`).join(", ")}
