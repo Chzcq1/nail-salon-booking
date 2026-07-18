@@ -392,7 +392,7 @@ function LandingScreen({ settings, gallery, onBook }: any) {
   const bookingsHref = slug ? `/r/${slug}/my-bookings` : "/my-bookings";
   const [galleryIdx, setGalleryIdx] = useState(0);
   const galleryRef = useRef<HTMLDivElement>(null);
-  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_KEY));
+  const [showTutorial, setShowTutorial] = useState(true);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   useEffect(() => {
@@ -439,26 +439,6 @@ function LandingScreen({ settings, gallery, onBook }: any) {
           <Calendar size={18} /> จองคิวเลย <ArrowRight size={16} />
         </button>
 
-        <button onClick={() => setShowTutorial(true)}
-          style={{ marginTop: 12, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)", borderRadius: 100, padding: "8px 20px", color: "rgba(255,255,255,0.9)", cursor: "pointer", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
-          <HelpCircle size={14} /> วิธีจอง / คำแนะนำ
-        </button>
-
-        {/* Wallet button — แสดงเสมอ (logged in: แสดงยอด, ไม่ได้ login: เชิญชวนเติมเงิน) */}
-        <div style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-          <a href={walletHref}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
-            <Wallet size={16} />
-            {walletBalance !== null
-              ? <>กระเป๋าเงิน · <span style={{ fontWeight: 800 }}>฿{walletBalance.toFixed(2)}</span></>
-              : "กระเป๋าเงิน / เติมเงินมัดจำ"
-            }
-          </a>
-          <a href={bookingsHref}
-            style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.5)", borderRadius: 100, padding: "10px 22px", color: "#fff", textDecoration: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
-            <Calendar size={16} /> การจองของฉัน
-          </a>
-        </div>
       </div>
 
       {/* Tutorial Popup */}
@@ -466,8 +446,24 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         {showTutorial && <TutorialPopup onClose={() => setShowTutorial(false)} />}
       </AnimatePresence>
 
-      {/* Social Links */}
-      {socials.length > 0 && (
+      {/* ── Wallet + My Bookings cards ── */}
+      <div style={{ padding: "20px 16px 4px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <a href={walletHref} style={{ textDecoration: "none", background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 18, padding: "18px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <Wallet size={26} color={P.pink} />
+          <div style={{ fontWeight: 700, fontSize: 14, color: P.text }}>กระเป๋าเงิน</div>
+          <div style={{ fontSize: 12, color: P.muted }}>
+            {walletBalance !== null ? `฿${walletBalance.toFixed(2)}` : "เติมเงินมัดจำ"}
+          </div>
+        </a>
+        <a href={bookingsHref} style={{ textDecoration: "none", background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 18, padding: "18px 14px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <Calendar size={26} color={P.pink} />
+          <div style={{ fontWeight: 700, fontSize: 14, color: P.text }}>การจองของฉัน</div>
+          <div style={{ fontSize: 12, color: P.muted }}>ดูประวัติ / ตรวจสอบ</div>
+        </a>
+      </div>
+
+      {/* Social Links + Map */}
+      {(socials.length > 0 || settings?.map_url) && (
         <div style={{ padding: "20px 20px 4px" }}>
           <p style={{ color: P.sub, fontSize: 13, marginBottom: 12, textAlign: "center" }}>ติดต่อและติดตามเราได้ที่</p>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
@@ -477,6 +473,12 @@ function LandingScreen({ settings, gallery, onBook }: any) {
                 <span style={{ color: s.color }}>{s.icon}</span> {s.label}
               </a>
             ))}
+            {settings?.map_url && (
+              <a href={settings.map_url} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: `1px solid ${P.pinkBorder}`, borderRadius: 100, padding: "8px 16px", textDecoration: "none", color: P.text, fontSize: 14, fontWeight: 500 }}>
+                📍 แผนที่ร้าน
+              </a>
+            )}
           </div>
         </div>
       )}
@@ -534,11 +536,34 @@ function LandingScreen({ settings, gallery, onBook }: any) {
         </div>
       )}
 
-      {/* CTA bottom */}
-      <div style={{ padding: "28px 20px 0" }}>
+      {/* spacer so content isn't hidden behind sticky bar */}
+      <div style={{ height: 96 }} />
+
+      {/* Floating help button */}
+      <button
+        onClick={() => setShowTutorial(true)}
+        style={{
+          position: "fixed", bottom: 88, left: 16, zIndex: 900,
+          width: 44, height: 44, borderRadius: "50%",
+          background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
+          border: "none", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        <HelpCircle size={20} color="#fff" />
+      </button>
+
+      {/* Sticky bottom CTA */}
+      <div style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: 480,
+        background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)",
+        borderTop: `1px solid ${P.pinkBorder}`, padding: "12px 16px 20px", zIndex: 800,
+        boxSizing: "border-box",
+      }}>
         <button
           onClick={onBook}
-          style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "16px", fontSize: 17, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 20px var(--b-primary-55)`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}
+          style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "15px", fontSize: 17, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 20px var(--b-primary-55)`, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}
         >
           <Calendar size={20} /> จองคิวทำเล็บ
         </button>
