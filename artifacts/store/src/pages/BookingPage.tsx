@@ -9,7 +9,7 @@ import {
   Instagram, Facebook, Clock, ChevronLeft, ChevronRight,
   Phone, User, StickyNote, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
-  MessageCircle, Video, HelpCircle, Wallet, Upload,
+  MessageCircle, Video, HelpCircle, Wallet, Upload, Printer, Search,
 } from "lucide-react";
 import { getTheme, injectThemeCss, DEFAULT_THEME } from "@/theme";
 import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
@@ -273,6 +273,7 @@ export default function BookingPage() {
           <SuccessScreen
             key="success"
             holdData={booking.holdData}
+            phone={booking.phone}
             serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onHome={() => { setBooking({ service: null, date: null, slot: null, name: "", phone: "", line: "", note: "", holdData: null }); go("landing"); }}
           />
@@ -394,6 +395,27 @@ function LandingScreen({ settings, gallery, onBook }: any) {
   const galleryRef = useRef<HTMLDivElement>(null);
   const [showTutorial, setShowTutorial] = useState(true);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  // ── Status check modal ──
+  const [showStatusCheck, setShowStatusCheck] = useState(false);
+  const [scRef, setScRef] = useState("");
+  const [scPhone, setScPhone] = useState("");
+  const [scResult, setScResult] = useState<any>(null);
+  const [scError, setScError] = useState("");
+  const [scLoading, setScLoading] = useState(false);
+
+  const doStatusCheck = async () => {
+    const ref = scRef.trim().toUpperCase();
+    const phone = scPhone.trim();
+    if (!ref || !phone) { setScError("กรุณากรอกรหัสคิวและเบอร์โทรให้ครบ"); return; }
+    setScLoading(true); setScError(""); setScResult(null);
+    try {
+      const qs = slug ? `?ref=${encodeURIComponent(ref)}&phone=${encodeURIComponent(phone)}&shop=${slug}` : `?ref=${encodeURIComponent(ref)}&phone=${encodeURIComponent(phone)}`;
+      const r = await fetch(`/api/nail/booking/public-status${qs}`);
+      if (!r.ok) { const e = await r.json(); setScError(e.detail || "ไม่พบข้อมูลการจอง"); }
+      else setScResult(await r.json());
+    } catch { setScError("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
+    setScLoading(false);
+  };
 
   useEffect(() => {
     const token = getWalletToken(slug);
@@ -460,6 +482,14 @@ function LandingScreen({ settings, gallery, onBook }: any) {
           <div style={{ fontWeight: 700, fontSize: 14, color: P.text }}>การจองของฉัน</div>
           <div style={{ fontSize: 12, color: P.muted }}>ดูประวัติ / ตรวจสอบ</div>
         </a>
+      </div>
+
+      {/* ── ตรวจสอบสถานะการจอง ── */}
+      <div style={{ padding: "10px 16px 0", textAlign: "center" }}>
+        <button onClick={() => { setShowStatusCheck(true); setScResult(null); setScError(""); }}
+          style={{ background: "none", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 100, padding: "9px 20px", fontSize: 13, fontWeight: 600, color: P.pink, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "inherit" }}>
+          <Search size={14} /> ตรวจสอบสถานะการจอง
+        </button>
       </div>
 
       {/* Social Links + Map */}
@@ -568,6 +598,74 @@ function LandingScreen({ settings, gallery, onBook }: any) {
           <Calendar size={20} /> จองคิวทำเล็บ
         </button>
       </div>
+      {/* ── Status Check Modal ── */}
+      {showStatusCheck && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={e => { if (e.target === e.currentTarget) setShowStatusCheck(false); }}>
+          <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
+            style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: "24px 20px 40px", width: "100%", maxWidth: 480, boxSizing: "border-box" }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Search size={20} color={P.pink} />
+                <span style={{ fontSize: 17, fontWeight: 800, color: P.text }}>ตรวจสอบสถานะการจอง</span>
+              </div>
+              <button onClick={() => setShowStatusCheck(false)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                <X size={22} color={P.muted} />
+              </button>
+            </div>
+
+            {/* Form */}
+            {!scResult ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>รหัสคิว (เช่น #00001)</label>
+                  <input value={scRef} onChange={e => setScRef(e.target.value.replace(/^#/, ""))}
+                    placeholder="รหัสคิว" maxLength={20}
+                    style={{ width: "100%", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>เบอร์โทรที่ใช้จอง</label>
+                  <input value={scPhone} onChange={e => setScPhone(e.target.value)} type="tel" placeholder="0812345678" maxLength={15}
+                    style={{ width: "100%", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
+                </div>
+                {scError && (
+                  <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "10px 12px", fontSize: 13, color: P.error }}>{scError}</div>
+                )}
+                <button onClick={doStatusCheck} disabled={scLoading}
+                  style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 14, padding: "14px", fontSize: 15, fontWeight: 700, cursor: scLoading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  {scLoading ? <><Loader2 size={16} className="animate-spin" /> กำลังตรวจสอบ…</> : <><Search size={16} /> ตรวจสอบสถานะ</>}
+                </button>
+              </div>
+            ) : (
+              /* Result */
+              <div>
+                <div style={{ background: "#F0FDF4", border: "1.5px solid #BBF7D0", borderRadius: 16, padding: 18, marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, color: "#15803D", fontWeight: 600, marginBottom: 4 }}>รหัสคิว</div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: P.pink, letterSpacing: 2, marginBottom: 14 }}>#{scResult.booking_ref}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {scResult.slot_date && <SummaryRow icon="📅" label={fmtDate(scResult.slot_date)} />}
+                    {scResult.start_time && <SummaryRow icon="🕐" label={`${scResult.start_time} – ${scResult.end_time}`} />}
+                    {scResult.service_name && <SummaryRow icon="💅" label={scResult.service_name} />}
+                    {scResult.customer_name && <SummaryRow icon="👤" label={scResult.customer_name} />}
+                  </div>
+                  <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #BBF7D0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: "#15803D" }}>สถานะ</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: scResult.status === "confirmed" || scResult.status === "wallet_paid" || scResult.status === "completed" ? "#16A34A" : scResult.status === "cancelled" ? P.error : "#D97706" }}>
+                      {scResult.status_label}
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => { setScResult(null); setScRef(""); setScPhone(""); }}
+                  style={{ width: "100%", background: "none", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "12px", fontSize: 14, fontWeight: 600, color: P.pink, cursor: "pointer", fontFamily: "inherit" }}>
+                  ตรวจสอบรหัสคิวอื่น
+                </button>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
+
     </PageWrap>
   );
 }
@@ -951,6 +1049,12 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const [refImagePreview, setRefImagePreview] = useState<string | null>(null);
   const refImageRef = useRef<HTMLInputElement>(null);
 
+  // slip payment (ไม่ต้อง login)
+  const [payTab, setPayTab] = useState<"slip" | "wallet">("slip");
+  const [slipBase64, setSlipBase64] = useState<string | null>(null);
+  const [slipName, setSlipName] = useState("");
+  const slipInputRef = useRef<HTMLInputElement>(null);
+
   // ใช้ ref ติดตาม hold_token, payment status และ mount state
   const holdTokenRef   = useRef<string | null>(null);
   const paymentDoneRef = useRef(false);
@@ -1076,6 +1180,17 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
     onError: (e: any) => setPayError(e.message),
   });
 
+  const paySlipMutation = useMutation({
+    mutationFn: async () => {
+      if (!slipBase64) throw new Error("กรุณาแนบสลิปการโอนเงินก่อน");
+      const uploadRes = await api.uploadSlip(slipBase64);
+      if (!uploadRes?.url) throw new Error("อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่");
+      return api.pay({ hold_token: holdData.hold_token, payment_proof: uploadRes.url });
+    },
+    onSuccess: (data: any) => { paymentDoneRef.current = true; onSuccess({ ...holdData, ...data }); },
+    onError: (e: any) => setPayError(e.message),
+  });
+
   if (holdMutation.isPending) {
     return (
       <PageWrap>
@@ -1155,31 +1270,78 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
           </div>
         </div>
 
-        {/* Credit payment — primary (and only) payment method */}
-        {!isLoggedIn ? (
+        {/* ── Payment method tabs ── */}
+        <div style={{ display: "flex", borderRadius: 12, border: `1.5px solid ${P.pinkBorder}`, overflow: "hidden", marginBottom: 16 }}>
+          {(["slip", "wallet"] as const).map(t => (
+            <button key={t} onClick={() => setPayTab(t)}
+              style={{ flex: 1, padding: "10px 6px", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+                background: payTab === t ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : "#fff",
+                color: payTab === t ? "#fff" : P.sub, transition: "all .18s" }}>
+              {t === "slip" ? "📸 โอนสลิป" : "💳 กระเป๋าเงิน"}
+            </button>
+          ))}
+        </div>
+
+        {/* Hidden slip file input */}
+        <input ref={slipInputRef} type="file" accept="image/*" style={{ display: "none" }}
+          onChange={async e => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setSlipName(file.name);
+            setSlipBase64(await compressImage(file));
+            e.target.value = "";
+          }} />
+
+        {payTab === "slip" ? (
+          /* ── Slip payment (no login required) ── */
+          <div>
+            <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 14, padding: 14, marginBottom: 14 }}>
+              <p style={{ fontSize: 12, color: "#1E40AF", fontWeight: 600, marginBottom: 4 }}>ขั้นตอน: โอนเงินมัดจำ → แนบสลิป → รอแอดมินยืนยัน</p>
+              <p style={{ fontSize: 11.5, color: "#3B82F6", lineHeight: 1.5, margin: 0 }}>
+                โอนเงิน <b>฿{holdData?.deposit_total?.toFixed(2)}</b> ตามช่องทางที่ร้านกำหนด แล้วถ่ายภาพสลิปมาแนบด้านล่าง
+              </p>
+            </div>
+
+            {slipBase64 ? (
+              <div style={{ position: "relative", marginBottom: 14, textAlign: "center" }}>
+                <img src={slipBase64} alt="slip" style={{ maxWidth: "100%", maxHeight: 200, borderRadius: 12, border: `1.5px solid ${P.pinkBorder}`, display: "block", margin: "0 auto" }} />
+                <button onClick={() => { setSlipBase64(null); setSlipName(""); }}
+                  style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.55)", border: "none", borderRadius: "50%", width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <X size={14} color="#fff" />
+                </button>
+                <p style={{ fontSize: 11, color: P.muted, marginTop: 4 }}>{slipName}</p>
+              </div>
+            ) : (
+              <button onClick={() => slipInputRef.current?.click()}
+                style={{ width: "100%", background: P.pinkPale, border: `2px dashed ${P.pink}`, borderRadius: 14, padding: "20px 16px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit", marginBottom: 14 }}>
+                <Upload size={24} color={P.pink} />
+                <span style={{ color: P.pink, fontWeight: 700, fontSize: 14 }}>แตะเพื่อแนบสลิป</span>
+                <span style={{ color: P.muted, fontSize: 11 }}>JPG, PNG — ไม่เกิน 5MB</span>
+              </button>
+            )}
+
+            <button onClick={() => paySlipMutation.mutate()} disabled={!slipBase64 || paySlipMutation.isPending}
+              style={{ width: "100%", background: slipBase64 ? `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})` : P.gray,
+                color: slipBase64 ? "#fff" : P.muted, border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 700,
+                cursor: slipBase64 ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              {paySlipMutation.isPending ? <><Loader2 size={18} className="animate-spin" /> กำลังส่งสลิป…</> : "📸 ส่งสลิปยืนยัน"}
+            </button>
+          </div>
+        ) : !isLoggedIn ? (
+          /* ── Wallet tab: not logged in ── */
           <div style={{ background: P.pinkPale, border: `2px solid ${P.pink}`, borderRadius: 16, padding: 20, textAlign: "center" }}>
             <Wallet size={36} color={P.pink} style={{ margin: "0 auto 12px" }} />
-            <p style={{ fontSize: 16, fontWeight: 700, color: P.text, marginBottom: 8 }}>ต้องเติมเครดิตก่อนจอง</p>
+            <p style={{ fontSize: 16, fontWeight: 700, color: P.text, marginBottom: 8 }}>เข้าสู่ระบบก่อนใช้กระเป๋าเงิน</p>
             <p style={{ fontSize: 13, color: P.sub, marginBottom: 16, lineHeight: 1.6 }}>
-              ระบบรับชำระมัดจำจากเครดิตในกระเป๋าเงินเท่านั้น<br />
-              กรุณาสมัครบัญชีและเติมเครดิตให้ครบ <b>฿{holdData?.deposit_total?.toFixed(2)}</b> ก่อน แล้วกลับมาจองใหม่
+              กรุณาสมัครบัญชีและเติมเครดิตให้ครบ <b>฿{holdData?.deposit_total?.toFixed(2)}</b>
             </p>
-            <a
-              href={walletHref}
-              onClick={saveHoldForWallet}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 8,
-                background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
-                color: "#fff", borderRadius: 14, padding: "12px 24px",
-                fontWeight: 700, fontSize: 15, textDecoration: "none",
-                boxShadow: `0 4px 16px var(--b-primary-55)`,
-              }}
-            >
-              <Wallet size={18} /> สมัคร / เติมเครดิต
+            <a href={walletHref} onClick={saveHoldForWallet}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", borderRadius: 14, padding: "12px 24px", fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
+              <Wallet size={18} /> สมัคร / เข้าสู่ระบบ
             </a>
-            <p style={{ fontSize: 11, color: P.muted, marginTop: 12 }}>หลังเติมเครดิตแล้ว กลับมาที่หน้านี้แล้วกด "ตรวจสอบยอดใหม่"</p>
           </div>
         ) : (
+          /* ── Wallet tab: logged in ── */
           <div style={{ background: walletSufficient ? "#F0FDF4" : "#FFFBEB", border: `1.5px solid ${walletSufficient ? "#BBF7D0" : "#FDE68A"}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: P.text }}>💳 เครดิตในกระเป๋าเงิน</span>
@@ -1188,16 +1350,8 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
               </span>
             </div>
             {walletSufficient ? (
-              <button
-                onClick={() => payWalletMutation.mutate()}
-                disabled={payWalletMutation.isPending}
-                style={{
-                  width: "100%", background: "linear-gradient(135deg, #22C55E, #16A34A)", color: "#fff",
-                  border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 700,
-                  cursor: payWalletMutation.isPending ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                }}
-              >
+              <button onClick={() => payWalletMutation.mutate()} disabled={payWalletMutation.isPending}
+                style={{ width: "100%", background: "linear-gradient(135deg, #22C55E, #16A34A)", color: "#fff", border: "none", borderRadius: 14, padding: "14px", fontSize: 16, fontWeight: 700, cursor: payWalletMutation.isPending ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {payWalletMutation.isPending ? <><Loader2 size={18} className="animate-spin" /> กำลังยืนยัน...</> : "จ่ายด้วยเครดิต ✓"}
               </button>
             ) : (
@@ -1205,27 +1359,14 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
                 <p style={{ fontSize: 13, color: "#B45309", marginBottom: 12, fontWeight: 600 }}>
                   ⚠️ เครดิตไม่พอ — ต้องเติมเพิ่มอีก <b>฿{((holdData?.deposit_total ?? 0) - (walletBalance ?? 0)).toFixed(2)}</b>
                 </p>
-                <a
-                  href={walletHref}
-                  onClick={saveHoldForWallet}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                    background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`,
-                    color: "#fff", borderRadius: 14, padding: "13px",
-                    fontWeight: 700, fontSize: 15, textDecoration: "none",
-                    boxShadow: `0 4px 16px var(--b-primary-55)`,
-                  }}
-                >
+                <a href={walletHref} onClick={saveHoldForWallet}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", borderRadius: 14, padding: "13px", fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
                   <ArrowRight size={18} /> เติมเครดิตที่กระเป๋าเงิน
                 </a>
-                <button
-                  onClick={() => { releaseHold(); holdMutation.mutate(); }}
-                  disabled={holdMutation.isPending}
-                  style={{ width: "100%", marginTop: 10, background: "none", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "11px", fontSize: 14, fontWeight: 600, color: P.pink, cursor: holdMutation.isPending ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                >
+                <button onClick={() => { releaseHold(); holdMutation.mutate(); }} disabled={holdMutation.isPending}
+                  style={{ width: "100%", marginTop: 10, background: "none", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 14, padding: "11px", fontSize: 14, fontWeight: 600, color: P.pink, cursor: holdMutation.isPending ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   {holdMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> กำลังตรวจสอบ...</> : "🔄 เติมแล้ว — ตรวจสอบยอดใหม่"}
                 </button>
-                <p style={{ fontSize: 11, color: P.muted, marginTop: 6, textAlign: "center" }}>เติมเครดิตเสร็จแล้วกด "ตรวจสอบยอดใหม่" ได้เลย</p>
               </div>
             )}
           </div>
@@ -1297,42 +1438,87 @@ function SummaryRow({ icon, label }: { icon: string; label: string }) {
 }
 
 // ── Success Screen ───────────────────────────────────────────────────
-function SuccessScreen({ holdData, onHome, serviceEmoji }: any) {
+function SuccessScreen({ holdData, phone, onHome, serviceEmoji }: any) {
   const svcIcon = serviceEmoji || "💅";
+  const isConfirmed = holdData?.status === "confirmed" || holdData?.status === "wallet_paid";
+  const isPendingSlip = holdData?.status === "pending_payment";
+
   return (
     <PageWrap>
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", duration: 0.5 }}
-        style={{ padding: "60px 28px", textAlign: "center" }}
-      >
-        <div style={{ width: 90, height: 90, borderRadius: "50%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", boxShadow: `0 8px 32px var(--b-primary-66)` }}>
-          <CheckCircle size={44} color="#fff" />
-        </div>
-        <h2 style={{ fontSize: 26, fontWeight: 800, color: P.text, marginBottom: 8 }}>จองคิวสำเร็จ! 🎉</h2>
-        <p style={{ color: P.sub, fontSize: 16, marginBottom: 24 }}>รอแอดมินยืนยันการชำระเงิน</p>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          #nail-receipt, #nail-receipt * { visibility: visible !important; }
+          #nail-receipt { position: fixed !important; inset: 0 !important; padding: 24px !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
 
-        <div style={{ background: P.pinkPale, border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 20, marginBottom: 28, textAlign: "left" }}>
-          <div style={{ fontSize: 12, color: P.muted, marginBottom: 10 }}>หมายเลขการจอง</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: P.pink, letterSpacing: 2 }}>{holdData?.booking_ref}</div>
-          <div style={{ height: 1, background: P.pinkBorder, margin: "14px 0" }} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", duration: 0.5 }} style={{ padding: "40px 24px 60px" }}>
+
+        {/* ── Header ── */}
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ width: 80, height: 80, borderRadius: "50%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: `0 8px 32px var(--b-primary-44)` }}>
+            <CheckCircle size={40} color="#fff" />
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 800, color: P.text, marginBottom: 6 }}>
+            {isConfirmed ? "จองคิวสำเร็จ! 🎉" : "ส่งสลิปเรียบร้อย! 📸"}
+          </h2>
+          <p style={{ color: P.sub, fontSize: 14 }}>
+            {isConfirmed ? "ยืนยันแล้ว — เจอกันตามนัด!" : "รอแอดมินตรวจสลิปและยืนยันคิว"}
+          </p>
+        </div>
+
+        {/* ── Receipt ── */}
+        <div id="nail-receipt" style={{ background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+          {/* Receipt header */}
+          <div style={{ textAlign: "center", borderBottom: `1px dashed ${P.pinkBorder}`, paddingBottom: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: P.muted, marginBottom: 4 }}>ใบยืนยันการจองคิว</div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: P.pink, letterSpacing: 3, fontVariantNumeric: "tabular-nums" }}>
+              #{holdData?.booking_ref}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {holdData?.slot_date && <SummaryRow icon="📅" label={fmtDate(holdData.slot_date)} />}
             {holdData?.start_time && <SummaryRow icon="🕐" label={`${holdData.start_time} – ${holdData.end_time}`} />}
             {holdData?.service_name && <SummaryRow icon={svcIcon} label={holdData.service_name} />}
             {holdData?.customer_name && <SummaryRow icon="👤" label={holdData.customer_name} />}
+            {phone && <SummaryRow icon="📱" label={phone} />}
+          </div>
+
+          <div style={{ borderTop: `1px dashed ${P.pinkBorder}`, marginTop: 14, paddingTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: P.sub }}>มัดจำ</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: P.pink }}>฿{holdData?.deposit_total?.toFixed(2)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+              <span style={{ fontSize: 12, color: P.muted }}>สถานะ</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: isConfirmed ? "#16A34A" : isPendingSlip ? "#D97706" : P.muted }}>
+                {isConfirmed ? "✅ ยืนยันแล้ว" : isPendingSlip ? "🔍 รอตรวจสลิป" : holdData?.status}
+              </span>
+            </div>
           </div>
         </div>
 
-        <p style={{ color: P.muted, fontSize: 13, marginBottom: 24 }}>ระบบจะส่งการยืนยันผ่านช่องทางที่คุณให้ไว้ หรือคุณสามารถติดต่อร้านโดยตรง</p>
+        {isPendingSlip && (
+          <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#92400E" }}>
+            💡 <b>เก็บรหัสคิว #{holdData?.booking_ref} ไว้</b> — ใช้ตรวจสอบสถานะได้ทุกเมื่อ (กดปุ่ม "ตรวจสอบสถานะ" ที่หน้าหลัก)
+          </div>
+        )}
 
-        <button
-          onClick={onHome}
-          style={{ background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 16, padding: "14px 32px", fontSize: 16, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 16px var(--b-primary-55)` }}
-        >
-          กลับหน้าหลัก
-        </button>
+        {/* ── Actions ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }} className="no-print">
+          <button onClick={() => window.print()}
+            style={{ width: "100%", background: "#fff", color: P.pink, border: `2px solid ${P.pink}`, borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <Printer size={18} /> พิมพ์ใบเสร็จ / บันทึกเป็น PDF
+          </button>
+          <button onClick={onHome}
+            style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 16px var(--b-primary-55)` }}>
+            กลับหน้าหลัก
+          </button>
+        </div>
       </motion.div>
     </PageWrap>
   );

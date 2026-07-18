@@ -971,6 +971,37 @@ def booking_status(hold_token: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/booking/public-status")
+def public_booking_status(ref: str, phone: str, db: Session = Depends(get_db)):
+    """ตรวจสอบสถานะการจองด้วยรหัสคิว + เบอร์โทร — สาธารณะ ไม่ต้อง login"""
+    booking = db.query(NailBooking).filter(
+        NailBooking.booking_ref == ref.strip().upper(),
+        NailBooking.customer_phone == phone.strip(),
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง กรุณาตรวจสอบรหัสคิวและเบอร์โทร")
+    STATUS_MAP = {
+        "held": "⏳ รอชำระมัดจำ",
+        "pending_payment": "🔍 รอแอดมินตรวจสลิป",
+        "confirmed": "✅ ยืนยันแล้ว",
+        "wallet_paid": "✅ ยืนยันแล้ว",
+        "completed": "✅ เสร็จสิ้น",
+        "cancelled": "❌ ยกเลิกแล้ว",
+    }
+    return {
+        "booking_ref": booking.booking_ref,
+        "customer_name": booking.customer_name,
+        "slot_date": str(booking.slot_date) if booking.slot_date else None,
+        "start_time": booking.start_time,
+        "end_time": booking.end_time,
+        "service_name": booking.service_name,
+        "status": booking.status,
+        "status_label": STATUS_MAP.get(booking.status, booking.status),
+        "slip_verify_status": booking.slip_verify_status,
+        "deposit_total": float(booking.deposit_total or 0),
+    }
+
+
 @router.get("/booking/my")
 def my_bookings(
     db: Session = Depends(get_db),
