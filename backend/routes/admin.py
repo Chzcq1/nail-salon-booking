@@ -260,6 +260,8 @@ async def admin_approve_order(order_id: int, db: Session = Depends(get_db), admi
         raise HTTPException(status_code=400, detail=f"ออเดอร์นี้มีสถานะ '{order.status}' แล้ว")
 
     order.status = "approved"
+    # ลบ slip ทันทีที่ admin อนุมัติ — ตรวจสอบเสร็จแล้วไม่ต้องเก็บภาพไว้อีก
+    order.payment_proof = None
     db.commit()
 
     product = db.query(Product).filter(Product.id == order.product_id).first()
@@ -351,6 +353,8 @@ def admin_reject_order(order_id: int, db: Session = Depends(get_db), admin: dict
         raise HTTPException(status_code=400, detail=f"ออเดอร์นี้มีสถานะ '{order.status}' แล้ว")
 
     order.status = "rejected"
+    # ลบ slip ทันทีที่ปฏิเสธ — admin ดูแล้วตัดสินใจแล้ว ไม่ต้องเก็บภาพไว้อีก
+    order.payment_proof = None
     db.commit()
     db.refresh(order)
     return order

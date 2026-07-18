@@ -477,6 +477,8 @@ async def topup_slip(
                 credit = Decimal(str(result["amount"]))
                 topup.amount = credit
                 topup.status = "approved"
+                # ลบ slip ทันทีหลัง Slip2Go verify เสร็จสมบูรณ์ — ไม่ต้องเก็บภาพอีกแล้ว
+                topup.payment_proof = None
                 customer.balance = (customer.balance or Decimal("0")) + credit
                 db.add(CreditTransaction(
                     customer_id=customer.id,
@@ -857,6 +859,8 @@ def admin_approve_topup(
 
     topup.amount = amount
     topup.status = "approved"
+    # ลบ slip ทันทีที่ admin อนุมัติ — ตรวจสอบเสร็จแล้วไม่ต้องเก็บภาพไว้อีก
+    topup.payment_proof = None
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
         customer_id=customer.id,
@@ -879,6 +883,8 @@ def admin_reject_topup(
     if not topup:
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
     topup.status = "rejected"
+    # ลบ slip ทันทีที่ปฏิเสธ — admin ดูแล้วตัดสินใจแล้ว ไม่ต้องเก็บภาพไว้อีก
+    topup.payment_proof = None
     db.commit()
     return {"ok": True}
 

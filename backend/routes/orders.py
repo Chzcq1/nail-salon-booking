@@ -47,6 +47,8 @@ async def _send_to_admin(order_id: int, product_name: str, order: Order):
 async def _run_auto_approve(order: Order, product: Product | None, db: Session, verify_result: dict) -> None:
     """Run the full approve flow after successful auto-verification."""
     order.status = "approved"
+    # ลบ slip ทันทีหลัง Slip2Go verify เสร็จ — verification สำเร็จแล้วไม่ต้องเก็บภาพอีก
+    order.payment_proof = None
     db.commit()
 
     # Generate Telegram invite links
@@ -247,5 +249,7 @@ def admin_set_links(
     order.link_sent = True
     if order.status != "approved":
         order.status = "approved"
+    # ลบ slip ทันทีที่ admin อนุมัติ manual — ไม่ต้องเก็บภาพไว้อีกแล้ว
+    order.payment_proof = None
     db.commit()
     return {"ok": True, "invite_links": body.invite_links}

@@ -2977,6 +2977,8 @@ def nail_admin_approve_topup(
         raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
     topup.amount = amount
     topup.status = "approved"
+    # ลบ slip ทันทีที่ admin อนุมัติ — ตรวจสอบเสร็จแล้วไม่ต้องเก็บภาพไว้อีก
+    topup.payment_proof = None
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
         customer_id=customer.id,
@@ -3006,6 +3008,8 @@ def nail_admin_reject_topup(
     if topup_shop != shop_id:
         raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์จัดการรายการของร้านอื่น")
     topup.status = "rejected"
+    # ลบ slip ทันทีที่ปฏิเสธ — admin ดูแล้วตัดสินใจแล้ว ไม่ต้องเก็บภาพไว้อีก
+    topup.payment_proof = None
     db.commit()
     return {"ok": True}
 
