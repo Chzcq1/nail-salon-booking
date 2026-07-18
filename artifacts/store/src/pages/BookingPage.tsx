@@ -1045,6 +1045,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
   const [holdData, setHoldData] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedAcct, setCopiedAcct] = useState(false);
   const [timer, setTimer] = useState(600);
   const [payError, setPayError] = useState("");
   // รูปอ้างอิงแบบงาน (brief) — ใช้เมื่อร้านเปิด allow_ref_image
@@ -1298,10 +1299,48 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
         {payTab === "slip" ? (
           /* ── Slip payment (no login required) ── */
           <div>
+            {/* Bank account info card */}
+            {(holdData?.bank_account_number || holdData?.bank_name) && (
+              <div style={{ background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                  <span style={{ fontSize: 16 }}>🏦</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: P.text }}>ข้อมูลบัญชีรับโอน</span>
+                </div>
+                {holdData.bank_name && (
+                  <div style={{ fontSize: 13, color: P.sub, marginBottom: 8 }}>
+                    ธนาคาร: <span style={{ color: P.text, fontWeight: 600 }}>{holdData.bank_name}</span>
+                  </div>
+                )}
+                {holdData.bank_account_name && (
+                  <div style={{ fontSize: 13, color: P.sub, marginBottom: 8 }}>
+                    ชื่อบัญชี: <span style={{ color: P.text, fontWeight: 600 }}>{holdData.bank_account_name}</span>
+                  </div>
+                )}
+                {holdData.bank_account_number && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 20, fontWeight: 800, color: P.pink, letterSpacing: 2 }}>
+                      {holdData.bank_account_number}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(holdData.bank_account_number);
+                        setCopiedAcct(true);
+                        setTimeout(() => setCopiedAcct(false), 2000);
+                      }}
+                      style={{ background: copiedAcct ? "#DCFCE7" : P.pinkPale, border: "none", borderRadius: 8, padding: "5px 12px", cursor: "pointer", color: copiedAcct ? "#16A34A" : P.pink, display: "flex", alignItems: "center", gap: 5, fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
+                      {copiedAcct ? <><Check size={13} /> คัดลอกแล้ว</> : <><Copy size={13} /> คัดลอก</>}
+                    </button>
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: P.muted, marginTop: 4 }}>แก้ไขได้ในบัญชีร้านค้า</div>
+              </div>
+            )}
+
+            {/* Instruction */}
             <div style={{ background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 14, padding: 14, marginBottom: 14 }}>
-              <p style={{ fontSize: 12, color: "#1E40AF", fontWeight: 600, marginBottom: 4 }}>ขั้นตอน: โอนเงินมัดจำ → แนบสลิป → รอแอดมินยืนยัน</p>
+              <p style={{ fontSize: 12, color: "#1E40AF", fontWeight: 600, marginBottom: 4 }}>📸 แนบสลิปโอนเงิน <span style={{ background: P.pink, color: "#fff", borderRadius: 100, padding: "1px 8px", fontSize: 11 }}>จำเป็น</span></p>
               <p style={{ fontSize: 11.5, color: "#3B82F6", lineHeight: 1.5, margin: 0 }}>
-                โอนเงิน <b>฿{holdData?.deposit_total?.toFixed(2)}</b> ตามช่องทางที่ร้านกำหนด แล้วถ่ายภาพสลิปมาแนบด้านล่าง
+                โอน <b>฿{holdData?.deposit_total?.toFixed(2)}</b> เข้าบัญชีด้านบน → ถ่ายรูปสลิป → แนบที่นี่
               </p>
             </div>
 
