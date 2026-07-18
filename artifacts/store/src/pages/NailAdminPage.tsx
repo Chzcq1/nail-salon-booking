@@ -810,6 +810,75 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
         <div style={{ textAlign: "center", padding: 48 }}><Loader2 size={28} color={A.primary} className="animate-spin" /></div>
       ) : data ? (
         <>
+          {/* ── Hero card — รายได้วันนี้ + สล็อตเหลือ ── */}
+          <div style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, borderRadius: 18, padding: "20px 20px 18px", marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", gap: 0, alignItems: "stretch" }}>
+              {/* รายได้วันนี้ */}
+              <div style={{ paddingRight: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Banknote size={14} color="rgba(255,255,255,0.7)" />
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>รายได้วันนี้</span>
+                </div>
+                <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>
+                  ฿{(data?.today?.revenue ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+                  เฉพาะที่ยืนยันแล้ว
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ background: "rgba(255,255,255,0.2)", width: 1, margin: "0 4px" }} />
+
+              {/* สล็อตวันนี้ */}
+              <div style={{ paddingLeft: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Calendar size={14} color="rgba(255,255,255,0.7)" />
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>คิววันนี้</span>
+                </div>
+                {(data?.today?.slot_capacity ?? 0) > 0 ? (
+                  <>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", lineHeight: 1.1 }}>
+                      <span style={{ color: (data?.today?.slot_available ?? 0) === 0 ? "#FCA5A5" : "#86EFAC" }}>
+                        {data?.today?.slot_available ?? 0}
+                      </span>
+                      <span style={{ fontSize: 15, fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>
+                        /{data?.today?.slot_capacity ?? 0}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 4, marginBottom: 8 }}>
+                      ช่องว่าง / ทั้งหมด
+                    </div>
+                    {/* Progress bar */}
+                    {(() => {
+                      const cap = data?.today?.slot_capacity ?? 0;
+                      const booked = data?.today?.slot_booked ?? 0;
+                      const pct = cap > 0 ? Math.round((booked / cap) * 100) : 0;
+                      const full = pct >= 100;
+                      return (
+                        <div style={{ background: "rgba(255,255,255,0.2)", borderRadius: 99, height: 6, overflow: "hidden" }}>
+                          <div style={{
+                            width: `${Math.min(pct, 100)}%`, height: "100%", borderRadius: 99,
+                            background: full ? "#FCA5A5" : pct >= 75 ? "#FCD34D" : "#86EFAC",
+                            transition: "width 0.4s ease",
+                          }} />
+                        </div>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>ยังไม่มีสล็อตวันนี้</div>
+                )}
+              </div>
+            </div>
+
+            {/* Secondary row — สัปดาห์นี้ */}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>มัดจำสัปดาห์นี้</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>฿{(data?.week_revenue ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+            </div>
+          </div>
+
           {/* Stat Cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
             {[
@@ -824,17 +893,6 @@ function DashboardTab({ token, onGoBookings }: { token: string; onGoBookings: ()
                 <div style={{ fontSize: 12, color: A.sub }}>{c.label}</div>
               </div>
             ))}
-          </div>
-
-          {/* Revenue Card */}
-          <div style={{ background: `linear-gradient(135deg, ${A.primary}, ${A.deep})`, borderRadius: 16, padding: "18px 20px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <p style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, margin: "0 0 4px" }}>มัดจำที่ได้รับสัปดาห์นี้</p>
-              <div style={{ color: "#fff", fontSize: 28, fontWeight: 800 }}>฿{(data?.week_revenue ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, color: "#fff", fontSize: 14 }}>
-              <Banknote size={20} />
-            </div>
           </div>
 
           {/* ── เงินที่ระบบช่วยหามาให้ — พิสูจน์คุณค่าของระบบให้เจ้าของร้านเห็นเป็นตัวเลข ── */}

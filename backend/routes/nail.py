@@ -1210,12 +1210,36 @@ def admin_dashboard(db: Session = Depends(get_db), authorization: str = Header(N
         .first()
     )
 
+    # ── รายได้วันนี้ (confirmed/completed/walkin เท่านั้น) ──────────────────────
+    today_revenue = db.query(sqlfunc.sum(NailBooking.deposit_total)).filter(
+        NailBooking.shop_id == shop_id,
+        NailBooking.slot_date == today,
+        NailBooking.status.in_(["confirmed", "completed", "walkin"]),
+    ).scalar() or 0
+
+    # ── ความจุสล็อตวันนี้ vs คิวที่จองแล้ว ──────────────────────────────────
+    today_slot_rows = db.query(NailTimeSlot).filter(
+        NailTimeSlot.shop_id == shop_id,
+        NailTimeSlot.slot_date == today,
+    ).all()
+    today_slot_capacity = sum(s.max_bookings for s in today_slot_rows)
+    today_slot_booked = db.query(NailBooking).filter(
+        NailBooking.shop_id == shop_id,
+        NailBooking.slot_date == today,
+        NailBooking.status.in_(["confirmed", "pending_payment", "held", "walkin"]),
+    ).count()
+    today_slot_available = max(0, today_slot_capacity - today_slot_booked)
+
     return {
         "today": {
             "confirmed": today_confirmed,
             "pending": today_pending,
             "walkin": today_walkin,
             "total": today_confirmed + today_pending + today_walkin,
+            "revenue": float(today_revenue),
+            "slot_capacity": today_slot_capacity,
+            "slot_booked": today_slot_booked,
+            "slot_available": today_slot_available,
         },
         "week_revenue": float(week_revenue),
         "total_bookings": total_bookings,
