@@ -2,7 +2,7 @@
  * BookingPage — หน้าจองคิวร้านทำเล็บ (Gen Z UX, Candy Pink + White)
  * Route: /
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -10,6 +10,7 @@ import {
   Phone, User, StickyNote, CheckCircle, AlertCircle,
   Loader2, Calendar, Sparkles, Copy, Check, ArrowRight, X,
   MessageCircle, Video, HelpCircle, Wallet, Upload, Printer, Search,
+  Building2, Palette, MapPin, Scissors,
 } from "lucide-react";
 import { getTheme, injectThemeCss, DEFAULT_THEME } from "@/theme";
 import { useShopSlug, shopQs } from "@/lib/shopSlugContext";
@@ -409,11 +410,14 @@ function LandingScreen({ settings, gallery, onBook }: any) {
   const doStatusCheck = async () => {
     const ref = scRef.trim().toUpperCase();
     const phone = scPhone.trim();
-    if (!ref || !phone) { setScError("กรุณากรอกรหัสคิวและเบอร์โทรให้ครบ"); return; }
+    if (!ref && !phone) { setScError("กรุณากรอกรหัสคิวหรือเบอร์โทรอย่างน้อยหนึ่งอย่าง"); return; }
     setScLoading(true); setScError(""); setScResult(null);
     try {
-      const qs = slug ? `?ref=${encodeURIComponent(ref)}&phone=${encodeURIComponent(phone)}&shop=${slug}` : `?ref=${encodeURIComponent(ref)}&phone=${encodeURIComponent(phone)}`;
-      const r = await fetch(`/api/nail/booking/public-status${qs}`);
+      const params = new URLSearchParams();
+      if (ref) params.append("ref", ref);
+      if (phone) params.append("phone", phone);
+      if (slug) params.append("shop", slug);
+      const r = await fetch(`/api/nail/booking/public-status?${params}`);
       if (!r.ok) { const e = await r.json(); setScError(e.detail || "ไม่พบข้อมูลการจอง"); }
       else setScResult(await r.json());
     } catch { setScError("เกิดข้อผิดพลาด กรุณาลองใหม่"); }
@@ -622,13 +626,13 @@ function LandingScreen({ settings, gallery, onBook }: any) {
             {!scResult ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>รหัสคิว (เช่น #00001)</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>รหัสคิว (เช่น #00001) <span style={{ fontWeight: 400, color: P.muted }}>— กรอกอย่างใดอย่างนึง</span></label>
                   <input value={scRef} onChange={e => setScRef(e.target.value.replace(/^#/, ""))}
                     placeholder="รหัสคิว" maxLength={20}
                     style={{ width: "100%", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>เบอร์โทรที่ใช้จอง</label>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: P.sub, display: "block", marginBottom: 6 }}>เบอร์โทรที่ใช้จอง <span style={{ fontWeight: 400, color: P.muted }}>— กรอกอย่างใดอย่างนึง</span></label>
                   <input value={scPhone} onChange={e => setScPhone(e.target.value)} type="tel" placeholder="0812345678" maxLength={15}
                     style={{ width: "100%", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 12, padding: "12px 14px", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box", outline: "none" }} />
                 </div>
@@ -647,10 +651,10 @@ function LandingScreen({ settings, gallery, onBook }: any) {
                   <div style={{ fontSize: 12, color: "#15803D", fontWeight: 600, marginBottom: 4 }}>รหัสคิว</div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: P.pink, letterSpacing: 2, marginBottom: 14 }}>#{scResult.booking_ref}</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {scResult.slot_date && <SummaryRow icon="📅" label={fmtDate(scResult.slot_date)} />}
-                    {scResult.start_time && <SummaryRow icon="🕐" label={`${scResult.start_time} – ${scResult.end_time}`} />}
-                    {scResult.service_name && <SummaryRow icon="💅" label={scResult.service_name} />}
-                    {scResult.customer_name && <SummaryRow icon="👤" label={scResult.customer_name} />}
+                    {scResult.slot_date && <SummaryRow icon={<Calendar size={15} />} label={fmtDate(scResult.slot_date)} />}
+                    {scResult.start_time && <SummaryRow icon={<Clock size={15} />} label={`${scResult.start_time} – ${scResult.end_time}`} />}
+                    {scResult.service_name && <SummaryRow icon={<Scissors size={15} />} label={scResult.service_name} />}
+                    {scResult.customer_name && <SummaryRow icon={<User size={15} />} label={scResult.customer_name} />}
                   </div>
                   <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #BBF7D0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ fontSize: 13, color: "#15803D" }}>สถานะ</span>
@@ -1189,7 +1193,16 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
       if (!slipBase64) throw new Error("กรุณาแนบสลิปการโอนเงินก่อน");
       const uploadRes = await api.uploadSlip(slipBase64);
       if (!uploadRes?.url) throw new Error("อัปโหลดสลิปไม่สำเร็จ กรุณาลองใหม่");
-      return api.pay({ hold_token: holdData.hold_token, payment_proof: uploadRes.url });
+      // อัปโหลดรูปบรีฟพร้อมกันถ้าร้านเปิดฟีเจอร์และลูกค้าเลือกรูปมา (ส่งเป็น base64 ตรง)
+      let refImageBase64: string | undefined;
+      if (refImageFile && holdData?.allow_ref_image) {
+        refImageBase64 = await compressImage(refImageFile);
+      }
+      return api.pay({
+        hold_token: holdData.hold_token,
+        payment_proof: uploadRes.url,
+        ...(refImageBase64 ? { ref_image: refImageBase64 } : {}),
+      });
     },
     onSuccess: (data: any) => { paymentDoneRef.current = true; onSuccess({ ...holdData, ...data }); },
     onError: (e: any) => setPayError(e.message),
@@ -1253,11 +1266,11 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
         <div style={{ background: P.pinkPale, border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 16, marginBottom: 20 }}>
           <div style={{ fontSize: 12, color: P.sub, marginBottom: 8 }}>สรุปการจอง</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <SummaryRow icon="📅" label={fmtDate(booking.date!)} />
-            <SummaryRow icon="🕐" label={`${holdData?.start_time} – ${holdData?.end_time}`} />
-            {holdData?.service_name && <SummaryRow icon={svcIcon} label={holdData.service_name} />}
-            <SummaryRow icon="👤" label={holdData?.customer_name} />
-            <SummaryRow icon="📱" label={booking.phone} />
+            <SummaryRow icon={<Calendar size={15} />} label={fmtDate(booking.date!)} />
+            <SummaryRow icon={<Clock size={15} />} label={`${holdData?.start_time} – ${holdData?.end_time}`} />
+            {holdData?.service_name && <SummaryRow icon={<Scissors size={15} />} label={holdData.service_name} />}
+            <SummaryRow icon={<User size={15} />} label={holdData?.customer_name} />
+            <SummaryRow icon={<Phone size={15} />} label={booking.phone} />
           </div>
         </div>
 
@@ -1303,7 +1316,7 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
             {(holdData?.bank_account_number || holdData?.bank_name) && (
               <div style={{ background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-                  <span style={{ fontSize: 16 }}>🏦</span>
+                  <Building2 size={16} color={P.pink} />
                   <span style={{ fontWeight: 700, fontSize: 14, color: P.text }}>ข้อมูลบัญชีรับโอน</span>
                 </div>
                 {holdData.bank_name && (
@@ -1423,7 +1436,10 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
         {/* รูปอ้างอิงแบบงาน (brief) — แสดงเมื่อร้านเปิดฟีเจอร์ allow_ref_image */}
         {holdData?.allow_ref_image && (
           <div style={{ marginTop: 16, background: "#F5F3FF", border: "1.5px solid #DDD6FE", borderRadius: 16, padding: 16 }}>
-            <p style={{ fontSize: 14, fontWeight: 700, color: "#5B21B6", marginBottom: 4 }}>🎨 แนบรูปอ้างอิงแบบงาน <span style={{ fontSize: 12, fontWeight: 400, color: "#7C3AED" }}>(ไม่บังคับ)</span></p>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <Palette size={16} color="#7C3AED" />
+              <p style={{ fontSize: 14, fontWeight: 700, color: "#5B21B6", margin: 0 }}>แนบรูปอ้างอิงแบบงาน <span style={{ fontSize: 12, fontWeight: 400, color: "#7C3AED" }}>(ไม่บังคับ)</span></p>
+            </div>
             <p style={{ fontSize: 12, color: "#7C3AED", marginBottom: 10, lineHeight: 1.5 }}>ช่างจะได้เห็นว่าคุณอยากได้แบบไหน เช่น รูปจาก Pinterest หรือ Instagram</p>
             {/* Hidden file input */}
             <input
@@ -1471,10 +1487,10 @@ function PaymentScreen({ booking, onBack, onSuccess, serviceEmoji }: any) {
   );
 }
 
-function SummaryRow({ icon, label }: { icon: string; label: string }) {
+function SummaryRow({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: P.text }}>
-      <span style={{ fontSize: 16 }}>{icon}</span>{label}
+      <span style={{ display: "flex", alignItems: "center", color: P.pink, flexShrink: 0 }}>{icon}</span>{label}
     </div>
   );
 }
@@ -1515,11 +1531,11 @@ function SuccessScreen({ holdData, phone, onHome, serviceEmoji, shopName, mapUrl
     });
   };
 
-  const rows = [
-    { icon: "📅", label: "วันที่",  val: holdData?.slot_date ? fmtDate(holdData.slot_date) : null },
-    { icon: "🕐", label: "เวลา",   val: holdData?.start_time ? `${holdData.start_time} – ${holdData.end_time}` : null },
-    { icon: svcIcon, label: "บริการ", val: holdData?.service_name },
-    { icon: "👤", label: "ชื่อ",   val: holdData?.customer_name },
+  const rows: { icon: ReactNode; label: string; val: string | null | undefined }[] = [
+    { icon: <Calendar size={14} />, label: "วันที่",  val: holdData?.slot_date ? fmtDate(holdData.slot_date) : null },
+    { icon: <Clock size={14} />,    label: "เวลา",   val: holdData?.start_time ? `${holdData.start_time} – ${holdData.end_time}` : null },
+    { icon: <Scissors size={14} />, label: "บริการ", val: holdData?.service_name },
+    { icon: <User size={14} />,     label: "ชื่อ",   val: holdData?.customer_name },
   ].filter(r => r.val);
 
   return (
@@ -1535,6 +1551,7 @@ function SuccessScreen({ holdData, phone, onHome, serviceEmoji, shopName, mapUrl
           #nail-receipt, #nail-receipt * { visibility: visible !important; }
           #nail-receipt { position: fixed !important; inset: 0 !important; padding: 28px !important; background: #fff !important; }
           .no-print { display: none !important; }
+          .receipt-paper { animation: none !important; max-height: none !important; overflow: visible !important; opacity: 1 !important; transform: none !important; }
         }
       `}</style>
 
@@ -1614,8 +1631,8 @@ function SuccessScreen({ holdData, phone, onHome, serviceEmoji, shopName, mapUrl
             {mapUrl && (
               <a href={mapUrl} target="_blank" rel="noopener noreferrer"
                 style={{ display: "flex", alignItems: "center", gap: 12, background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 14, padding: "13px 15px", textDecoration: "none", marginBottom: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>
-                  📍
+                <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <MapPin size={18} color="#fff" />
                 </div>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#1E40AF" }}>นำทางร้าน</div>

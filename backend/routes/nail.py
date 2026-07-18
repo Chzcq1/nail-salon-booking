@@ -978,14 +978,45 @@ def booking_status(hold_token: str, db: Session = Depends(get_db)):
 
 
 @router.get("/booking/public-status")
-def public_booking_status(ref: str, phone: str, db: Session = Depends(get_db)):
-    """ตรวจสอบสถานะการจองด้วยรหัสคิว + เบอร์โทร — สาธารณะ ไม่ต้อง login"""
-    booking = db.query(NailBooking).filter(
-        NailBooking.booking_ref == ref.strip().upper(),
-        NailBooking.customer_phone == phone.strip(),
-    ).first()
+def public_booking_status(
+    ref: Optional[str] = None,
+    phone: Optional[str] = None,
+    shop: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """ตรวจสอบสถานะการจองด้วยรหัสคิว หรือ เบอร์โทร (กรอกอย่างใดอย่างนึง) — สาธารณะ ไม่ต้อง login"""
+    ref = ref.strip().upper() if ref else None
+    phone = phone.strip() if phone else None
+    if not ref and not phone:
+        raise HTTPException(status_code=400, detail="กรุณากรอกรหัสคิวหรือเบอร์โทรอย่างน้อยหนึ่งอย่าง")
+
+    q = db.query(NailBooking)
+    # กรองร้านถ้าระบุ slug
+    if shop:
+        _s = db.query(Shop).filter(Shop.slug == shop).first()
+        if _s:
+            q = q.filter(NailBooking.shop_id == _s.id)
+
+    if ref and phone:
+        booking = q.filter(
+            NailBooking.booking_ref == ref,
+            NailBooking.customer_phone == phone,
+        ).first()
+    elif ref:
+        booking = q.filter(NailBooking.booking_ref == ref).first()
+    else:
+        # ค้นด้วยเบอร์โทร → คืนการจองล่าสุดที่ยังไม่ยกเลิก
+        booking = (
+            q.filter(
+                NailBooking.customer_phone == phone,
+                NailBooking.status != "cancelled",
+            )
+            .order_by(NailBooking.id.desc())
+            .first()
+        )
+
     if not booking:
-        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง กรุณาตรวจสอบรหัสคิวและเบอร์โทร")
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการจอง กรุณาตรวจสอบรหัสคิวหรือเบอร์โทร")
     STATUS_MAP = {
         "held": "⏳ รอชำระมัดจำ",
         "pending_payment": "🔍 รอแอดมินตรวจสลิป",
