@@ -759,12 +759,16 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
     proof = (req.payment_proof or "").strip()
     if not proof:
         raise HTTPException(status_code=400, detail="กรุณาใส่ลิงก์หลักฐานการชำระ")
-    if len(proof) > 2048:
-        raise HTTPException(status_code=400, detail="ลิงก์ยาวเกินไป (สูงสุด 2048 ตัวอักษร)")
-    # ถ้าเป็น URL ต้องขึ้นต้นด้วย https:// (ไม่รับ http:// ป้องกัน mixed content)
-    # voucher code หรือ internal note รับได้เช่นกัน (ไม่ขึ้นต้นด้วย http)
-    if proof.startswith("http://") or (proof.startswith("http") and not proof.startswith("https://")):
+    # base64 data URI (รูปสลิปที่อัปโหลดโดยตรง) — ตรวจขนาดแทนความยาว
+    if proof.startswith("data:image/") and "base64," in proof:
+        b64_part = proof.split("base64,", 1)[1]
+        approx_bytes = len(b64_part) * 3 // 4
+        if approx_bytes > 5 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="รูปสลิปใหญ่เกิน 5MB กรุณาลดขนาดรูปก่อนส่ง")
+    elif proof.startswith("http://") or (proof.startswith("http") and not proof.startswith("https://")):
         raise HTTPException(status_code=400, detail="ลิงก์ต้องใช้ https:// เท่านั้น")
+    elif not proof.startswith("data:") and len(proof) > 2048:
+        raise HTTPException(status_code=400, detail="ลิงก์ยาวเกินไป (สูงสุด 2048 ตัวอักษร)")
 
     booking.payment_proof = proof
 
@@ -1361,6 +1365,9 @@ def admin_update_booking(
         raise HTTPException(status_code=404, detail="ไม่พบการจอง")
     if body.status:
         booking.status = body.status
+        # ลบสลิปทันทีหลังยืนยัน — ประหยัด DB storage และปกป้องข้อมูลส่วนตัวลูกค้า
+        if body.status == "confirmed" and booking.payment_proof:
+            booking.payment_proof = None
     if body.admin_note is not None:
         booking.admin_note = body.admin_note
 

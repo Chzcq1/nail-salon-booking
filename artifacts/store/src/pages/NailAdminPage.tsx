@@ -12,7 +12,8 @@ import {
   Phone, User, AlertCircle, Upload, ChevronRight, TrendingUp,
   Banknote, Users, ArrowLeft, Edit2, Save, X, Ban, RotateCcw,
   MessageCircle, Package, Crown, ChevronLeft, Palette, ChevronUp, ChevronDown,
-  Wallet, CreditCard, Bell, Settings2, AlertTriangle,
+  Wallet, CreditCard, Bell, Settings2, AlertTriangle, Paperclip, ExternalLink,
+  Receipt, Smartphone, FileText,
 } from "lucide-react";
 import { BRAND_THEMES, getTheme, injectThemeCss } from "@/theme";
 import { useShopSlug } from "@/lib/shopSlugContext";
@@ -971,11 +972,11 @@ function InboxTab({ token }: { token: string }) {
   }, {});
   const sortedDates = Object.keys(groups).sort();
 
-  const dateLabel = (d: string): { text: string; overdue: boolean } => {
-    if (d === todayStr) return { text: "📅 วันนี้", overdue: false };
-    if (d === yesterdayStr) return { text: "⚠️ เมื่อวาน", overdue: true };
-    if (d < todayStr) return { text: "🔴 เลยกำหนด", overdue: true };
-    return { text: "📅", overdue: false };
+  const dateLabel = (d: string): { icon: React.ReactNode; text: string; overdue: boolean } => {
+    if (d === todayStr) return { icon: <Calendar size={12} />, text: "วันนี้", overdue: false };
+    if (d === yesterdayStr) return { icon: <AlertTriangle size={12} />, text: "เมื่อวาน", overdue: true };
+    if (d < todayStr) return { icon: <AlertCircle size={12} />, text: "เลยกำหนด", overdue: true };
+    return { icon: <Calendar size={12} />, text: "", overdue: false };
   };
 
   return (
@@ -1004,7 +1005,7 @@ function InboxTab({ token }: { token: string }) {
       {/* Empty state */}
       {!isLoading && pending.length === 0 && (
         <div style={{ textAlign: "center", padding: "60px 20px" }}>
-          <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+          <CheckCircle size={64} color={A.success} style={{ marginBottom: 16 }} />
           <div style={{ fontSize: 18, fontWeight: 700, color: A.success, marginBottom: 8 }}>ยืนยันครบแล้ว!</div>
           <div style={{ fontSize: 13, color: A.muted }}>ไม่มีสลิปค้างรอตรวจสอบ — ระบบจะแจ้งเมื่อมีสลิปใหม่</div>
         </div>
@@ -1053,8 +1054,8 @@ function InboxTab({ token }: { token: string }) {
                       <span style={{ fontWeight: 800, fontSize: 13, color: A.primary, fontFamily: "monospace", letterSpacing: 1 }}>
                         {b.booking_ref}
                       </span>
-                      <span style={{ background: "#FEF3C7", color: "#92400E", borderRadius: 100, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>
-                        ⏳ รอตรวจสลิป
+                      <span style={{ background: "#FEF3C7", color: "#92400E", borderRadius: 100, padding: "2px 10px", fontSize: 10, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <Clock size={10} /> รอตรวจสลิป
                       </span>
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 3 }}>{b.customer_name}</div>
@@ -1073,7 +1074,7 @@ function InboxTab({ token }: { token: string }) {
                 {/* Slip image */}
                 {b.payment_proof && (
                   <div style={{ padding: "0 14px 12px" }}>
-                    <div style={{ fontSize: 11, color: A.muted, marginBottom: 5, fontWeight: 600 }}>📎 สลิปการชำระเงิน</div>
+                    <div style={{ fontSize: 11, color: A.muted, marginBottom: 5, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}><Paperclip size={11} /> สลิปการชำระเงิน</div>
                     {(b.payment_proof.startsWith("http") || b.payment_proof.startsWith("data:image/")) ? (
                       <img src={b.payment_proof} alt="slip"
                         style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 12, border: `1px solid ${A.grayBorder}`, background: A.gray, cursor: b.payment_proof.startsWith("http") ? "pointer" : "default", display: "block" }}
@@ -1097,7 +1098,7 @@ function InboxTab({ token }: { token: string }) {
                 {/* Reference / Brief Image */}
                 {b.ref_image && (
                   <div style={{ padding: "0 14px 12px" }}>
-                    <div style={{ fontSize: 11, color: "#7C3AED", marginBottom: 5, fontWeight: 700 }}>🎨 รูปอ้างอิงแบบงาน (Brief)</div>
+                    <div style={{ fontSize: 11, color: "#7C3AED", marginBottom: 5, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}><Palette size={11} /> รูปอ้างอิง (Brief)</div>
                     <img src={b.ref_image} alt="ref brief"
                       style={{ width: "100%", maxHeight: 280, objectFit: "contain", borderRadius: 12, border: "1.5px solid #DDD6FE", background: "#F5F3FF", display: "block" }}
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -1356,9 +1357,9 @@ function BookingsTab({ token }: { token: string }) {
 
               {/* Basic Info */}
               <div style={{ display: "flex", gap: 12, fontSize: 13, color: A.sub, flexWrap: "wrap" }}>
-                <span>🕐 {b.start_time}{b.end_time ? ` – ${b.end_time}` : ""}</span>
-                {b.service_name && <span>💅 {b.service_name}</span>}
-                <span>📱 {b.customer_phone}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={12} /> {b.start_time}{b.end_time ? ` – ${b.end_time}` : ""}</span>
+                {b.service_name && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Scissors size={12} /> {b.service_name}</span>}
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Smartphone size={12} /> {b.customer_phone}</span>
                 {b.customer_line && <span style={{ color: "#06C755" }}>LINE: {b.customer_line}</span>}
               </div>
 
@@ -1374,8 +1375,8 @@ function BookingsTab({ token }: { token: string }) {
               )}
 
               {b.customer_note && (
-                <div style={{ fontSize: 12, color: A.sub, marginTop: 4, background: A.gray, borderRadius: 8, padding: "6px 10px" }}>
-                  📝 {b.customer_note}
+                <div style={{ fontSize: 12, color: A.sub, marginTop: 4, background: A.gray, borderRadius: 8, padding: "6px 10px", display: "flex", alignItems: "flex-start", gap: 5 }}>
+                  <FileText size={12} style={{ flexShrink: 0, marginTop: 1 }} /> {b.customer_note}
                 </div>
               )}
 

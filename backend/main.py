@@ -58,6 +58,8 @@ def _run_cleanup(engine):
         "DELETE FROM nail_bookings WHERE status = 'held' AND held_until < NOW() - INTERVAL '1 day'",
         # ลบการจองที่เสร็จสิ้น/walk-in เก่าเกิน 180 วัน — กันประวัติการจองลูกค้าโตไม่มีที่สิ้นสุด
         "DELETE FROM nail_bookings WHERE status IN ('completed', 'walkin') AND created_at < NOW() - INTERVAL '180 days'",
+        # ลบรูป brief (ref_image) หลังวันนัดผ่านมา 1 วัน — ช่างทำงานเสร็จแล้ว ไม่ต้องการรูปอีก
+        "UPDATE nail_bookings SET ref_image = NULL WHERE ref_image IS NOT NULL AND slot_date < (CURRENT_DATE - INTERVAL '1 day')::text",
 
         # ── Nail Time Slots ───────────────────────────────────────────────────
         # ลบ slot วันที่ผ่านมาเกิน 60 วัน — ไม่มีประโยชน์เก็บอีกต่อไป
