@@ -4263,6 +4263,18 @@ function SettingsTab({ token }: { token: string }) {
       {F("fb_url", "Facebook URL", "url", "https://facebook.com/...")}
       {F("line_oa_url", "Line Official Account URL", "url", "https://line.me/...")}
       {F("tiktok_url", "TikTok URL", "url", "https://tiktok.com/...")}
+      {F("map_url", "ลิงก์แผนที่ร้าน (Google Maps)", "url", "https://maps.app.goo.gl/...")}
+
+      <Section title="นโยบายการจอง" />
+      <div style={{ background: A.pale, border: `1px solid ${A.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: A.primary }}>
+        💡 ข้อความนี้จะแสดงในใบเสร็จที่ลูกค้าได้รับหลังจองคิว — เช่น กฎการยกเลิก, เลทได้ไม่เกิน X นาที
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 13, color: A.sub, fontWeight: 500, display: "block", marginBottom: 5 }}>นโยบาย / กฎการจอง</label>
+        <textarea value={form?.booking_policy ?? ""} rows={5} placeholder={"📍 เลทได้ไม่เกิน 10 นาที\nตามเวลานัดหมาย\nไม่มีการเลื่อนคิว"}
+          onChange={e => setForm((p: any) => ({ ...p, booking_policy: e.target.value }))}
+          style={{ width: "100%", border: `1.5px solid ${A.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box", background: A.bg, resize: "vertical" }} />
+      </div>
 
       <Section title="การชำระมัดจำ" />
       {F("deposit_amount", "ค่ามัดจำ (฿)", "number", "200")}

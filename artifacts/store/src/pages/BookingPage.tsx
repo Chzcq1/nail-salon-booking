@@ -274,6 +274,9 @@ export default function BookingPage() {
             key="success"
             holdData={booking.holdData}
             phone={booking.phone}
+            shopName={shopSettings?.shop_name}
+            mapUrl={shopSettings?.map_url}
+            bookingPolicy={shopSettings?.booking_policy}
             serviceEmoji={shopSettings?.service_section_emoji || "💅"}
             onHome={() => { setBooking({ service: null, date: null, slot: null, name: "", phone: "", line: "", note: "", holdData: null }); go("landing"); }}
           />
@@ -1437,89 +1440,174 @@ function SummaryRow({ icon, label }: { icon: string; label: string }) {
   );
 }
 
-// ── Success Screen ───────────────────────────────────────────────────
-function SuccessScreen({ holdData, phone, onHome, serviceEmoji }: any) {
+// ── Success Screen — Thermal Receipt Printer Style ─────────────────
+function SuccessScreen({ holdData, phone, onHome, serviceEmoji, shopName, mapUrl, bookingPolicy }: any) {
   const svcIcon = serviceEmoji || "💅";
   const isConfirmed = holdData?.status === "confirmed" || holdData?.status === "wallet_paid";
-  const isPendingSlip = holdData?.status === "pending_payment";
+  const [copied, setCopied] = useState(false);
+
+  // 🔊 Printer buzzing sound on mount
+  useEffect(() => {
+    try {
+      const ctx = new ((window as any).AudioContext || (window as any).webkitAudioContext)();
+      const sr = ctx.sampleRate;
+      const dur = 1.4; // seconds
+      const buf = ctx.createBuffer(1, Math.floor(sr * dur), sr);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) {
+        const t = i / sr;
+        // Intermittent buzz pattern: 18 pulses/sec like dot-matrix
+        const pulse = Math.sin(2 * Math.PI * 18 * t) > 0.3 ? 1 : 0;
+        const env = Math.pow(Math.max(0, 1 - t / dur), 0.4);
+        d[i] = (Math.random() * 2 - 1) * 0.07 * pulse * env;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = 900; bp.Q.value = 1.2;
+      src.connect(bp); bp.connect(ctx.destination);
+      src.start(); src.stop(ctx.currentTime + dur);
+    } catch { /* AudioContext not available */ }
+  }, []);
+
+  const copyRef = () => {
+    navigator.clipboard?.writeText(holdData?.booking_ref || "").then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const rows = [
+    { icon: "📅", label: "วันที่",  val: holdData?.slot_date ? fmtDate(holdData.slot_date) : null },
+    { icon: "🕐", label: "เวลา",   val: holdData?.start_time ? `${holdData.start_time} – ${holdData.end_time}` : null },
+    { icon: svcIcon, label: "บริการ", val: holdData?.service_name },
+    { icon: "👤", label: "ชื่อ",   val: holdData?.customer_name },
+  ].filter(r => r.val);
 
   return (
-    <PageWrap>
+    <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: P.offwhite, fontFamily: "inherit" }}>
       <style>{`
+        @keyframes receiptSlide {
+          from { max-height: 0; opacity: 0; transform: translateY(-8px); }
+          to   { max-height: 1200px; opacity: 1; transform: translateY(0); }
+        }
+        .receipt-paper { animation: receiptSlide 1.3s cubic-bezier(0.22,1,0.36,1) 0.25s both; overflow: hidden; }
         @media print {
           body * { visibility: hidden !important; }
           #nail-receipt, #nail-receipt * { visibility: visible !important; }
-          #nail-receipt { position: fixed !important; inset: 0 !important; padding: 24px !important; }
+          #nail-receipt { position: fixed !important; inset: 0 !important; padding: 28px !important; background: #fff !important; }
           .no-print { display: none !important; }
         }
       `}</style>
 
-      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", duration: 0.5 }} style={{ padding: "40px 24px 60px" }}>
+      {/* ── Status bar "RECEIPT PRINTER" ── */}
+      <div className="no-print" style={{ background: "#111827", padding: "10px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4ade80", boxShadow: "0 0 6px #4ade80" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 2 }}>RECEIPT PRINTER</span>
+        </div>
+        <button onClick={onHome}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#4ade80", fontSize: 11, fontWeight: 700, letterSpacing: 1.5, fontFamily: "inherit" }}>
+          ✓ DONE
+        </button>
+      </div>
 
-        {/* ── Header ── */}
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ width: 80, height: 80, borderRadius: "50%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: `0 8px 32px var(--b-primary-44)` }}>
-            <CheckCircle size={40} color="#fff" />
+      {/* ── Hero gradient ── */}
+      <div style={{ background: `linear-gradient(155deg, ${P.pinkDeep} 0%, ${P.pink} 100%)`, padding: "32px 24px 52px", textAlign: "center", position: "relative" }}>
+        <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 300, damping: 20 }}>
+          <div style={{ width: 62, height: 62, borderRadius: "50%", border: "3px solid rgba(255,255,255,0.75)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+            <CheckCircle size={34} color="#fff" />
           </div>
-          <h2 style={{ fontSize: 24, fontWeight: 800, color: P.text, marginBottom: 6 }}>
-            {isConfirmed ? "จองคิวสำเร็จ! 🎉" : "ส่งสลิปเรียบร้อย! 📸"}
+          <h2 style={{ fontSize: 21, fontWeight: 800, color: "#fff", marginBottom: 10 }}>
+            {isConfirmed ? "จองคิวสำเร็จ! 🎉" : "ส่งสลิปเรียบร้อย! 🎉"}
           </h2>
-          <p style={{ color: P.sub, fontSize: 14 }}>
-            {isConfirmed ? "ยืนยันแล้ว — เจอกันตามนัด!" : "รอแอดมินตรวจสลิปและยืนยันคิว"}
-          </p>
-        </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.22)", backdropFilter: "blur(8px)", borderRadius: 100, padding: "8px 18px" }}>
+            <span style={{ fontSize: 13, color: "#fff", fontWeight: 600 }}>
+              🏪 {isConfirmed ? "ยืนยันแล้ว" : "รอร้านยืนยัน"}
+            </span>
+          </div>
+        </motion.div>
+      </div>
 
-        {/* ── Receipt ── */}
-        <div id="nail-receipt" style={{ background: "#fff", border: `1.5px solid ${P.pinkBorder}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
-          {/* Receipt header */}
-          <div style={{ textAlign: "center", borderBottom: `1px dashed ${P.pinkBorder}`, paddingBottom: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: P.muted, marginBottom: 4 }}>ใบยืนยันการจองคิว</div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: P.pink, letterSpacing: 3, fontVariantNumeric: "tabular-nums" }}>
-              #{holdData?.booking_ref}
+      {/* ── Receipt paper rolling out ── */}
+      <div className="receipt-paper">
+        <div id="nail-receipt" style={{ background: "#fff", margin: "0 14px", borderRadius: "0 0 18px 18px", boxShadow: "0 12px 32px rgba(0,0,0,0.15)" }}>
+
+          {/* Shop name header (pink band) */}
+          <div style={{ background: P.pinkPale, padding: "13px 20px", textAlign: "center", borderBottom: `1px dashed ${P.pinkBorder}` }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: P.pink }}>{shopName || "ร้านทำเล็บ"}</div>
+            <div style={{ fontSize: 11, color: P.muted, marginTop: 2 }}>ใบยืนยันการจอง / ใบเสร็จมัดจำ</div>
+          </div>
+
+          <div style={{ padding: "18px 18px 22px" }}>
+            {/* Booking ref + copy */}
+            <div style={{ textAlign: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: P.muted, marginBottom: 4 }}>รหัสการจอง</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <span style={{ fontSize: 26, fontWeight: 900, color: P.pink, letterSpacing: 2 }}>
+                  {holdData?.booking_ref}
+                </span>
+                <button onClick={copyRef}
+                  style={{ background: P.pinkPale, border: `1px solid ${P.pinkBorder}`, borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: P.pink, display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
+                  {copied ? <><Check size={11} /> คัดลอกแล้ว</> : <><Copy size={11} /> คัดลอก</>}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {holdData?.slot_date && <SummaryRow icon="📅" label={fmtDate(holdData.slot_date)} />}
-            {holdData?.start_time && <SummaryRow icon="🕐" label={`${holdData.start_time} – ${holdData.end_time}`} />}
-            {holdData?.service_name && <SummaryRow icon={svcIcon} label={holdData.service_name} />}
-            {holdData?.customer_name && <SummaryRow icon="👤" label={holdData.customer_name} />}
-            {phone && <SummaryRow icon="📱" label={phone} />}
-          </div>
+            <div style={{ border: `1px dashed ${P.pinkBorder}`, margin: "10px 0" }} />
 
-          <div style={{ borderTop: `1px dashed ${P.pinkBorder}`, marginTop: 14, paddingTop: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: P.sub }}>มัดจำ</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: P.pink }}>฿{holdData?.deposit_total?.toFixed(2)}</span>
+            {/* Receipt rows */}
+            {rows.map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: 13 }}>
+                <span style={{ color: P.sub }}>{r.icon} {r.label}</span>
+                <span style={{ fontWeight: 600, color: P.text, textAlign: "right", maxWidth: "58%" }}>{r.val}</span>
+              </div>
+            ))}
+
+            <div style={{ border: `1px dashed ${P.pinkBorder}`, margin: "10px 0" }} />
+
+            {/* Total */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: P.text }}>ยอดมัดจำที่ชำระ</span>
+              <span style={{ fontSize: 24, fontWeight: 900, color: P.pink }}>฿{holdData?.deposit_total?.toFixed(2)}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-              <span style={{ fontSize: 12, color: P.muted }}>สถานะ</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: isConfirmed ? "#16A34A" : isPendingSlip ? "#D97706" : P.muted }}>
-                {isConfirmed ? "✅ ยืนยันแล้ว" : isPendingSlip ? "🔍 รอตรวจสลิป" : holdData?.status}
-              </span>
-            </div>
+
+            {/* Map link */}
+            {mapUrl && (
+              <a href={mapUrl} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", gap: 12, background: "#EFF6FF", border: "1.5px solid #BFDBFE", borderRadius: 14, padding: "13px 15px", textDecoration: "none", marginBottom: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 16 }}>
+                  📍
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#1E40AF" }}>นำทางร้าน</div>
+                  <div style={{ fontSize: 11.5, color: "#3B82F6" }}>กดเพื่อเปิด Google Maps</div>
+                </div>
+              </a>
+            )}
+
+            {/* Booking policy notice */}
+            {bookingPolicy && (
+              <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 12, padding: "11px 13px" }}>
+                <div style={{ fontSize: 12.5, color: "#78350F", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>
+                  {bookingPolicy}
+                </div>
+              </div>
+            )}
           </div>
         </div>
+      </div>
 
-        {isPendingSlip && (
-          <div style={{ background: "#FFFBEB", border: "1.5px solid #FDE68A", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#92400E" }}>
-            💡 <b>เก็บรหัสคิว #{holdData?.booking_ref} ไว้</b> — ใช้ตรวจสอบสถานะได้ทุกเมื่อ (กดปุ่ม "ตรวจสอบสถานะ" ที่หน้าหลัก)
-          </div>
-        )}
-
-        {/* ── Actions ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }} className="no-print">
-          <button onClick={() => window.print()}
-            style={{ width: "100%", background: "#fff", color: P.pink, border: `2px solid ${P.pink}`, borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-            <Printer size={18} /> พิมพ์ใบเสร็จ / บันทึกเป็น PDF
-          </button>
-          <button onClick={onHome}
-            style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 14, padding: "13px", fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: `0 4px 16px var(--b-primary-55)` }}>
-            กลับหน้าหลัก
-          </button>
-        </div>
-      </motion.div>
-    </PageWrap>
+      {/* ── Action buttons ── */}
+      <div className="no-print" style={{ padding: "18px 16px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <button onClick={() => window.print()}
+          style={{ width: "100%", background: "#fff", color: P.pink, border: `2px solid ${P.pink}`, borderRadius: 14, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit" }}>
+          <Printer size={16} /> พิมพ์ใบเสร็จ / บันทึก PDF
+        </button>
+        <button onClick={onHome}
+          style={{ width: "100%", background: `linear-gradient(135deg, ${P.pink}, ${P.pinkDeep})`, color: "#fff", border: "none", borderRadius: 14, padding: "12px", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: `0 4px 16px var(--b-primary-55)` }}>
+          กลับหน้าหลัก
+        </button>
+      </div>
+    </div>
   );
 }

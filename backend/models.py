@@ -253,6 +253,8 @@ class NailShopSettings(Base):
     fb_url = Column(String(500), nullable=True)
     line_oa_url = Column(String(500), nullable=True)
     tiktok_url = Column(String(500), nullable=True)
+    map_url = Column(String(500), nullable=True)            # Google Maps / location link แสดงในหน้าร้านและใบเสร็จ
+    booking_policy = Column(Text, nullable=True)            # นโยบาย/กฎการจอง — แสดงในใบเสร็จหลังจอง (เช่น "เลทได้ไม่เกิน 10 นาที")
     deposit_amount = Column(Numeric(10, 2), nullable=False, default=200)
     bank_account_number = Column(String(50), nullable=True)
     bank_name = Column(String(100), nullable=True)

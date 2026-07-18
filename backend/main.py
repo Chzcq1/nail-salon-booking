@@ -466,6 +466,9 @@ def _run_migrations(engine):
         "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS allow_ref_image BOOLEAN NOT NULL DEFAULT FALSE",
         # ref_image: เก็บรูปบรีฟจากลูกค้า (base64 data URI) ใน nail_bookings
         "ALTER TABLE nail_bookings ADD COLUMN IF NOT EXISTS ref_image TEXT",
+        # map_url + booking_policy — แสดงในหน้าร้านและใบเสร็จหลังจอง
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS map_url VARCHAR(500)",
+        "ALTER TABLE nail_shop_settings ADD COLUMN IF NOT EXISTS booking_policy TEXT",
         "ALTER TABLE shop_registrations ADD COLUMN IF NOT EXISTS payment_channel VARCHAR(20) NOT NULL DEFAULT 'bank_slip'",
         "ALTER TABLE shop_registrations ADD COLUMN IF NOT EXISTS voucher_code VARCHAR(200)",
     ]

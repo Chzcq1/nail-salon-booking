@@ -455,6 +455,8 @@ def get_settings_public(background_tasks: BackgroundTasks, db: Session = Depends
         "fb_url": shop.fb_url,
         "line_oa_url": shop.line_oa_url,
         "tiktok_url": shop.tiktok_url,
+        "map_url": shop.map_url,
+        "booking_policy": shop.booking_policy,
         "deposit_amount": float(shop.deposit_amount or 200),
         "bank_account_number": shop.bank_account_number,
         "bank_name": shop.bank_name,
@@ -2397,6 +2399,8 @@ class ShopSettingsBody(BaseModel):
     fb_url: Optional[str] = None
     line_oa_url: Optional[str] = None
     tiktok_url: Optional[str] = None
+    map_url: Optional[str] = None
+    booking_policy: Optional[str] = None
     deposit_amount: Optional[float] = None
     bank_account_number: Optional[str] = None
     bank_name: Optional[str] = None
@@ -2428,6 +2432,8 @@ def admin_get_settings(db: Session = Depends(get_db), authorization: str = Heade
         "fb_url": shop.fb_url,
         "line_oa_url": shop.line_oa_url,
         "tiktok_url": shop.tiktok_url,
+        "map_url": shop.map_url,
+        "booking_policy": shop.booking_policy,
         "deposit_amount": float(shop.deposit_amount or 200),
         "bank_account_number": shop.bank_account_number,
         "bank_name": shop.bank_name,
