@@ -143,9 +143,10 @@ async def send_custom_email(to_email: str, subject: str, html: str, text: str) -
                 json=payload,
             )
         if resp.status_code in (200, 201, 202):
+            logger.info("ส่งอีเมล custom ผ่าน Brevo สำเร็จ → %s", to_email)
             return True
         logger.error("Brevo custom email error %s: %s", resp.status_code, resp.text)
-        return False
+        raise RuntimeError(f"ส่งอีเมลไม่สำเร็จ (Brevo {resp.status_code}): {resp.text}")
 
     if settings.resend_api_key:
         from_email = settings.smtp_from_email or "onboarding@resend.dev"
@@ -163,9 +164,10 @@ async def send_custom_email(to_email: str, subject: str, html: str, text: str) -
                 json=payload,
             )
         if resp.status_code in (200, 201):
+            logger.info("ส่งอีเมล custom ผ่าน Resend สำเร็จ → %s", to_email)
             return True
         logger.error("Resend custom email error %s: %s", resp.status_code, resp.text)
-        return False
+        raise RuntimeError(f"ส่งอีเมลไม่สำเร็จ (Resend {resp.status_code}): {resp.text}")
 
     if not all([settings.smtp_host, settings.smtp_user, settings.smtp_password, settings.smtp_from_email]):
         raise ValueError("ระบบอีเมลยังไม่ได้ตั้งค่า")

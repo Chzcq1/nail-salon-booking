@@ -4489,8 +4489,12 @@ async def superadmin_approve_registration(
 
     try:
         await send_custom_email(reg.owner_email, f"ร้าน {reg.shop_name} ได้รับการอนุมัติแล้ว 🎉", html, txt)
+        logging.info(f"[superadmin] welcome email sent → {reg.owner_email} (shop_id={shop_row.id})")
     except Exception as exc:
-        logging.warning(f"[superadmin] welcome email failed: {exc}")
+        logging.error(
+            f"[superadmin] welcome email FAILED → {reg.owner_email} (shop_id={shop_row.id}): {exc}",
+            exc_info=True,
+        )
 
     return {"ok": True, "shop_id": shop_row.id, "slug": shop_row.slug, "onboarding_url": onboarding_url}
 
