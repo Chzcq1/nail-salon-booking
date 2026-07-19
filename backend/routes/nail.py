@@ -506,6 +506,7 @@ def get_services(db: Session = Depends(get_db), shop_slug: Optional[str] = None)
             "duration_minutes": s.duration_minutes,
             "price": float(s.price or 0), "color": s.color,
             "deposit_amount": float(s.deposit_amount) if s.deposit_amount is not None else None,
+            "image_url": s.image_url,
         }
         for s in items
     ]
@@ -2335,6 +2336,7 @@ class ServiceBody(BaseModel):
     deposit_amount: Optional[float] = None  # ถ้าไม่ระบุ (None) จะใช้ค่ามัดจำเริ่มต้นของร้าน
     color: Optional[str] = "#FF6B9D"
     sort_order: Optional[int] = 0
+    image_url: Optional[str] = None
 
 
 @router.get("/admin/services")
@@ -2344,7 +2346,8 @@ def admin_list_services(db: Session = Depends(get_db), authorization: str = Head
     return [{"id": s.id, "name": s.name, "description": s.description,
              "duration_minutes": s.duration_minutes, "price": float(s.price or 0),
              "deposit_amount": float(s.deposit_amount) if s.deposit_amount is not None else None,
-             "color": s.color, "is_active": s.is_active, "sort_order": s.sort_order}
+             "color": s.color, "is_active": s.is_active, "sort_order": s.sort_order,
+             "image_url": s.image_url}
             for s in items]
 
 
@@ -2363,6 +2366,7 @@ def admin_create_service(
         deposit_amount=body.deposit_amount if body.deposit_amount is not None else None,
         color=body.color or "#FF6B9D",
         sort_order=body.sort_order or 0,
+        image_url=body.image_url or None,
     )
     db.add(s)
     db.commit()
@@ -2388,6 +2392,7 @@ def admin_update_service(
     s.deposit_amount = body.deposit_amount if body.deposit_amount is not None else None
     s.color = body.color or "#FF6B9D"
     s.sort_order = body.sort_order or 0
+    s.image_url = body.image_url or None
     db.commit()
     return {"ok": True}
 

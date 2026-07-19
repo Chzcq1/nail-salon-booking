@@ -1115,6 +1115,11 @@ function InboxTab({ token }: { token: string }) {
                       <span style={{ background: "#FEF3C7", color: "#92400E", borderRadius: 100, padding: "2px 10px", fontSize: 10, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <Clock size={10} /> รอตรวจสลิป
                       </span>
+                      {b.ref_image && (
+                        <span style={{ background: "#EDE9FE", color: "#6D28D9", borderRadius: 100, padding: "2px 10px", fontSize: 10, fontWeight: 700 }}>
+                          🎨 มีรูปบรีฟ
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: A.text, marginBottom: 3 }}>{b.customer_name}</div>
                     <div style={{ fontSize: 12, color: A.sub, display: "flex", flexWrap: "wrap" as const, gap: "2px 12px" }}>

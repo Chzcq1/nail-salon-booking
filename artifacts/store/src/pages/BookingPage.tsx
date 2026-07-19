@@ -884,6 +884,7 @@ function InfoScreen({ slot, services, service, name, phone, line, note, defaultD
   const slug = useShopSlug();
   const walletHref = slug ? `/r/${slug}/wallet` : "/wallet";
   const [sel, setSel] = useState<any>(service || null);
+  const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const depositAmount = sel?.deposit_amount ?? defaultDeposit ?? null;
   const [n, setN] = useState(name);
   const [p, setP] = useState(phone);
@@ -957,7 +958,15 @@ function InfoScreen({ slot, services, service, name, phone, line, note, defaultD
                     textAlign: "left", display: "flex", alignItems: "center", gap: 12,
                     boxShadow: sel?.id === s.id ? `0 0 0 2px var(--b-primary-22)` : "none",
                   }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color ? `${s.color}22` : "var(--b-primary-22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{svcIcon}</div>
+                  {s.image_url ? (
+                    <div style={{ width: 56, height: 56, borderRadius: 10, overflow: "hidden", flexShrink: 0, position: "relative" }}
+                      onClick={e => { e.stopPropagation(); setLightboxImg(s.image_url); }}>
+                      <img src={s.image_url} alt={s.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <div style={{ position: "absolute", bottom: 2, right: 2, background: "rgba(0,0,0,0.45)", borderRadius: 4, padding: "1px 3px", fontSize: 8, color: "#fff", lineHeight: 1 }}>🔍</div>
+                    </div>
+                  ) : (
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color ? `${s.color}22` : "var(--b-primary-22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{svcIcon}</div>
+                  )}
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, color: P.text, fontSize: 14 }}>{s.name}</div>
                     {s.description && <div style={{ color: P.sub, fontSize: 12 }}>{s.description}</div>}
@@ -1020,6 +1029,20 @@ function InfoScreen({ slot, services, service, name, phone, line, note, defaultD
           ถัดไป — ชำระมัดจำ <ArrowRight size={18} style={{ display: "inline" }} />
         </button>
       </div>
+
+      {/* Lightbox — ดูรูปบริการเต็มจอ */}
+      {lightboxImg && (
+        <div onClick={() => setLightboxImg(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <img src={lightboxImg} alt="รูปบริการ"
+            style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 16, objectFit: "contain", boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }}
+            onClick={e => e.stopPropagation()} />
+          <button onClick={() => setLightboxImg(null)}
+            style={{ position: "absolute", top: 16, right: 16, background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 100, width: 36, height: 36, color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            ✕
+          </button>
+        </div>
+      )}
     </PageWrap>
   );
 }

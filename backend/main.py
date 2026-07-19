@@ -391,6 +391,8 @@ def _run_migrations(engine):
 
         # ── ค่ามัดจำแยกตามบริการ — บริการที่ราคาต่างกันควรมัดจำไม่เท่ากัน ──────────
         "ALTER TABLE nail_services ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(10,2)",
+        # ── รูปภาพประกอบบริการ — แอดมินใส่ URL รูปภาพแสดงให้ลูกค้าดูได้ ──────────
+        "ALTER TABLE nail_services ADD COLUMN IF NOT EXISTS image_url VARCHAR(2048)",
 
         # ── Multi-shop: shops table + shop_id ทุกตาราง nail_* ────────────────────
         # เดิมระบบสมมติว่ามีร้านเดียวเท่านั้น (nail_shop_settings id=1) — ตอนนี้แยกเป็นตาราง shops
