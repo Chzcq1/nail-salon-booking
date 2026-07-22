@@ -50,12 +50,21 @@ _INSECURE_PLACEHOLDERS = {
 def validate_required_secrets() -> None:
     """Call once at application startup.
 
-    Raises RuntimeError if SECRET_KEY is missing or is a known insecure placeholder.
-    All JWT tokens (wallet customer auth + legacy admin sessions) are signed with this key,
-    so a weak or missing key compromises the entire authentication system.
+    Hard-stops (RuntimeError → SystemExit) if SECRET_KEY is missing or is a known
+    insecure placeholder.  All JWT tokens (wallet customer auth + admin sessions)
+    are signed with this key, so a missing or weak key compromises the entire
+    authentication system.
+
+    Emits a WARNING (not a hard stop) for NAIL_SUPER_ADMIN_KEY: the app can serve
+    regular shop traffic without it, but superadmin endpoints will return 503 until
+    the key is configured.
     """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     s = get_settings()
 
+    # ── Hard stop: SECRET_KEY ─────────────────────────────────────────────────
     if not s.secret_key:
         raise RuntimeError(
             "ต้องตั้งค่า SECRET_KEY ใน environment variables ก่อนเริ่มแอปพลิเคชัน\n"
@@ -66,4 +75,16 @@ def validate_required_secrets() -> None:
         raise RuntimeError(
             "SECRET_KEY ไม่ปลอดภัย: ต้องมีความยาวอย่างน้อย 32 ตัวอักษรและต้องไม่ใช่ค่าตัวอย่าง\n"
             "สร้างค่าสุ่ม: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+    # ── Soft warning: NAIL_SUPER_ADMIN_KEY ───────────────────────────────────
+    # Not a hard stop — shops run normally without it; only /superadmin/* is locked.
+    if not s.nail_super_admin_key:
+        _log.warning(
+            "NAIL_SUPER_ADMIN_KEY ไม่ได้ตั้งค่า — superadmin endpoints จะ return 503 "
+            "จนกว่าจะตั้งค่า key นี้ใน environment variables"
+        )
+    elif len(s.nail_super_admin_key) < 32:
+        _log.warning(
+            "NAIL_SUPER_ADMIN_KEY สั้นเกินไป (< 32 chars) — ควรใช้ค่าสุ่มความยาวอย่างน้อย 32 ตัวอักษร"
         )

@@ -2,14 +2,29 @@ import hashlib
 import hmac
 import time
 from typing import Optional
-from itsdangerous import URLSafeTimedSerializer
+
+import jwt as _jwt
+from jwt.exceptions import ExpiredSignatureError as _JWTExpired, InvalidTokenError as _JWTInvalid
 import bcrypt as _bcrypt
+
 from backend.config import get_settings
 
-settings = get_settings()
+# ── Admin JWT constants ───────────────────────────────────────────────────────
+_ADMIN_TOKEN_ALG = "HS256"
+_ADMIN_TOKEN_EXPIRE_SECONDS = 86400 * 7   # 7 days
+_ADMIN_TOKEN_ISSUER = "csc-admin"
 
 
 def verify_telegram_login(data: dict) -> bool:
+    """Verify Telegram login widget payload.
+
+    Uses HMAC-SHA256 with SHA256(bot_token) as the key — per Telegram Bot API spec.
+    Returns False immediately if bot_token is not configured.
+    """
+    settings = get_settings()
+    if not settings.bot_token:
+        return False
+
     check_hash = data.pop("hash", None)
     if not check_hash:
         return False
@@ -29,15 +44,53 @@ def verify_telegram_login(data: dict) -> bool:
 
 
 def create_admin_token(telegram_id: int, shop_id: int = 1) -> str:
-    s = URLSafeTimedSerializer(settings.secret_key)
-    return s.dumps({"telegram_id": telegram_id, "role": "admin", "shop_id": shop_id})
+    """Issue a signed admin JWT (HS256, 7-day expiry, iss=csc-admin).
+
+    Replaces the old itsdangerous URLSafeTimedSerializer approach.
+    Callers: admin.py verify-otp, nail.py verify-otp / totp-login.
+    """
+    s = get_settings()
+    if not s.secret_key:
+        raise RuntimeError("SECRET_KEY ไม่ได้ตั้งค่า — ไม่สามารถออก admin token ได้")
+    now = int(time.time())
+    payload = {
+        "telegram_id": telegram_id,
+        "role": "admin",
+        "shop_id": shop_id,
+        "iss": _ADMIN_TOKEN_ISSUER,
+        "iat": now,
+        "exp": now + _ADMIN_TOKEN_EXPIRE_SECONDS,
+    }
+    return _jwt.encode(payload, s.secret_key, algorithm=_ADMIN_TOKEN_ALG)
 
 
 def verify_admin_token(token: str) -> Optional[dict]:
-    s = URLSafeTimedSerializer(settings.secret_key)
+    """Verify a signed admin JWT.
+
+    Returns the decoded payload dict on success, or None on any failure
+    (expired, invalid signature, missing required claims, wrong issuer).
+
+    Required claims: exp, iat, iss (issuer must be 'csc-admin').
+    Algorithm pinned to HS256 — rejects tokens signed with other algorithms.
+    """
+    s = get_settings()
+    if not s.secret_key or not token:
+        return None
     try:
-        data = s.loads(token, max_age=86400 * 7)
+        data = _jwt.decode(
+            token,
+            s.secret_key,
+            algorithms=[_ADMIN_TOKEN_ALG],
+            options={"require": ["exp", "iat", "iss"]},
+            issuer=_ADMIN_TOKEN_ISSUER,
+        )
         return data
+    except _JWTExpired:
+        # Token expired — caller raises 401 "กรุณาล็อกอินใหม่"
+        return None
+    except _JWTInvalid:
+        # Bad signature, wrong algorithm, missing/wrong claims, wrong issuer
+        return None
     except Exception:
         return None
 
