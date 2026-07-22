@@ -29,6 +29,7 @@ psycopg2-binary
 pydantic-settings
 pyotp
 python-jose
+slowapi
 python-multipart
 qrcode
 sqlalchemy

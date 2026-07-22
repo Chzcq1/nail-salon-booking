@@ -9,7 +9,8 @@ from typing import Optional
 
 import bcrypt
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from backend.limiter import limiter
 from pydantic import BaseModel
 import jwt as _jwt
 from jwt.exceptions import InvalidTokenError as JWTError
@@ -150,7 +151,8 @@ def wallet_check(
 # ── Send OTP via email ────────────────────────────────────────────────────────
 
 @router.post("/wallet/send-otp")
-async def wallet_send_otp(body: dict, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def wallet_send_otp(request: Request, body: dict, db: Session = Depends(get_db)):
     raw_email = body.get("email", "")
     mode = body.get("mode", "login")
     shop_slug = body.get("shop_slug", None)
@@ -222,7 +224,8 @@ async def wallet_send_otp(body: dict, db: Session = Depends(get_db)):
 # ── Verify OTP ────────────────────────────────────────────────────────────────
 
 @router.post("/wallet/verify-otp")
-def wallet_verify_otp(body: dict, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def wallet_verify_otp(request: Request, body: dict, db: Session = Depends(get_db)):
     session_token = body.get("session_token", "")
     otp_input = body.get("otp", "").strip()
 
@@ -277,7 +280,8 @@ def wallet_verify_otp(body: dict, db: Session = Depends(get_db)):
 # ── Reset PIN ─────────────────────────────────────────────────────────────────
 
 @router.post("/wallet/reset-pin")
-def wallet_reset_pin(body: dict, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def wallet_reset_pin(request: Request, body: dict, db: Session = Depends(get_db)):
     verified_token = body.get("verified_token", "")
     new_pin = body.get("new_pin", "")
     confirm_pin = body.get("confirm_pin", "")
@@ -312,7 +316,8 @@ def wallet_reset_pin(body: dict, db: Session = Depends(get_db)):
 # ── Auth (login / register) ───────────────────────────────────────────────────
 
 @router.post("/wallet/auth")
-def wallet_auth(body: dict, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def wallet_auth(request: Request, body: dict, db: Session = Depends(get_db)):
     raw_email = body.get("email", "")
     pin = body.get("pin", "")
     verified_token = body.get("verified_token", None)

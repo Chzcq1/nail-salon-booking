@@ -29,6 +29,7 @@ from backend.models import (
     SystemConfig, ShopPlan, ShopRegistration,
 )
 from backend.auth import generate_otp, create_admin_token, verify_admin_token, hash_passcode, verify_passcode
+from backend.limiter import limiter
 from backend.models import Shop
 from backend.routes.wallet import get_wallet_customer
 import backend.bot as bot_module
@@ -327,7 +328,8 @@ class NailAdminOTPVerify(BaseModel):
     shop_slug: Optional[str] = None
 
 @router.post("/admin/request-otp")
-async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def nail_request_otp(request: Request, body: NailAdminOTPRequest, db: Session = Depends(get_db)):
     """ขั้นที่ 1 — ตรวจรหัสผ่าน แล้วส่ง OTP ไปยัง Telegram group admin"""
     cfg = get_settings()
 
@@ -394,7 +396,8 @@ async def nail_request_otp(body: NailAdminOTPRequest, db: Session = Depends(get_
 
 
 @router.post("/admin/verify-otp")
-def nail_verify_otp(body: NailAdminOTPVerify, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def nail_verify_otp(request: Request, body: NailAdminOTPVerify, db: Session = Depends(get_db)):
     """ขั้นที่ 2 — ยืนยัน OTP แล้วรับ JWT token"""
     # Resolve target shop
     shop_row = _resolve_shop_by_slug(db, body.shop_slug)
@@ -2655,7 +2658,8 @@ def _get_superadmin_totp_secret(db: Session) -> Optional[str]:
 
 
 @router.post("/superadmin/login/request-otp")
-async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def superadmin_login_request_otp(request: Request, body: SuperAdminRequestOtpBody, db: Session = Depends(get_db)):
     """ขั้นตอนที่ 1: ตรวจ PIN
     - ถ้าตั้ง TOTP แล้ว → return {method:'totp'} ให้ frontend กรอก code จาก Google Authenticator
     - ถ้ายังไม่ตั้ง TOTP → fallback ส่ง OTP ผ่าน Telegram (legacy)
@@ -2711,7 +2715,8 @@ async def superadmin_login_request_otp(body: SuperAdminRequestOtpBody, db: Sessi
 
 
 @router.post("/superadmin/login/verify-otp")
-def superadmin_login_verify_otp(body: SuperAdminVerifyOtpBody, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def superadmin_login_verify_otp(request: Request, body: SuperAdminVerifyOtpBody, db: Session = Depends(get_db)):
     """ขั้นตอนที่ 2: ตรวจ PIN + code
     - ถ้าตั้ง TOTP แล้ว → ตรวจ TOTP code จาก Google Authenticator
     - ถ้ายังไม่ตั้ง TOTP → ตรวจ OTP ที่ส่งไป Telegram (legacy)
@@ -4110,7 +4115,8 @@ class _AdminTOTPLogin(BaseModel):
 
 
 @router.post("/admin/login/totp")
-def admin_login_totp(body: _AdminTOTPLogin, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def admin_login_totp(request: Request, body: _AdminTOTPLogin, db: Session = Depends(get_db)):
     """Login สำหรับร้านที่ใช้ TOTP — passcode + 6-digit TOTP → JWT"""
     shop_row = _resolve_shop_by_slug(db, body.shop_slug)
     if not shop_row.is_active:
@@ -4253,7 +4259,8 @@ class _SubmitReg(BaseModel):
 
 
 @router.post("/register/submit")
-async def register_submit(body: _SubmitReg, db: Session = Depends(get_db)):
+@limiter.limit("3/minute")
+async def register_submit(request: Request, body: _SubmitReg, db: Session = Depends(get_db)):
     """ยื่นสมัครร้านใหม่ — bank_slip: Slip2Go verify / angpao: TrueMoney auto-redeem"""
     if body.payment_channel not in ("bank_slip", "angpao"):
         raise HTTPException(status_code=400, detail="ช่องทางชำระเงินไม่ถูกต้อง")

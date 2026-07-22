@@ -2,7 +2,8 @@ import os
 import json
 import uuid
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File, Query
+from backend.limiter import limiter
 from sqlalchemy.orm import Session
 from sqlalchemy import func, delete
 from typing import List, Optional, Dict
@@ -72,7 +73,8 @@ ADMIN_SESSION_ID = 0  # fixed placeholder — no Telegram ID needed
 
 
 @router.post("/admin/request-otp")
-async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def request_otp(request: Request, body: OTPRequest, db: Session = Depends(get_db)):
     import hmac as _hmac
     expected = settings.admin_passcode or settings.secret_key
     if not expected or not _hmac.compare_digest((body.passcode or "").strip(), (expected or "").strip()):
@@ -111,7 +113,8 @@ async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/admin/verify-otp", response_model=AdminToken)
-def verify_otp(body: OTPVerify, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def verify_otp(request: Request, body: OTPVerify, db: Session = Depends(get_db)):
     otp_input = (body.otp_code or "").strip()
     session = (
         db.query(OTPSession)
