@@ -3028,7 +3028,10 @@ def nail_admin_approve_topup(
     """อนุมัติคำขอเติมเครดิต — ตรวจสิทธิ์ว่าเป็นร้านเดียวกับที่ลูกค้าเติม"""
     shop_id = _check_admin(authorization)
     from backend.models import TopupRequest
-    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
+    # Lock the topup row first, then re-check status under the lock.
+    # Without the lock, two concurrent admin approvals both see status="pending"
+    # before either sets it to "approved" → double credit.
+    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).with_for_update().first()
     if not topup:
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
     # ตรวจสิทธิ์ร้าน (NULL = legacy shop 1)
@@ -3040,7 +3043,9 @@ def nail_admin_approve_topup(
     amount = Decimal(str(body.get("amount", topup.amount or 0)))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="กรุณาระบุจำนวนเครดิต")
-    customer = db.query(Customer).filter(Customer.id == topup.customer_id).first()
+    # Lock customer row to prevent concurrent balance updates from other approvals
+    # running in parallel (e.g., another topup for the same customer being approved).
+    customer = db.query(Customer).filter(Customer.id == topup.customer_id).with_for_update().first()
     if not customer:
         raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
     topup.amount = amount

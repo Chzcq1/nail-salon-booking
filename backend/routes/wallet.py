@@ -491,6 +491,16 @@ async def topup_slip(
                 topup.status = "approved"
                 # ลบ slip ทันทีหลัง Slip2Go verify เสร็จสมบูรณ์ — ไม่ต้องเก็บภาพอีกแล้ว
                 topup.payment_proof = None
+                # Lock customer row atomically before updating balance —
+                # prevents double-credit if two slip-verify responses land simultaneously.
+                customer = (
+                    db.query(Customer)
+                    .filter_by(id=customer.id)
+                    .with_for_update()
+                    .first()
+                )
+                if not customer:
+                    raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
                 customer.balance = (customer.balance or Decimal("0")) + credit
                 db.add(CreditTransaction(
                     customer_id=customer.id,
@@ -631,6 +641,16 @@ async def topup_truemoney(
             credit = Decimal(str(result["amount"]))
             topup.amount = credit
             topup.status = "approved"
+            # Lock customer row atomically before updating balance —
+            # prevents double-credit if the TrueMoney API is retried concurrently.
+            customer = (
+                db.query(Customer)
+                .filter_by(id=customer.id)
+                .with_for_update()
+                .first()
+            )
+            if not customer:
+                raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
             customer.balance = (customer.balance or Decimal("0")) + credit
             db.add(CreditTransaction(
                 customer_id=customer.id,
@@ -720,13 +740,24 @@ async def purchase_with_credits(
         raise HTTPException(status_code=404, detail="ไม่พบสินค้า")
 
     price = Decimal(str(product.price))
-    if (customer.balance or Decimal("0")) < price:
+    # Lock customer row before the balance check+deduct so concurrent purchase
+    # requests cannot both pass the balance guard and drive the balance negative.
+    customer = (
+        db.query(Customer)
+        .filter_by(id=customer.id)
+        .with_for_update()
+        .first()
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
+    current_balance = customer.balance or Decimal("0")
+    if current_balance < price:
         raise HTTPException(
             status_code=400,
-            detail=f"เครดิตไม่พอ (มี {float(customer.balance or 0):.0f} ต้องการ {float(price):.0f})"
+            detail=f"เครดิตไม่พอ (มี {float(current_balance):.0f} ต้องการ {float(price):.0f})"
         )
 
-    customer.balance = customer.balance - price
+    customer.balance = current_balance - price
     order = Order(
         telegram_username=customer.email,
         product_id=product.id,
@@ -855,7 +886,10 @@ def admin_approve_topup(
     db: Session = Depends(get_db),
     admin: dict = Depends(get_admin),
 ):
-    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).first()
+    # Lock the topup row first, then re-check status under the lock.
+    # Without the lock, two concurrent admin approvals both see status="pending"
+    # before either sets it to "approved" → double credit.
+    topup = db.query(TopupRequest).filter(TopupRequest.id == topup_id).with_for_update().first()
     if not topup:
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
     if topup.status != "pending":
@@ -865,7 +899,9 @@ def admin_approve_topup(
     if amount <= 0:
         raise HTTPException(status_code=400, detail="กรุณาระบุจำนวนเครดิต")
 
-    customer = db.query(Customer).filter(Customer.id == topup.customer_id).first()
+    # Lock customer row to prevent concurrent balance updates from other approvals
+    # running in parallel (e.g., another topup for the same customer being approved).
+    customer = db.query(Customer).filter(Customer.id == topup.customer_id).with_for_update().first()
     if not customer:
         raise HTTPException(status_code=404, detail="ไม่พบบัญชีลูกค้า")
 
@@ -929,7 +965,8 @@ def admin_adjust_balance(
     db: Session = Depends(get_db),
     admin: dict = Depends(get_admin),
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    # Lock row so concurrent admin adjustments on the same customer don't overwrite each other.
+    customer = db.query(Customer).filter(Customer.id == customer_id).with_for_update().first()
     if not customer:
         raise HTTPException(status_code=404, detail="ไม่พบลูกค้า")
     amount = Decimal(str(body.get("amount", 0)))
