@@ -3,6 +3,7 @@ import hmac
 import time
 from typing import Optional
 from itsdangerous import URLSafeTimedSerializer
+import bcrypt as _bcrypt
 from backend.config import get_settings
 
 settings = get_settings()
@@ -47,11 +48,28 @@ def generate_otp() -> str:
 
 
 def hash_passcode(passcode: str) -> str:
-    """SHA-256 hex digest of a passcode (consistent with existing pattern)"""
-    return hashlib.sha256(passcode.encode()).hexdigest()
+    """bcrypt hash of a passcode.  New hashes always use bcrypt."""
+    return _bcrypt.hashpw(passcode.encode(), _bcrypt.gensalt()).decode()
 
 
 def verify_passcode(plain: str, hashed: str) -> bool:
-    """Compare plain passcode against stored hash (constant-time)"""
-    computed = hashlib.sha256(plain.encode()).hexdigest()
-    return hmac.compare_digest(computed, hashed)
+    """Verify plain passcode against stored hash.
+
+    Supports both:
+    - Legacy SHA-256 hashes (64 lowercase hex chars, no $ prefix) — backward compat
+    - bcrypt hashes (start with $2b$ / $2a$ / $2y$) — new default
+
+    Existing shops with SHA-256 hashes continue to work.  When their passcode is
+    next set via the admin UI, it will automatically be stored as bcrypt.
+    """
+    if not plain or not hashed:
+        return False
+    # Detect legacy SHA-256: exactly 64 lowercase hex chars, no dollar-sign prefix
+    if len(hashed) == 64 and hashed.isalnum() and not hashed.startswith("$"):
+        computed = hashlib.sha256(plain.encode()).hexdigest()
+        return hmac.compare_digest(computed, hashed)
+    # bcrypt path
+    try:
+        return _bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False

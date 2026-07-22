@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     admin_group_id: Optional[str] = Field(default=None)
     bot_username: Optional[str] = Field(default=None)
     webhook_url: Optional[str] = Field(default=None)
-    secret_key: str = Field(default="changeme-please-set-a-real-secret-key-32chars")
+    secret_key: Optional[str] = Field(default=None)
     admin_passcode: Optional[str] = Field(default=None)
     admin_telegram_ids: Optional[str] = Field(default=None)
     slip2go_api_key: Optional[str] = Field(default=None)
@@ -35,3 +35,35 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+# ─── Startup secret validation ────────────────────────────────────────────────
+_INSECURE_PLACEHOLDERS = {
+    "changeme",
+    "changeme-please-set-a-real-secret-key-32chars",
+    "wallet-pin-secret-change-in-production",
+    "change_this_to_a_random_secret_key_at_least_32_chars",
+    "secret",
+    "password",
+}
+
+def validate_required_secrets() -> None:
+    """Call once at application startup.
+
+    Raises RuntimeError if SECRET_KEY is missing or is a known insecure placeholder.
+    All JWT tokens (wallet customer auth + legacy admin sessions) are signed with this key,
+    so a weak or missing key compromises the entire authentication system.
+    """
+    s = get_settings()
+
+    if not s.secret_key:
+        raise RuntimeError(
+            "ต้องตั้งค่า SECRET_KEY ใน environment variables ก่อนเริ่มแอปพลิเคชัน\n"
+            "สร้างค่าสุ่ม: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+    if s.secret_key.lower().strip() in _INSECURE_PLACEHOLDERS or len(s.secret_key) < 32:
+        raise RuntimeError(
+            "SECRET_KEY ไม่ปลอดภัย: ต้องมีความยาวอย่างน้อย 32 ตัวอักษรและต้องไม่ใช่ค่าตัวอย่าง\n"
+            "สร้างค่าสุ่ม: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )

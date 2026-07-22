@@ -2594,7 +2594,10 @@ _SUPERADMIN_LOGIN_OTP_SENTINEL = "superadmin:login"
 def _issue_superadmin_session() -> str:
     """ออก JWT session token สำหรับ superadmin — เซ็นด้วย NAIL_SUPER_ADMIN_KEY, หมดอายุใน 12 ชม."""
     cfg = get_settings()
-    secret = cfg.nail_super_admin_key or secrets.token_urlsafe(32)
+    secret = cfg.nail_super_admin_key
+    if not secret:
+        # Guard: _check_superadmin also enforces this, but fail explicitly here too
+        raise HTTPException(status_code=503, detail="ยังไม่ได้ตั้งค่า NAIL_SUPER_ADMIN_KEY ใน environment")
     payload = {
         "sub": "superadmin",
         "iat": int(time.time()),

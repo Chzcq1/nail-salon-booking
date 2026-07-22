@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.config import get_settings
+from backend.config import get_settings, validate_required_secrets
 
 logging.basicConfig(
     level=logging.INFO,
@@ -495,6 +495,18 @@ def _run_migrations(engine):
 async def lifespan(app: FastAPI):
     import time
     from backend.database import engine, Base
+
+    # ── Startup secret validation ─────────────────────────────────────────────
+    # Refuse to serve traffic if SECRET_KEY is missing or is a known placeholder.
+    # All JWT tokens (wallet customer auth + legacy admin sessions) are signed with
+    # this key, so a missing or weak key compromises the entire auth system.
+    try:
+        validate_required_secrets()
+        logger.info("Secret validation passed")
+    except RuntimeError as exc:
+        logger.critical(f"STARTUP ABORTED — secret validation failed: {exc}")
+        raise SystemExit(1) from exc
+
     if engine is not None:
         # Neon serverless อาจต้อง cold-start — retry สูงสุด 3 ครั้ง
         for attempt in range(1, 4):

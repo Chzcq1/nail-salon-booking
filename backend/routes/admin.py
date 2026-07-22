@@ -73,8 +73,9 @@ ADMIN_SESSION_ID = 0  # fixed placeholder — no Telegram ID needed
 
 @router.post("/admin/request-otp")
 async def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
+    import hmac as _hmac
     expected = settings.admin_passcode or settings.secret_key
-    if body.passcode != expected:
+    if not expected or not _hmac.compare_digest((body.passcode or "").strip(), (expected or "").strip()):
         raise HTTPException(status_code=403, detail="รหัสผ่านไม่ถูกต้อง")
 
     # ลบ OTP เก่าที่หมดอายุหรือใช้แล้วก่อนสร้างใหม่ (ป้องกัน table โต)

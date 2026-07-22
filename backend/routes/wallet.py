@@ -43,9 +43,16 @@ def _slim_verify_result(result: dict) -> dict:
         "error_message": result.get("error_message"),
     }
 
-_JWT_SECRET = os.environ.get("SECRET_KEY", "wallet-pin-secret-change-in-production")
 _JWT_ALG = "HS256"
 _TOKEN_EXPIRE_DAYS = 7
+
+
+def _jwt_secret() -> str:
+    """Get JWT secret from settings at call time (avoids module-level hardcoded fallback)."""
+    s = get_settings().secret_key
+    if not s:
+        raise RuntimeError("SECRET_KEY ไม่ได้ตั้งค่า — ไม่สามารถออก/ตรวจสอบ token ได้")
+    return s
 
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
@@ -68,12 +75,12 @@ def _create_token(email: str, shop_id: int = 1) -> str:
         "shop_id": shop_id,
         "exp": datetime.utcnow() + timedelta(days=_TOKEN_EXPIRE_DAYS),
     }
-    return _jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALG)
+    return _jwt.encode(payload, _jwt_secret(), algorithm=_JWT_ALG)
 
 
 def _decode_token(token: str):
     """คืนค่า (email, shop_id) — token เดิมที่ไม่มี shop_id จะ default เป็น 1"""
-    payload = _jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALG])
+    payload = _jwt.decode(token, _jwt_secret(), algorithms=[_JWT_ALG])
     email = payload.get("sub", "")
     shop_id = int(payload.get("shop_id", 1))
     return email, shop_id
@@ -260,7 +267,7 @@ def wallet_verify_otp(body: dict, db: Session = Depends(get_db)):
             "shop_id": _shop_id_for_vt,
             "exp": datetime.utcnow() + timedelta(minutes=15),
         },
-        _JWT_SECRET,
+        _jwt_secret(),
         algorithm=_JWT_ALG,
     )
 
@@ -276,7 +283,7 @@ def wallet_reset_pin(body: dict, db: Session = Depends(get_db)):
     confirm_pin = body.get("confirm_pin", "")
 
     try:
-        payload = _jwt.decode(verified_token, _JWT_SECRET, algorithms=[_JWT_ALG])
+        payload = _jwt.decode(verified_token, _jwt_secret(), algorithms=[_JWT_ALG])
         if payload.get("purpose") != "otp_verified":
             raise ValueError("wrong purpose")
         email = payload.get("email", "")
@@ -317,7 +324,7 @@ def wallet_auth(body: dict, db: Session = Depends(get_db)):
     shop_id = _resolve_wallet_shop_id(shop_slug, db)
     if verified_token:
         try:
-            vt_payload = _jwt.decode(verified_token, _JWT_SECRET, algorithms=[_JWT_ALG])
+            vt_payload = _jwt.decode(verified_token, _jwt_secret(), algorithms=[_JWT_ALG])
             if vt_payload.get("purpose") == "otp_verified":
                 shop_id = int(vt_payload.get("shop_id", shop_id))
         except Exception:
@@ -333,7 +340,7 @@ def wallet_auth(body: dict, db: Session = Depends(get_db)):
         if not verified_token:
             raise HTTPException(status_code=400, detail="กรุณายืนยัน OTP ก่อนตั้ง PIN")
         try:
-            payload = _jwt.decode(verified_token, _JWT_SECRET, algorithms=[_JWT_ALG])
+            payload = _jwt.decode(verified_token, _jwt_secret(), algorithms=[_JWT_ALG])
             if payload.get("purpose") != "otp_verified" or payload.get("email") != email:
                 raise ValueError("wrong purpose or email")
         except Exception:
