@@ -1,7 +1,9 @@
 import base64
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from backend import storage
+from backend.routes.admin import get_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -9,47 +11,90 @@ router = APIRouter()
 MAX_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
-@router.post("/upload/slip")
-async def upload_slip(body: dict):
+def _decode_base64(data: str) -> tuple[bytes, str, str]:
     """
-    รับรูปสลิปเป็น base64 data URI → ตรวจสอบขนาด/รูปแบบ → คืน data URI เดิมกลับไปตรงๆ
+    Parse a base64 data URI (or raw base64 string).
 
-    เดิม endpoint นี้เซฟไฟล์ลงดิสก์ของเซิร์ฟเวอร์แล้วคืน URL path (/uploads/slips/xxx.jpg)
-    แต่ Render (โฮสต์จริงของโปรเจกต์) ใช้ filesystem แบบ ephemeral — ไฟล์หายทุกครั้งที่
-    redeploy/restart หรือกระจาย request ไปคนละ instance ทำให้สลิปที่ลูกค้าส่งมา "หาย" จาก
-    หลังบ้านแอดมิน (แม้ request จะถูกบันทึกใน DB แล้วก็ตาม) จึงเปลี่ยนมาคืน data URI ตรงๆ
-    เพื่อให้ payment_proof ที่บันทึกใน DB (Neon, ถาวร) มีรูปสลิปแนบอยู่ในตัวเอง ไม่พึ่งดิสก์เลย
-    ทั้ง <img src=...> ในหน้าแอดมินและ Slip2Go verify() รองรับ data URI อยู่แล้วโดยไม่ต้องแก้จุดอื่น
-
-    Body : {"data": "data:image/jpeg;base64,..."}
-    Return: {"url": "data:image/jpeg;base64,...", "size": 123456}
+    Returns:
+        (raw_bytes, mime_type, file_extension)
+    Raises:
+        HTTPException 400 on invalid base64.
     """
-    data = body.get("data", "")
-    if not data:
-        raise HTTPException(status_code=400, detail="ไม่พบข้อมูลรูปภาพ")
-
     if "," in data:
         header, b64 = data.split(",", 1)
-        mime = "image/jpeg"
-        if "png" in header:
-            mime = "image/png"
-        elif "gif" in header:
-            mime = "image/gif"
-        elif "webp" in header:
-            mime = "image/webp"
+        mime, ext = storage.mime_and_ext(header)
     else:
         b64 = data
-        mime = "image/jpeg"
+        mime, ext = "image/jpeg", ".jpg"
 
     try:
         img_bytes = base64.b64decode(b64)
     except Exception:
         raise HTTPException(status_code=400, detail="รูปภาพไม่ถูกต้อง (base64 error)")
 
+    return img_bytes, mime, ext
+
+
+@router.post("/upload/slip")
+async def upload_slip(body: dict):
+    """
+    รับรูปเป็น base64 data URI → validate → อัปโหลดไป object storage (R2/S3) → คืน URL สาธารณะ
+
+    เมื่อตั้งค่า S3_* env vars แล้ว:
+      - รูปถูก upload ไปยัง object storage
+      - DB จะเก็บแค่ URL (https://...) — ไม่มี base64 ใน DB อีกต่อไป
+
+    กรณียังไม่ตั้ง S3_* (dev/local):
+      - คืน data URI เดิมกลับไป (backward compatible)
+
+    Body : {"data": "data:image/jpeg;base64,..."}
+    Return: {"url": "https://...", "size": 123456}
+            หรือ {"url": "data:image/jpeg;base64,...", "size": ...} ถ้า storage ไม่ได้ตั้ง
+    """
+    data = (body.get("data") or "").strip()
+    if not data:
+        raise HTTPException(status_code=400, detail="ไม่พบข้อมูลรูปภาพ")
+
+    img_bytes, mime, ext = _decode_base64(data)
+
     if len(img_bytes) > MAX_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="รูปภาพใหญ่เกิน 5MB")
 
-    data_uri = f"data:{mime};base64,{b64}"
-    logger.info(f"Slip received: {len(img_bytes):,} bytes (stored inline, no disk)")
+    if storage.is_configured():
+        try:
+            url = storage.upload_bytes(img_bytes, mime, folder="slips", extension=ext)
+            logger.info("Slip uploaded to storage: %d bytes → %s", len(img_bytes), url)
+            return {"url": url, "size": len(img_bytes)}
+        except Exception as exc:
+            logger.error("Storage upload failed: %s", exc)
+            raise HTTPException(status_code=500, detail="อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่")
+    else:
+        # Dev/local fallback — return data URI when storage is not configured
+        logger.info(
+            "Storage not configured — returning data URI (%d bytes, no disk write)",
+            len(img_bytes),
+        )
+        b64 = data.split(",", 1)[1] if "," in data else data
+        return {"url": f"data:{mime};base64,{b64}", "size": len(img_bytes)}
 
-    return {"url": data_uri, "size": len(img_bytes)}
+
+@router.post("/upload/delete")
+async def delete_image(body: dict, _admin: dict = Depends(get_admin)):
+    """
+    ลบรูปจาก object storage — เฉพาะแอดมินเท่านั้น
+
+    ใช้เมื่อ admin ลบ announcement / เปลี่ยนรูปในฟอร์ม
+    URL ที่ไม่ใช่ของ storage เรา (เช่น data:image/ หรือ URL ภายนอก) จะถูกข้ามไปเงียบๆ
+
+    Body: {"url": "https://..."}
+    """
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="ต้องระบุ URL รูปภาพ")
+
+    if not url.startswith("https://"):
+        # data URI or other non-storage value — nothing to delete
+        return {"ok": True, "skipped": True}
+
+    storage.delete_url(url)
+    return {"ok": True}

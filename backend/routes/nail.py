@@ -781,8 +781,10 @@ async def submit_payment(req: PayRequest, db: Session = Depends(get_db)):
         _shop_settings = db.query(NailShopSettings).filter_by(shop_id=booking.shop_id).first()
         if _shop_settings and _shop_settings.allow_ref_image:
             ref = req.ref_image.strip()
-            # รับเฉพาะ base64 data URI (data:image/...) ไม่รับ URL ภายนอก
-            if ref.startswith("data:image/") and "base64," in ref:
+            # รับ URL จาก object storage (https://) หรือ base64 data URI (legacy/dev)
+            if ref.startswith("https://"):
+                booking.ref_image = ref
+            elif ref.startswith("data:image/") and "base64," in ref:
                 # ตรวจขนาดคร่าวๆ (base64 ~1.37× ขนาดจริง) — ป้องกันรูปใหญ่เกิน 5MB
                 b64_part = ref.split("base64,", 1)[1]
                 approx_bytes = len(b64_part) * 3 // 4
@@ -922,7 +924,10 @@ async def submit_payment_wallet(
         _shop_settings = db.query(NailShopSettings).filter_by(shop_id=booking.shop_id).first()
         if _shop_settings and _shop_settings.allow_ref_image:
             ref = req.ref_image.strip()
-            if ref.startswith("data:image/") and "base64," in ref:
+            # รับ URL จาก object storage (https://) หรือ base64 data URI (legacy/dev)
+            if ref.startswith("https://"):
+                booking.ref_image = ref
+            elif ref.startswith("data:image/") and "base64," in ref:
                 b64_part = ref.split("base64,", 1)[1]
                 if len(b64_part) * 3 // 4 <= 5 * 1024 * 1024:
                     booking.ref_image = ref
@@ -1426,6 +1431,8 @@ def admin_update_booking(
         booking.status = body.status
         # ลบสลิปทันทีหลังยืนยัน — ประหยัด DB storage และปกป้องข้อมูลส่วนตัวลูกค้า
         if body.status == "confirmed" and booking.payment_proof:
+            from backend import storage as _storage
+            _storage.delete_url(booking.payment_proof)
             booking.payment_proof = None
     if body.admin_note is not None:
         booking.admin_note = body.admin_note
@@ -3051,6 +3058,8 @@ def nail_admin_approve_topup(
     topup.amount = amount
     topup.status = "approved"
     # ลบ slip ทันทีที่ admin อนุมัติ — ตรวจสอบเสร็จแล้วไม่ต้องเก็บภาพไว้อีก
+    from backend import storage as _storage
+    _storage.delete_url(topup.payment_proof or "")
     topup.payment_proof = None
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
@@ -3082,6 +3091,8 @@ def nail_admin_reject_topup(
         raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์จัดการรายการของร้านอื่น")
     topup.status = "rejected"
     # ลบ slip ทันทีที่ปฏิเสธ — admin ดูแล้วตัดสินใจแล้ว ไม่ต้องเก็บภาพไว้อีก
+    from backend import storage as _storage
+    _storage.delete_url(topup.payment_proof or "")
     topup.payment_proof = None
     db.commit()
     return {"ok": True}
@@ -4292,7 +4303,12 @@ async def register_submit(request: Request, body: _SubmitReg, db: Session = Depe
 
     # ── Validate & prepare payment payload ───────────────────────────────────
     if body.payment_channel == "bank_slip":
-        if not body.slip_image or not body.slip_image.startswith("data:image"):
+        _slip = (body.slip_image or "").strip()
+        # รับ URL จาก object storage (https://) หรือ base64 data URI (legacy/dev)
+        if not _slip or (
+            not _slip.startswith("https://")
+            and not _slip.startswith("data:image")
+        ):
             raise HTTPException(status_code=400, detail="กรุณาอัปโหลดสลิปการโอนเงิน")
         image_or_voucher = body.slip_image
         voucher_code_clean = None

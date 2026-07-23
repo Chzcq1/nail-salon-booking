@@ -125,22 +125,45 @@ function AnnouncementFormModal({
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
     setUploading(true);
+    setError("");
     const results: string[] = [];
     for (const file of Array.from(files)) {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      results.push(base64);
+      try {
+        // Read as base64 data URI
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        // Upload to object storage via backend — returns HTTPS URL (or data URI in dev)
+        const res = await fetch("/api/upload/slip", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: base64 }),
+        });
+        if (!res.ok) throw new Error("upload failed");
+        const { url } = await res.json();
+        results.push(url);
+      } catch {
+        setError("อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่");
+      }
     }
     setImages((prev) => [...prev, ...results]);
     setUploading(false);
   };
 
   const removeImage = (idx: number) => {
+    const url = images[idx];
     setImages((prev) => prev.filter((_, i) => i !== idx));
+    // Delete from object storage if it's a storage URL (fire-and-forget)
+    if (url && url.startsWith("https://")) {
+      fetch("/api/upload/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ url }),
+      }).catch(() => {/* non-critical */});
+    }
   };
 
   const previewFontClass = FONT_SIZE_PREVIEW[form.font_size] ?? "text-base";

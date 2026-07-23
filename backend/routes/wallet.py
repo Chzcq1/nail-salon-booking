@@ -490,6 +490,8 @@ async def topup_slip(
                 topup.amount = credit
                 topup.status = "approved"
                 # ลบ slip ทันทีหลัง Slip2Go verify เสร็จสมบูรณ์ — ไม่ต้องเก็บภาพอีกแล้ว
+                from backend import storage as _storage
+                _storage.delete_url(topup.payment_proof or "")
                 topup.payment_proof = None
                 # Lock customer row atomically before updating balance —
                 # prevents double-credit if two slip-verify responses land simultaneously.
@@ -908,6 +910,8 @@ def admin_approve_topup(
     topup.amount = amount
     topup.status = "approved"
     # ลบ slip ทันทีที่ admin อนุมัติ — ตรวจสอบเสร็จแล้วไม่ต้องเก็บภาพไว้อีก
+    from backend import storage as _storage
+    _storage.delete_url(topup.payment_proof or "")
     topup.payment_proof = None
     customer.balance = (customer.balance or Decimal("0")) + amount
     db.add(CreditTransaction(
@@ -932,6 +936,8 @@ def admin_reject_topup(
         raise HTTPException(status_code=404, detail="ไม่พบรายการ")
     topup.status = "rejected"
     # ลบ slip ทันทีที่ปฏิเสธ — admin ดูแล้วตัดสินใจแล้ว ไม่ต้องเก็บภาพไว้อีก
+    from backend import storage as _storage
+    _storage.delete_url(topup.payment_proof or "")
     topup.payment_proof = None
     db.commit()
     return {"ok": True}

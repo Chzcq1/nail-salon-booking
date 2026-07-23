@@ -48,6 +48,8 @@ async def _run_auto_approve(order: Order, product: Product | None, db: Session, 
     """Run the full approve flow after successful auto-verification."""
     order.status = "approved"
     # ลบ slip ทันทีหลัง Slip2Go verify เสร็จ — verification สำเร็จแล้วไม่ต้องเก็บภาพอีก
+    from backend import storage as _storage
+    _storage.delete_url(order.payment_proof or "")
     order.payment_proof = None
     db.commit()
 
@@ -250,6 +252,8 @@ def admin_set_links(
     if order.status != "approved":
         order.status = "approved"
     # ลบ slip ทันทีที่ admin อนุมัติ manual — ไม่ต้องเก็บภาพไว้อีกแล้ว
+    from backend import storage as _storage
+    _storage.delete_url(order.payment_proof or "")
     order.payment_proof = None
     db.commit()
     return {"ok": True, "invite_links": body.invite_links}

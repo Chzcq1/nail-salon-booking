@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     gafiwshop_key_api: Optional[str] = Field(default=None)
     nail_super_admin_key: Optional[str] = Field(default=None)  # key สำหรับ super-admin ระบบเช่า
 
+    # ── Object storage (Cloudflare R2 / S3-compatible) ────────────────────────
+    s3_endpoint_url: Optional[str] = Field(default=None)       # https://<account>.r2.cloudflarestorage.com
+    s3_bucket_name: Optional[str] = Field(default=None)        # bucket name
+    s3_access_key_id: Optional[str] = Field(default=None)      # R2 Access Key ID / AWS Access Key
+    s3_secret_access_key: Optional[str] = Field(default=None)  # R2 Secret / AWS Secret Access Key
+    s3_public_url: Optional[str] = Field(default=None)         # public base URL, e.g. https://pub.example.com
+    s3_region: str = Field(default="auto")                     # "auto" for R2, "us-east-1" for AWS
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

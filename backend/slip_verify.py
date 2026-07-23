@@ -119,8 +119,23 @@ async def verify_slip(
         return {**base_result, "success": False, "status": "no_config",
                 "error_message": "SLIP2GO_API_KEY ยังไม่ได้ตั้งค่าใน Secrets"}
 
-    # รองรับทั้ง URL path และ base64 โดยตรง
-    if base64_image.startswith("/uploads/"):
+    # รองรับ: HTTPS URL (object storage), /uploads/ path (legacy), base64 data URI
+    if base64_image.startswith("https://"):
+        # ดึงรูปจาก object storage แล้วแปลงเป็น base64 ก่อนส่ง Slip2Go
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as _dl:
+                _resp = await _dl.get(base64_image)
+                _resp.raise_for_status()
+            _raw = _resp.content
+            _ct = _resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+            _mime = _ct if _ct.startswith("image/") else "image/jpeg"
+            import base64 as _b64
+            img_data = f"data:{_mime};base64,{_b64.b64encode(_raw).decode()}"
+            logger.info("Fetched slip from storage: %d bytes, mime=%s", len(_raw), _mime)
+        except Exception as e:
+            return {**base_result, "success": False, "status": "error",
+                    "error_message": f"ดาวน์โหลดรูปสลิปไม่ได้: {e}"}
+    elif base64_image.startswith("/uploads/"):
         try:
             img_data = _url_path_to_base64(base64_image)
         except FileNotFoundError:

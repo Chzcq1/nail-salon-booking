@@ -16,10 +16,11 @@
 - [Slot hold release on back](slot-hold-release.md) — PaymentScreen must release hold (DELETE /api/nail/booking/hold) on back/unmount; cloned shops hit max_bookings=1 so one unreleased hold blocks the whole slot for 10 min
 - [Wallet login redirect slug](wallet-login-redirect.md) — after login setLocation must use slug ? /r/${slug} : "/" not bare "/" or cloned-shop users land on /default
 - [Slip upload image not URL](slip-upload-image.md) — booking slip and topup slip both use file upload (compressImage → /api/upload/slip); URL text input removed; slips auto-deleted after 7 days by _cleanup_old_slips() in upload.py
+- [Object storage migration](object-storage-migration.md) — images moved from base64-in-DB to R2/S3; backend/storage.py; S3_* env vars; delete_url() before every field=None; Slip2Go fetches HTTPS URLs
 - [Wallet login tab isolation](wallet-login-tab-isolation.md) — never open a wallet login link with target="_blank"; sessionStorage isn't shared across tabs so the caller page won't see the new token
 - [Nail wallet cross-shop payment](nail-wallet-cross-shop-payment.md) — hold/pay-wallet endpoints must verify customer.shop_id == booking.shop_id; per-shop customer isolation alone doesn't stop cross-shop token misuse
 - [Superadmin rebrand & multi-shop UX](superadmin-rebrand-ux.md) — /superadmin header is now "CSC / Chain System Care"; page is tab-based with search/pagination for scaling to many shops
-- [Render ephemeral disk breaks local file uploads](render-ephemeral-disk-uploads.md) — never write user uploads to local disk on this project; store slip images as inline base64 data URI instead
+- [Render ephemeral disk breaks local file uploads](render-ephemeral-disk-uploads.md) — never write user uploads to local disk; images now go to R2/S3 object storage (see object-storage-migration.md)
 - [Controlled number input "stuck digit" bug pattern](controlled-number-input-stuck-digit.md) — never bind number inputs directly via Number(e.target.value); use a string-buffer wrapper (NumberField) so users can clear the field
 - [Framer Motion transform breaks fixed modals](framer-motion-transform-breaks-fixed-modals.md) — animated y/x/scale on a wrapper leaves a persistent transform, making nested position:fixed modals not cover the viewport; animate opacity only or portal modals
 - [Per-shop feature flags pattern](per-shop-feature-flags.md) — allow_ref_image is the first flag; lives in NailShopSettings; superadmin GET/PUT /superadmin/shops/{id}/features; off by default for all shops

@@ -66,6 +66,15 @@ def delete_announcement(ann_id: int, db: Session = Depends(get_db), admin: dict 
     ann = db.query(Announcement).filter(Announcement.id == ann_id).first()
     if not ann:
         raise HTTPException(status_code=404, detail="Announcement not found")
+    # ลบรูปทั้งหมดจาก object storage ก่อนลบ announcement
+    if ann.images:
+        import json as _json
+        from backend import storage as _storage
+        try:
+            urls = _json.loads(ann.images)
+            _storage.delete_urls(urls)
+        except Exception:
+            pass  # ถ้า parse ไม่ได้ ก็ข้ามไป
     db.delete(ann)
     db.commit()
     return {"message": "Deleted"}
